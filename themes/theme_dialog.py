@@ -3,10 +3,10 @@ from typing import Optional
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QLabel, QPushButton, QTextEdit, QSplitter, QFrame, QWidget, QComboBox,
-    QFormLayout, QGroupBox, QCheckBox, QMessageBox, QFileDialog
+    QFormLayout, QGroupBox, QCheckBox, QMessageBox, QFileDialog, QMenu
 )
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont, QPalette, QColor
+from PySide6.QtGui import QFont, QPalette, QColor, QAction
 from .theme_manager import ThemeManager
 
 logger = logging.getLogger(__name__)
@@ -106,6 +106,7 @@ class ThemeDialog(QDialog):
         super().__init__(parent)
         self.theme_manager = theme_manager
         self.current_theme = theme_manager.get_current_theme()
+        self.favorite_themes = set()  # Set of favorite theme names
         self.setup_ui()
         self.load_themes()
     
@@ -131,6 +132,9 @@ class ThemeDialog(QDialog):
         
         self.theme_list = QListWidget()
         self.theme_list.currentItemChanged.connect(self.on_theme_selected)
+        # Enable context menu for favorites
+        self.theme_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.theme_list.customContextMenuRequested.connect(self.show_theme_context_menu)
         left_layout.addWidget(self.theme_list)
         
         # Theme info
@@ -191,6 +195,9 @@ class ThemeDialog(QDialog):
             item = QListWidgetItem(theme_name)
             if theme_name == self.current_theme:
                 item.setText(f"{theme_name} (Current)")
+                item.setFont(QFont("Arial", 9, QFont.Weight.Bold))
+            elif theme_name in self.favorite_themes:
+                item.setText(f"⭐ {theme_name}")
                 item.setFont(QFont("Arial", 9, QFont.Weight.Bold))
             self.theme_list.addItem(item)
     
@@ -313,4 +320,49 @@ class ThemeDialog(QDialog):
                     
             except Exception as e:
                 logger.error(f"Failed to export theme: {e}")
-                QMessageBox.critical(self, "Error", f"Failed to export theme: {str(e)}") 
+                QMessageBox.critical(self, "Error", f"Failed to export theme: {str(e)}")
+    
+    def show_theme_context_menu(self, position):
+        """Show context menu for theme list items."""
+        item = self.theme_list.itemAt(position)
+        if not item:
+            return
+        
+        theme_name = item.text().replace(" (Current)", "").replace("⭐ ", "")
+        
+        context_menu = QMenu(self)
+        
+        # Toggle favorite action
+        if theme_name in self.favorite_themes:
+            favorite_action = QAction("Remove from Favorites", self)
+            favorite_action.triggered.connect(lambda: self.toggle_favorite(theme_name))
+        else:
+            favorite_action = QAction("Add to Favorites", self)
+            favorite_action.triggered.connect(lambda: self.toggle_favorite(theme_name))
+        
+        context_menu.addAction(favorite_action)
+        
+        # Show favorites only action
+        show_favorites_action = QAction("Show Favorites Only", self)
+        show_favorites_action.setCheckable(True)
+        show_favorites_action.triggered.connect(self.toggle_favorites_filter)
+        context_menu.addAction(show_favorites_action)
+        
+        context_menu.exec(self.theme_list.mapToGlobal(position))
+    
+    def toggle_favorite(self, theme_name: str):
+        """Toggle favorite status of a theme."""
+        if theme_name in self.favorite_themes:
+            self.favorite_themes.remove(theme_name)
+        else:
+            self.favorite_themes.add(theme_name)
+        
+        # Refresh the theme list
+        self.load_themes()
+        logger.debug(f"Toggled favorite for theme: {theme_name}")
+    
+    def toggle_favorites_filter(self):
+        """Toggle showing only favorite themes."""
+        # This is a placeholder for future implementation
+        # For now, just refresh the list
+        self.load_themes() 

@@ -16,7 +16,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QApplication,
 )
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QKeySequence, QFont
+from PySide6.QtCore import QPoint
 
 import logging
 
@@ -45,9 +46,8 @@ from ..services.plugin_service import discover_and_register_all_plugins
 from ..utils.window_title import build_title
 from ..utils.version import build_version_details
 from ..utils.admin import needs_admin_for_plugin
-from ..ui.widgets.loading_placeholder import LoadingPlaceholder
-from ..ui.widgets.admin_required_placeholder import AdminRequiredPlaceholder
-from ..ui.widgets.error_placeholder import ErrorPlaceholder
+from ..ui.toast_notification import ToastManager
+from ..utils.shortcuts import ShortcutManager
 
 CURRENT_PLATFORM = platform.system().lower()
 
@@ -179,7 +179,17 @@ class MainWindow(QMainWindow):
                     logger.warning("Sudo not available - some operations may not work")
 
         self.setWindowTitle(f"{VERSION_NAME} v{VERSION} ({CURRENT_PLATFORM.capitalize()})")
-        self.setGeometry(100, 100, 800, 600)
+        
+        # Load saved window geometry
+        if self.settings_service:
+            geom = self.settings_service.get_window_geometry()
+            self.setGeometry(geom.x, geom.y, geom.width, geom.height)
+            if geom.maximized:
+                self.showMaximized()
+            elif geom.fullscreen:
+                self.showFullScreen()
+        else:
+            self.setGeometry(100, 100, 800, 600)
 
         self.theme_manager = theme_manager if theme_manager is not None else ThemeManager()
 
@@ -195,10 +205,19 @@ class MainWindow(QMainWindow):
         self.tab_widget = QTabWidget()
         self.tab_widget.hide()
         self.tab_widget.currentChanged.connect(self.on_tab_changed)
+        # Enable drag-and-drop tab reordering
+        self.tab_widget.setMovable(True)
+        # Enable context menu on tabs
+        self.tab_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tab_widget.customContextMenuRequested.connect(self.show_tab_context_menu)
         layout.addWidget(self.tab_widget)
 
         self.loaded_tabs: Dict[str, Dict[str, Any]] = {}
         self.is_loading_tab = False
+        
+        # Initialize UX enhancements
+        self.setup_toast_manager()
+        self.setup_shortcuts()
 
         QApplication.processEvents()
 
@@ -229,9 +248,6 @@ class MainWindow(QMainWindow):
         # Separator
         self.settings_menu.addSeparator()
         
-        # Future preferences item (placeholder)
-        # self.preferences_action = QAction("Preferences...", self)
-        # self.settings_menu.addAction(self.preferences_action)
 
         if CURRENT_PLATFORM == "windows":
             # Only show the admin menu/action when not already elevated
@@ -243,6 +259,9 @@ class MainWindow(QMainWindow):
                 self.admin_menu.addAction(self.restart_admin_action)
 
         self.update_window_title()
+        
+        # Setup tooltips after menu is created
+        self.setup_tooltips()
 
     @Slot(str, object)
     def add_tab(self, tab_name: str, plugin_class: object) -> None:
@@ -305,6 +324,7 @@ class MainWindow(QMainWindow):
             )
         except Exception:
             self.setWindowTitle(build_title(VERSION_NAME, VERSION, CURRENT_PLATFORM))
+    
 
     def on_tabs_loaded(self) -> None:
         self.loading_widget.hide()
@@ -404,6 +424,10 @@ class MainWindow(QMainWindow):
 
     def on_theme_selected(self, theme_name: str) -> None:
         logger.info(f"Theme selected: {theme_name}")
+        # Refresh toast notifications with new theme
+        if hasattr(self, 'toast_manager'):
+            self.toast_manager.update_theme_manager(self.theme_manager)
+            self.toast_manager.refresh_theme()
 
     def restart_as_admin(self) -> None:
         if CURRENT_PLATFORM == "windows":
@@ -412,5 +436,229 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 logger.error(f"Failed to restart as administrator: {e}")
                 QMessageBox.critical(self, "Error", f"Failed to restart as administrator:\n{e}")
+    
+    
+    def setup_toast_manager(self):
+        """Setup the toast notification manager."""
+        self.toast_manager = ToastManager(self, self.theme_manager)
+    
+    def setup_shortcuts(self):
+        """Setup keyboard shortcuts."""
+        if not self.settings_service or not self.settings_service.get_shortcuts_enabled():
+            return
+            
+        self.shortcut_manager = ShortcutManager(self)
+        
+        # Connect shortcut signals
+        self.shortcut_manager.tabSearch.connect(self.open_tab_search_dialog)
+        self.shortcut_manager.nextTab.connect(self.next_tab)
+        self.shortcut_manager.prevTab.connect(self.previous_tab)
+        self.shortcut_manager.closeTab.connect(self.close_current_tab)
+        self.shortcut_manager.reopenTab.connect(self.reopen_last_closed_tab)
+        self.shortcut_manager.toggleFullscreen.connect(self.toggle_fullscreen)
+        self.shortcut_manager.zoomIn.connect(self.zoom_in)
+        self.shortcut_manager.zoomOut.connect(self.zoom_out)
+        self.shortcut_manager.zoomReset.connect(self.zoom_reset)
+    
+    def setup_tooltips(self):
+        """Setup tooltips for UI elements."""
+        if not self.settings_service or not self.settings_service.get_show_tooltips():
+            return
+            
+        # Add tooltips to menu actions
+        if hasattr(self, 'manage_plugins_action'):
+            self.manage_plugins_action.setToolTip("Enable or disable plugins and manage their settings")
+        if hasattr(self, 'select_theme_action'):
+            self.select_theme_action.setToolTip("Choose from available themes or import custom ones")
+        if hasattr(self, 'preferences_action'):
+            self.preferences_action.setToolTip("Configure application settings and preferences")
+        
+        if hasattr(self, 'restart_admin_action'):
+            self.restart_admin_action.setToolTip("Restart the application with administrator privileges")
+    
+    
+    
+    def open_tab_search_dialog(self):
+        """Open quick tab search dialog (placeholder for now)."""
+        # TODO: Implement tab search dialog in Phase 3
+        QMessageBox.information(self, "Tab Search", "Tab search dialog will be implemented in Phase 3.")
+    
+    def next_tab(self):
+        """Switch to next tab."""
+        current = self.tab_widget.currentIndex()
+        if current < self.tab_widget.count() - 1:
+            self.tab_widget.setCurrentIndex(current + 1)
+    
+    def previous_tab(self):
+        """Switch to previous tab."""
+        current = self.tab_widget.currentIndex()
+        if current > 0:
+            self.tab_widget.setCurrentIndex(current - 1)
+    
+    def close_current_tab(self):
+        """Close the current tab."""
+        current = self.tab_widget.currentIndex()
+        if current >= 0:
+            self.close_tab_by_index(current)
+    
+    def reopen_last_closed_tab(self):
+        """Reopen the last closed tab (placeholder for now)."""
+        # TODO: Implement recently closed tabs in Phase 3
+        QMessageBox.information(self, "Reopen Tab", "Recently closed tabs will be implemented in Phase 3.")
+    
+    def toggle_fullscreen(self):
+        """Toggle fullscreen mode."""
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+    
+    def zoom_in(self):
+        """Zoom in the UI (placeholder for now)."""
+        # TODO: Implement UI scaling
+        QMessageBox.information(self, "Zoom In", "UI scaling will be implemented in Phase 2.")
+    
+    def zoom_out(self):
+        """Zoom out the UI (placeholder for now)."""
+        # TODO: Implement UI scaling
+        QMessageBox.information(self, "Zoom Out", "UI scaling will be implemented in Phase 2.")
+    
+    def zoom_reset(self):
+        """Reset UI zoom (placeholder for now)."""
+        # TODO: Implement UI scaling
+        QMessageBox.information(self, "Zoom Reset", "UI scaling will be implemented in Phase 2.")
+    
+    def closeEvent(self, event):
+        """Handle window close event to save settings."""
+        if self.settings_service:
+            # Save window geometry
+            geom = self.geometry()
+            self.settings_service.save_window_geometry(
+                geom.x(), geom.y(), geom.width(), geom.height()
+            )
+            
+            # Save window state
+            if self.isMaximized():
+                self.settings_service._settings.window_geometry.maximized = True
+            elif self.isFullScreen():
+                self.settings_service._settings.window_geometry.fullscreen = True
+            else:
+                self.settings_service._settings.window_geometry.maximized = False
+                self.settings_service._settings.window_geometry.fullscreen = False
+            self.settings_service._save_settings()
+        
+        event.accept()
+    
+    def show_tab_context_menu(self, position: QPoint):
+        """Show context menu for tabs."""
+        # Find the tab at the position
+        tab_index = self.tab_widget.tabBar().tabAt(position)
+        if tab_index < 0:
+            return
+        
+        tab_name = self.tab_widget.tabText(tab_index)
+        
+        # Create context menu
+        context_menu = QMenu(self)
+        
+        # Close tab action
+        close_action = QAction("Close Tab", self)
+        close_action.setShortcut(QKeySequence("Ctrl+W"))
+        close_action.triggered.connect(lambda: self.close_tab_by_index(tab_index))
+        context_menu.addAction(close_action)
+        
+        # Close other tabs action
+        close_others_action = QAction("Close Other Tabs", self)
+        close_others_action.triggered.connect(lambda: self.close_other_tabs(tab_index))
+        context_menu.addAction(close_others_action)
+        
+        # Close all tabs action
+        close_all_action = QAction("Close All Tabs", self)
+        close_all_action.triggered.connect(self.close_all_tabs)
+        context_menu.addAction(close_all_action)
+        
+        context_menu.addSeparator()
+        
+        # Pin/Unpin tab action (placeholder for future implementation)
+        pin_action = QAction("Pin Tab", self)
+        pin_action.setEnabled(False)  # Disabled for now
+        pin_action.triggered.connect(lambda: self.pin_tab(tab_index))
+        context_menu.addAction(pin_action)
+        
+        context_menu.addSeparator()
+        
+        # Plugin info action
+        info_action = QAction("Plugin Info", self)
+        info_action.triggered.connect(lambda: self.show_plugin_info(tab_name))
+        context_menu.addAction(info_action)
+        
+        # Show the context menu
+        context_menu.exec(self.tab_widget.mapToGlobal(position))
+    
+    def close_tab_by_index(self, index: int):
+        """Close tab by index."""
+        if 0 <= index < self.tab_widget.count():
+            tab_name = self.tab_widget.tabText(index)
+            self.tab_widget.removeTab(index)
+            if tab_name in self.loaded_tabs:
+                del self.loaded_tabs[tab_name]
+            self.update_window_title()
+            
+            # Show toast notification
+            if hasattr(self, 'toast_manager'):
+                self.toast_manager.show_info(f"Closed tab: {tab_name}")
+    
+    def close_other_tabs(self, keep_index: int):
+        """Close all tabs except the one at keep_index."""
+        if keep_index < 0 or keep_index >= self.tab_widget.count():
+            return
+        
+        # Close tabs from right to left to avoid index shifting
+        for i in range(self.tab_widget.count() - 1, -1, -1):
+            if i != keep_index:
+                self.close_tab_by_index(i)
+    
+    def close_all_tabs(self):
+        """Close all tabs."""
+        reply = QMessageBox.question(
+            self, "Close All Tabs",
+            "Are you sure you want to close all tabs?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            while self.tab_widget.count() > 0:
+                self.close_tab_by_index(0)
+    
+    def pin_tab(self, index: int):
+        """Pin a tab (placeholder for future implementation)."""
+        # TODO: Implement tab pinning in future version
+        QMessageBox.information(self, "Pin Tab", "Tab pinning will be implemented in a future version.")
+    
+    def show_plugin_info(self, tab_name: str):
+        """Show information about the plugin in the tab."""
+        if tab_name in self.loaded_tabs:
+            tab_info = self.loaded_tabs[tab_name]
+            plugin_class = tab_info.get("plugin_class")
+            
+            if plugin_class:
+                info = plugin_class.get_plugin_info()
+                
+                info_text = f"""Plugin Information:
+
+Name: {info.get('name', 'Unknown')}
+Description: {info.get('description', 'No description')}
+Version: {info.get('version', 'Unknown')}
+Author: {info.get('author', 'Unknown')}
+Supported Platforms: {', '.join(info.get('supported_platforms', []))}
+Requires Admin: {'Yes' if info.get('requires_admin', False) else 'No'}
+Compatible: {'Yes' if info.get('compatible', False) else 'No'}"""
+                
+                QMessageBox.information(self, f"Plugin Info - {tab_name}", info_text)
+            else:
+                QMessageBox.information(self, f"Plugin Info - {tab_name}", "No plugin information available.")
+        else:
+            QMessageBox.warning(self, "Plugin Info", f"Tab '{tab_name}' not found.")
 
 
