@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QFont
 
 from .services.logging_service import setup_logging
+from .services.settings_service import load_settings as load_settings_service
 from ..themes.theme_manager import ThemeManager
 from .ui.main_window import MainWindow
 from .utils.console import apply_console_setting
@@ -39,6 +40,10 @@ def run(argv: List[str]) -> int:
     
     logger = setup_logging()
     logger.info(f"Starting {VERSION_NAME} v{VERSION} on {platform.system().lower()}")
+
+    # Load settings service
+    settings_service = load_settings_service()
+    logger.info("Settings service loaded")
 
     # On Linux, before creating QApplication, ensure Qt xcb system dependencies are present
     if platform.system().lower() == "linux":
@@ -72,11 +77,12 @@ def run(argv: List[str]) -> int:
                 return 1
             logger.info("Admin privileges obtained successfully.")
 
-    # Apply theme using ThemeManager auto-detection
-    theme_manager = ThemeManager()
-    theme_manager.apply_auto_theme()
+    # Apply theme using ThemeManager with saved preference
+    theme_manager = ThemeManager(settings_service=settings_service)
+    saved_theme = settings_service.get_theme_preference()
+    theme_manager.apply_auto_theme(saved_theme=saved_theme)
 
-    window = MainWindow(theme_manager)
+    window = MainWindow(theme_manager, settings_service=settings_service)
     window.show()
 
     exit_code = app.exec()

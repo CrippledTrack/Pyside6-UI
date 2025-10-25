@@ -80,10 +80,11 @@ class TabLoaderThread(QThread):
     error = Signal(str)
     add_tab = Signal(str, object)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, settings_service=None):
         super().__init__(parent)
         self.setObjectName("TabLoaderThread")
         self.tab_widget: Optional[QTabWidget] = None
+        self.settings_service = settings_service
 
     def set_tab_widget(self, tab_widget: QTabWidget) -> None:
         self.tab_widget = tab_widget
@@ -91,6 +92,41 @@ class TabLoaderThread(QThread):
     def run(self) -> None:
         try:
             self.discover_and_register_plugins()
+            
+            # Load saved plugin states from settings if available
+            if self.settings_service:
+                try:
+                    saved_disabled = self.settings_service.get_disabled_plugins()
+                    
+                    if saved_disabled:  # Has saved user preferences
+                        logger.info(f"Loading saved user-disabled plugins: {saved_disabled}")
+                        
+                        # Apply user-disabled plugins on top of default states
+                        for plugin_name in saved_disabled:
+                            if plugin_registry.get_plugin(plugin_name):
+                                plugin_registry.disable_plugin(plugin_name)
+                                logger.debug(f"Applied user preference: {plugin_name} disabled")
+                    else:
+                        # First run - apply default plugin states only
+                        logger.info("First run detected, applying default plugin states (disabled_by_default flags)")
+                        # No action needed - defaults from registration are already applied
+                        
+                        # Log default states for information
+                        enabled_by_default = [name for name in plugin_registry.list_plugin_names() 
+                                            if plugin_registry.is_enabled(name)]
+                        disabled_by_default = [name for name in plugin_registry.list_plugin_names() 
+                                              if not plugin_registry.is_enabled(name)]
+                        logger.info(f"Default plugin states: {len(enabled_by_default)} enabled, "
+                                   f"{len(disabled_by_default)} disabled by default")
+                        if disabled_by_default:
+                            logger.info(f"Disabled by default: {', '.join(disabled_by_default)}")
+                        
+                        # Initialize empty disabled list (user hasn't disabled anything yet)
+                        self.settings_service.save_disabled_plugins([])
+                except Exception as e:
+                    logger.warning(f"Failed to load saved plugin states: {e}")
+                    # On error, keep current states (from disabled_by_default flags)
+            
             enabled_plugins = plugin_registry.get_enabled_plugins()
             for tab_name, plugin_class in enabled_plugins.items():
                 self.add_tab.emit(tab_name, plugin_class)
@@ -105,9 +141,10 @@ class TabLoaderThread(QThread):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, theme_manager: Optional[ThemeManager] = None):
+    def __init__(self, theme_manager: Optional[ThemeManager] = None, settings_service=None):
         super().__init__()
         logger.info(f"Initializing MainWindow for {VERSION_NAME} v{VERSION} on {CURRENT_PLATFORM}")
+        self.settings_service = settings_service
 
         if CURRENT_PLATFORM == "windows":
             self.is_admin = is_admin()
@@ -165,7 +202,7 @@ class MainWindow(QMainWindow):
 
         QApplication.processEvents()
 
-        self.tab_loader = TabLoaderThread()
+        self.tab_loader = TabLoaderThread(settings_service=self.settings_service)
         self.tab_loader.set_tab_widget(self.tab_widget)
         self.tab_loader.finished.connect(self.on_tabs_loaded)
         self.tab_loader.error.connect(self.on_tab_load_error)
@@ -175,17 +212,26 @@ class MainWindow(QMainWindow):
         self.menu_bar = QMenuBar(self)
         self.setMenuBar(self.menu_bar)
 
-        self.plugins_menu = QMenu("Plugins", self)
-        self.menu_bar.addMenu(self.plugins_menu)
+        # Create unified Settings menu
+        self.settings_menu = QMenu("Settings", self)
+        self.menu_bar.addMenu(self.settings_menu)
+        
+        # Plugin management
         self.manage_plugins_action = QAction("Manage Plugins...", self)
-        self.plugins_menu.addAction(self.manage_plugins_action)
+        self.settings_menu.addAction(self.manage_plugins_action)
         self.manage_plugins_action.triggered.connect(self.open_plugin_management_dialog)
-
-        self.theme_menu = QMenu("Theme", self)
-        self.menu_bar.addMenu(self.theme_menu)
+        
+        # Theme selection
         self.select_theme_action = QAction("Select Theme...", self)
-        self.theme_menu.addAction(self.select_theme_action)
+        self.settings_menu.addAction(self.select_theme_action)
         self.select_theme_action.triggered.connect(self.open_theme_dialog)
+        
+        # Separator
+        self.settings_menu.addSeparator()
+        
+        # Future preferences item (placeholder)
+        # self.preferences_action = QAction("Preferences...", self)
+        # self.settings_menu.addAction(self.preferences_action)
 
         if CURRENT_PLATFORM == "windows":
             # Only show the admin menu/action when not already elevated
@@ -328,6 +374,27 @@ class MainWindow(QMainWindow):
                     break
             if plugin_name in self.loaded_tabs:
                 del self.loaded_tabs[plugin_name]
+        
+        # Save user-disabled plugins to settings (excludes plugins disabled by default)
+        if self.settings_service:
+            try:
+                # Determine which plugins are disabled by the user (not by default)
+                # Get all disabled plugins
+                all_disabled = [name for name in plugin_registry.list_plugin_names() 
+                              if not plugin_registry.is_enabled(name)]
+                
+                # Filter out plugins that are disabled_by_default
+                user_disabled = []
+                for plugin_name in all_disabled:
+                    plugin_class = plugin_registry.get_plugin(plugin_name)
+                    if plugin_class and not getattr(plugin_class, 'disabled_by_default', False):
+                        user_disabled.append(plugin_name)
+                
+                logger.debug(f"Saving user-disabled plugins: {user_disabled}")
+                self.settings_service.save_disabled_plugins(user_disabled)
+            except Exception as e:
+                logger.warning(f"Failed to save plugin states: {e}")
+        
         self.update_window_title()
 
     def open_theme_dialog(self) -> None:

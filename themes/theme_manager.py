@@ -12,9 +12,10 @@ logger = logging.getLogger(__name__)
 class ThemeManager:
     """Manages application themes including loading, saving, and applying themes"""
     
-    def __init__(self, themes_dir: str = "themes"):
+    def __init__(self, themes_dir: str = "themes", settings_service=None):
         self.themes_dir = themes_dir
         self.themes = {}
+        self.settings_service = settings_service
         self.load_builtin_themes()
         self.load_custom_themes()
     
@@ -87,6 +88,14 @@ class ThemeManager:
             self._apply_palette(theme_data.get('palette', {}))
             self.current_theme = theme_name
             logger.info(f"Applied theme: {theme_name}")
+            
+            # Save theme preference if settings service is available
+            if self.settings_service:
+                try:
+                    self.settings_service.save_theme_preference(theme_name)
+                except Exception as e:
+                    logger.warning(f"Failed to save theme preference: {e}")
+            
             return True
         except Exception as e:
             logger.error(f"Failed to apply theme {theme_name}: {e}")
@@ -107,15 +116,30 @@ class ThemeManager:
                 current_platform = ""
             return current_platform == "linux"
 
-    def apply_auto_theme(self) -> str:
+    def apply_auto_theme(self, saved_theme: str = None) -> str:
         """Detect and apply the appropriate theme ('dark' or 'light').
+        
+        Args:
+            saved_theme: If provided, use this theme instead of auto-detection
 
         Returns the applied theme name.
         """
-        is_dark = self.detect_system_dark_mode()
-        theme_name = "ocean_blue" if is_dark else "light"
+        # Use saved theme preference if available
+        if saved_theme and saved_theme in self.themes:
+            theme_name = saved_theme
+            logger.info(f"Applying saved theme preference: {theme_name}")
+        else:
+            # Auto-detect based on system preference
+            is_dark = self.detect_system_dark_mode()
+            theme_name = "ocean_blue" if is_dark else "light"
+            logger.info(f"Applying auto-detected theme: {theme_name}")
+        
         self.apply_theme(theme_name)
         return theme_name
+    
+    def set_settings_service(self, settings_service):
+        """Set the settings service for theme persistence"""
+        self.settings_service = settings_service
     
     def _apply_stylesheet(self, stylesheet: str):
         """Apply stylesheet to the application"""
