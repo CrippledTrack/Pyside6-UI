@@ -25,9 +25,6 @@ class ShortcutManager(QObject):
     reopenTab = Signal()  # Ctrl+Shift+T
   # Ctrl+,
     toggleFullscreen = Signal()  # F11
-    zoomIn = Signal()     # Ctrl++
-    zoomOut = Signal()    # Ctrl+-
-    zoomReset = Signal()  # Ctrl+0
     
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -43,9 +40,6 @@ class ShortcutManager(QObject):
             "close_tab": ("Ctrl+W", self.closeTab.emit),
             "reopen_tab": ("Ctrl+Shift+T", self.reopenTab.emit),
             "fullscreen": ("F11", self.toggleFullscreen.emit),
-            "zoom_in": ("Ctrl+=", self.zoomIn.emit),  # Ctrl+= is same as Ctrl++
-            "zoom_out": ("Ctrl+-", self.zoomOut.emit),
-            "zoom_reset": ("Ctrl+0", self.zoomReset.emit),
         }
         
         for name, (key_sequence, callback) in shortcuts_config.items():

@@ -31,14 +31,7 @@ class AppSettings:
     log_to_file: bool = True
     window_geometry: WindowGeometry = None
     # UI/UX settings
-    font_family: str = "Segoe UI"
-    font_size: int = 10
-    ui_scale: float = 1.0
     show_tooltips: bool = True
-    show_status_bar: bool = True
-    # Tab behavior
-    tab_order: List[str] = None  # Saved tab order
-    recently_closed_tabs: List[str] = None  # Recently closed tabs for restoration
     # Keyboard shortcuts
     shortcuts_enabled: bool = True
     # Toast notifications
@@ -51,10 +44,6 @@ class AppSettings:
             self.disabled_plugins = []
         if self.window_geometry is None:
             self.window_geometry = WindowGeometry()
-        if self.tab_order is None:
-            self.tab_order = []
-        if self.recently_closed_tabs is None:
-            self.recently_closed_tabs = []
 
 
 class SettingsService:
@@ -103,22 +92,8 @@ class SettingsService:
                 )
             
             # Load UI/UX settings
-            if 'font_family' in data:
-                self._settings.font_family = data['font_family']
-            if 'font_size' in data:
-                self._settings.font_size = int(data['font_size'])
-            if 'ui_scale' in data:
-                self._settings.ui_scale = float(data['ui_scale'])
             if 'show_tooltips' in data:
                 self._settings.show_tooltips = bool(data['show_tooltips'])
-            if 'show_status_bar' in data:
-                self._settings.show_status_bar = bool(data['show_status_bar'])
-            
-            # Load tab behavior
-            if 'tab_order' in data and isinstance(data['tab_order'], list):
-                self._settings.tab_order = data['tab_order']
-            if 'recently_closed_tabs' in data and isinstance(data['recently_closed_tabs'], list):
-                self._settings.recently_closed_tabs = data['recently_closed_tabs']
             
             # Load keyboard shortcuts
             if 'shortcuts_enabled' in data:
@@ -152,13 +127,7 @@ class SettingsService:
                     'maximized': self._settings.window_geometry.maximized,
                     'fullscreen': self._settings.window_geometry.fullscreen
                 },
-                'font_family': self._settings.font_family,
-                'font_size': self._settings.font_size,
-                'ui_scale': self._settings.ui_scale,
                 'show_tooltips': self._settings.show_tooltips,
-                'show_status_bar': self._settings.show_status_bar,
-                'tab_order': self._settings.tab_order,
-                'recently_closed_tabs': self._settings.recently_closed_tabs,
                 'shortcuts_enabled': self._settings.shortcuts_enabled,
                 'toast_notifications_enabled': self._settings.toast_notifications_enabled,
                 'toast_duration': self._settings.toast_duration
@@ -215,77 +184,15 @@ class SettingsService:
         return self._settings.log_to_file
     
     # UI/UX settings methods
-    def save_font_settings(self, font_family: str, font_size: int, ui_scale: float):
-        """Save font and UI scale settings"""
-        self._settings.font_family = font_family
-        self._settings.font_size = font_size
-        self._settings.ui_scale = ui_scale
-        self._save_settings()
-        logger.debug(f"Font settings saved: {font_family}, {font_size}, scale: {ui_scale}")
-    
-    def get_font_family(self) -> str:
-        """Get font family setting"""
-        return self._settings.font_family
-    
-    def get_font_size(self) -> int:
-        """Get font size setting"""
-        return self._settings.font_size
-    
-    def get_ui_scale(self) -> float:
-        """Get UI scale setting"""
-        return self._settings.ui_scale
-    
-    def save_ui_preferences(self, show_tooltips: bool, show_status_bar: bool):
+    def save_ui_preferences(self, show_tooltips: bool):
         """Save UI preferences"""
         self._settings.show_tooltips = show_tooltips
-        self._settings.show_status_bar = show_status_bar
         self._save_settings()
-        logger.debug(f"UI preferences saved: tooltips={show_tooltips}, status_bar={show_status_bar}")
+        logger.debug(f"UI preferences saved: tooltips={show_tooltips}")
     
     def get_show_tooltips(self) -> bool:
         """Get show tooltips setting"""
         return self._settings.show_tooltips
-    
-    def get_show_status_bar(self) -> bool:
-        """Get show status bar setting"""
-        return self._settings.show_status_bar
-    
-    # Tab behavior methods
-    def save_tab_order(self, tab_order: List[str]):
-        """Save tab order"""
-        self._settings.tab_order = tab_order.copy()
-        self._save_settings()
-        logger.debug(f"Tab order saved: {tab_order}")
-    
-    def get_tab_order(self) -> List[str]:
-        """Get saved tab order"""
-        return self._settings.tab_order.copy()
-    
-    def save_recently_closed_tabs(self, closed_tabs: List[str]):
-        """Save recently closed tabs (keep last 10)"""
-        self._settings.recently_closed_tabs = closed_tabs[-10:]  # Keep only last 10
-        self._save_settings()
-        logger.debug(f"Recently closed tabs saved: {len(closed_tabs)} tabs")
-    
-    def get_recently_closed_tabs(self) -> List[str]:
-        """Get recently closed tabs"""
-        return self._settings.recently_closed_tabs.copy()
-    
-    def add_recently_closed_tab(self, tab_name: str):
-        """Add a tab to recently closed list"""
-        if tab_name not in self._settings.recently_closed_tabs:
-            self._settings.recently_closed_tabs.insert(0, tab_name)
-            # Keep only last 10
-            self._settings.recently_closed_tabs = self._settings.recently_closed_tabs[:10]
-            self._save_settings()
-            logger.debug(f"Added to recently closed: {tab_name}")
-    
-    def remove_recently_closed_tab(self, tab_name: str):
-        """Remove a tab from recently closed list"""
-        if tab_name in self._settings.recently_closed_tabs:
-            self._settings.recently_closed_tabs.remove(tab_name)
-            self._save_settings()
-            logger.debug(f"Removed from recently closed: {tab_name}")
     
     # Keyboard shortcuts methods
     def save_shortcuts_enabled(self, enabled: bool):

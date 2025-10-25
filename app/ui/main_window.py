@@ -456,9 +456,6 @@ class MainWindow(QMainWindow):
         self.shortcut_manager.closeTab.connect(self.close_current_tab)
         self.shortcut_manager.reopenTab.connect(self.reopen_last_closed_tab)
         self.shortcut_manager.toggleFullscreen.connect(self.toggle_fullscreen)
-        self.shortcut_manager.zoomIn.connect(self.zoom_in)
-        self.shortcut_manager.zoomOut.connect(self.zoom_out)
-        self.shortcut_manager.zoomReset.connect(self.zoom_reset)
     
     def setup_tooltips(self):
         """Setup tooltips for UI elements."""
@@ -513,20 +510,6 @@ class MainWindow(QMainWindow):
         else:
             self.showFullScreen()
     
-    def zoom_in(self):
-        """Zoom in the UI (placeholder for now)."""
-        # TODO: Implement UI scaling
-        QMessageBox.information(self, "Zoom In", "UI scaling will be implemented in Phase 2.")
-    
-    def zoom_out(self):
-        """Zoom out the UI (placeholder for now)."""
-        # TODO: Implement UI scaling
-        QMessageBox.information(self, "Zoom Out", "UI scaling will be implemented in Phase 2.")
-    
-    def zoom_reset(self):
-        """Reset UI zoom (placeholder for now)."""
-        # TODO: Implement UI scaling
-        QMessageBox.information(self, "Zoom Reset", "UI scaling will be implemented in Phase 2.")
     
     def closeEvent(self, event):
         """Handle window close event to save settings."""
