@@ -32,11 +32,17 @@ except ImportError:
 # Linux-specific checks
 if platform.system().lower() == "linux":
     from .utils.qt_dependencies_linux import ensure_qt_xcb_dependencies_installed
-    from .utils.elevation_linux import is_admin, ensure_root_privileges
+    from .utils.elevation_linux import start_daemon, stop_daemon
+    from .daemon import set_daemon_client
 
 
 def run(argv: List[str]) -> int:
     """Application bootstrap. Mirrors previous behavior from main.py without changes."""
+    # Check for daemon mode before GUI initialization
+    if '--daemon' in argv and platform.system().lower() == 'linux':
+        from .daemon.server import run_daemon
+        return run_daemon()
+    
     # Apply console visibility setting based on SHOW_CONSOLE constant
     apply_console_setting()
     
@@ -74,14 +80,25 @@ def run(argv: List[str]) -> int:
     app.setStyle("Fusion")
     app.setFont(QFont("Segoe UI", 10))
 
-    # On Linux, prompt for root if required (preserves previous behavior)
+    # On Linux, start privileged daemon
+    daemon_client = None
     if platform.system().lower() == "linux":
-        if not is_admin():
-            logger.info("Application not running as root, requesting admin privileges...")
-            if not ensure_root_privileges():
-                logger.error("Admin privileges not granted. Application cannot continue.")
-                return 1
-            logger.info("Admin privileges obtained successfully.")
+        logger.info("Starting privileged daemon...")
+        daemon_client = start_daemon()
+        if not daemon_client or not daemon_client.is_connected():
+            logger.error("Failed to start privileged daemon. Administrator privileges required.")
+            from PySide6.QtWidgets import QMessageBox
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setWindowTitle("Administrator Privileges Required")
+            msg.setText("This application requires administrator privileges to function properly.")
+            msg.setInformativeText("The application will now exit.")
+            msg.exec()
+            return 1
+        
+        # Store daemon client globally for utils to use
+        set_daemon_client(daemon_client)
+        logger.info("Privileged daemon started successfully")
 
     # Apply theme using ThemeManager with saved preference
     theme_manager = ThemeManager(settings_service=settings_service)
@@ -92,6 +109,17 @@ def run(argv: List[str]) -> int:
     window.show()
 
     exit_code = app.exec()
+    
+    # Cleanup: Stop daemon on exit
+    if platform.system().lower() == "linux" and daemon_client:
+        logger.info("Stopping privileged daemon...")
+        try:
+            daemon_client.request('shutdown', {})
+            daemon_client.disconnect()
+        except:
+            pass
+        stop_daemon()
+    
     logger.info(f"Application closed with code {exit_code}")
     return exit_code
 
