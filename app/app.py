@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import os
 from typing import List
 import platform
 
@@ -42,6 +43,38 @@ def run(argv: List[str]) -> int:
     if '--daemon' in argv and platform.system().lower() == 'linux':
         from .daemon.server import run_daemon
         return run_daemon()
+    
+    # Check if this is a Qt probe subprocess (Python -c mode) - skip all initialization
+    if '-c' in argv:
+        # This is being run as a Python command line probe - just execute the code
+        # The code will be in argv[argv.index('-c') + 1]
+        try:
+            idx = argv.index('-c')
+            if idx + 1 < len(argv):
+                code = argv[idx + 1]
+                # Execute in clean namespace (like Python -c does)
+                exec(code, {'__name__': '__main__', '__builtins__': __builtins__})
+                return 0
+        except Exception as e:
+            # If exec fails, exit with error (Qt probe will handle this)
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+    
+    # Prevent multiple instances on Linux (check BEFORE any initialization)
+    lock_file = None
+    lock_file_path = None
+    if platform.system().lower() == "linux":
+        import fcntl
+        lock_file_path = '/tmp/cyberpatriot-ui.lock'
+        try:
+            lock_file = open(lock_file_path, 'w')
+            fcntl.lockf(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            lock_file.write(str(os.getpid()))
+            lock_file.flush()
+        except (IOError, OSError):
+            # Another instance is running
+            print("Another instance is already running.", file=sys.stderr)
+            return 1
     
     # Apply console visibility setting based on SHOW_CONSOLE constant
     apply_console_setting()
@@ -114,6 +147,17 @@ def run(argv: List[str]) -> int:
         except:
             pass
         stop_daemon()
+    
+    # Cleanup: Release lock file
+    if lock_file:
+        try:
+            import fcntl
+            fcntl.lockf(lock_file, fcntl.LOCK_UN)
+            lock_file.close()
+            if lock_file_path and os.path.exists(lock_file_path):
+                os.unlink(lock_file_path)
+        except:
+            pass
     
     logger.info(f"Application closed with code {exit_code}")
     return exit_code
