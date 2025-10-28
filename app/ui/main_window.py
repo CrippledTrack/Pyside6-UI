@@ -180,16 +180,17 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(f"{VERSION_NAME} v{VERSION} ({CURRENT_PLATFORM.capitalize()})")
         
-        # Load saved window geometry
+        # Load saved window geometry (only width/height, not position)
         if self.settings_service:
             geom = self.settings_service.get_window_geometry()
-            self.setGeometry(geom.x, geom.y, geom.width, geom.height)
+            # Only restore size, let Qt handle positioning
+            self.resize(geom.width, geom.height)
             if geom.maximized:
                 self.showMaximized()
             elif geom.fullscreen:
                 self.showFullScreen()
         else:
-            self.setGeometry(100, 100, 800, 600)
+            self.resize(800, 600)
 
         self.theme_manager = theme_manager if theme_manager is not None else ThemeManager()
 
@@ -450,11 +451,8 @@ class MainWindow(QMainWindow):
         self.shortcut_manager = ShortcutManager(self)
         
         # Connect shortcut signals
-        self.shortcut_manager.tabSearch.connect(self.open_tab_search_dialog)
         self.shortcut_manager.nextTab.connect(self.next_tab)
         self.shortcut_manager.prevTab.connect(self.previous_tab)
-        self.shortcut_manager.closeTab.connect(self.close_current_tab)
-        self.shortcut_manager.reopenTab.connect(self.reopen_last_closed_tab)
         self.shortcut_manager.toggleFullscreen.connect(self.toggle_fullscreen)
     
     def setup_tooltips(self):
@@ -475,11 +473,6 @@ class MainWindow(QMainWindow):
     
     
     
-    def open_tab_search_dialog(self):
-        """Open quick tab search dialog (placeholder for now)."""
-        # TODO: Implement tab search dialog in Phase 3
-        QMessageBox.information(self, "Tab Search", "Tab search dialog will be implemented in Phase 3.")
-    
     def next_tab(self):
         """Switch to next tab."""
         current = self.tab_widget.currentIndex()
@@ -497,11 +490,6 @@ class MainWindow(QMainWindow):
         current = self.tab_widget.currentIndex()
         if current >= 0:
             self.close_tab_by_index(current)
-    
-    def reopen_last_closed_tab(self):
-        """Reopen the last closed tab (placeholder for now)."""
-        # TODO: Implement recently closed tabs in Phase 3
-        QMessageBox.information(self, "Reopen Tab", "Recently closed tabs will be implemented in Phase 3.")
     
     def toggle_fullscreen(self):
         """Toggle fullscreen mode."""
@@ -562,14 +550,6 @@ class MainWindow(QMainWindow):
         
         context_menu.addSeparator()
         
-        # Pin/Unpin tab action (placeholder for future implementation)
-        pin_action = QAction("Pin Tab", self)
-        pin_action.setEnabled(False)  # Disabled for now
-        pin_action.triggered.connect(lambda: self.pin_tab(tab_index))
-        context_menu.addAction(pin_action)
-        
-        context_menu.addSeparator()
-        
         # Plugin info action
         info_action = QAction("Plugin Info", self)
         info_action.triggered.connect(lambda: self.show_plugin_info(tab_name))
@@ -613,11 +593,6 @@ class MainWindow(QMainWindow):
         if reply == QMessageBox.StandardButton.Yes:
             while self.tab_widget.count() > 0:
                 self.close_tab_by_index(0)
-    
-    def pin_tab(self, index: int):
-        """Pin a tab (placeholder for future implementation)."""
-        # TODO: Implement tab pinning in future version
-        QMessageBox.information(self, "Pin Tab", "Tab pinning will be implemented in a future version.")
     
     def show_plugin_info(self, tab_name: str):
         """Show information about the plugin in the tab."""

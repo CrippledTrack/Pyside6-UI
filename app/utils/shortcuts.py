@@ -18,12 +18,8 @@ class ShortcutManager(QObject):
     """Manages keyboard shortcuts for the application."""
     
     # Signals for shortcut actions
-    tabSearch = Signal()  # Ctrl+T
     nextTab = Signal()    # Ctrl+Tab
     prevTab = Signal()    # Ctrl+Shift+Tab
-    closeTab = Signal()   # Ctrl+W
-    reopenTab = Signal()  # Ctrl+Shift+T
-  # Ctrl+,
     toggleFullscreen = Signal()  # F11
     
     def __init__(self, parent: Optional[QWidget] = None):
@@ -34,11 +30,8 @@ class ShortcutManager(QObject):
     def setup_shortcuts(self):
         """Setup all keyboard shortcuts."""
         shortcuts_config = {
-            "tab_search": ("Ctrl+T", self.tabSearch.emit),
             "next_tab": ("Ctrl+Tab", self.nextTab.emit),
             "prev_tab": ("Ctrl+Shift+Tab", self.prevTab.emit),
-            "close_tab": ("Ctrl+W", self.closeTab.emit),
-            "reopen_tab": ("Ctrl+Shift+T", self.reopenTab.emit),
             "fullscreen": ("F11", self.toggleFullscreen.emit),
         }
         

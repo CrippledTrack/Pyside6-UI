@@ -8,10 +8,10 @@ from __future__ import annotations
 import logging
 from typing import Optional
 from PySide6.QtWidgets import (
-    QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QFrame
+    QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QFrame, QMainWindow
 )
-from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QRect
-from PySide6.QtGui import QFont, QPalette, QColor
+from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QRect, QEvent
+from PySide6.QtGui import QFont, QPalette, QColor, QMouseEvent
 
 logger = logging.getLogger(__name__)
 
@@ -20,18 +20,27 @@ class ToastNotification(QFrame):
     """A toast notification widget that appears temporarily."""
     
     def __init__(self, message: str, notification_type: str = "info", duration: int = 3000, parent=None, theme_manager=None):
-        super().__init__(parent)
+        super().__init__(parent)  # Set parent for proper window hierarchy
         self.message = message
         self.notification_type = notification_type
         self.duration = duration
         self.theme_manager = theme_manager
+        self.parent_window = parent  # Store for positioning
         self.setup_ui()
         self.setup_animation()
         self.apply_theme()
     
     def setup_ui(self):
         """Setup the toast notification UI."""
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
+        # Use Tool window type - stays above parent but not globally on top of all apps
+        # Don't use WindowStaysOnTopHint as it makes it globally on top
+        window_flags = Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool
+        
+        self.setWindowFlags(window_flags)
+        # Set parent to establish window hierarchy (Tool windows stay above their parent)
+        if self.parent_window:
+            self.setParent(self.parent_window)
+        
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedSize(320, 70)
         # Set a semi-transparent background instead of fully transparent
@@ -55,13 +64,16 @@ class ToastNotification(QFrame):
         self.message_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         content_layout.addWidget(self.message_label)
         
-        # Close button
-        close_button = QPushButton("×")
-        close_button.setFixedSize(18, 18)
-        close_button.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-        close_button.clicked.connect(self.close_toast)
-        close_button.setObjectName("closeButton")
-        content_layout.addWidget(close_button)
+        # Close button (needs to be clickable while toast is click-through)
+        self.close_button = QPushButton("×")
+        self.close_button.setFixedSize(18, 18)
+        self.close_button.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        self.close_button.clicked.connect(self.close_toast)
+        self.close_button.setObjectName("closeButton")
+        content_layout.addWidget(self.close_button)
+        
+        # Don't use WA_TransparentForMouseEvents - it doesn't work for click-through on top-level windows
+        # Instead, we'll handle events manually in event() method
         
         layout.addWidget(content_frame)
         
@@ -217,21 +229,31 @@ class ToastNotification(QFrame):
     
     def show_toast(self, parent_widget: Optional[QWidget] = None):
         """Show the toast notification with animation."""
-        if parent_widget:
+        # Use stored parent_window if no parent_widget provided
+        target_parent = parent_widget or self.parent_window
+        
+        if target_parent:
             # Position relative to parent - try to get the main window
-            main_window = parent_widget
-            while main_window and not hasattr(main_window, 'geometry'):
+            main_window = target_parent
+            while main_window and not isinstance(main_window, QMainWindow):
                 main_window = main_window.parent()
             
-            if main_window and hasattr(main_window, 'geometry'):
+            if main_window:
                 parent_rect = main_window.geometry()
-                # Position in top-right corner with better spacing
+                # Position in top-right corner, moved down to avoid blocking menu/toolbars
                 x = parent_rect.x() + parent_rect.width() - self.width() - 15
-                y = parent_rect.y() + 15
+                y = parent_rect.y() + 60  # Move down to clear menu bar area
                 self.move(x, y)
             else:
                 # Fallback positioning
                 self.move(100, 100)
+        else:
+            # No parent available, use screen positioning
+            from PySide6.QtWidgets import QApplication
+            screen = QApplication.primaryScreen().geometry()
+            x = screen.width() - self.width() - 15
+            y = 60  # Move down to clear top menu areas
+            self.move(x, y)
         
         # Start hidden above the target position
         start_rect = QRect(self.x(), self.y() - self.height(), self.width(), self.height())
@@ -239,6 +261,8 @@ class ToastNotification(QFrame):
         
         self.setGeometry(start_rect)
         self.show()
+        self.raise_()
+        # Don't call activateWindow() as it brings focus to the toast
         
         # Animate slide down
         self.animation.setStartValue(start_rect)
@@ -267,6 +291,27 @@ class ToastNotification(QFrame):
         self.animation.start()
         
         logger.debug(f"Closing toast: {self.message}")
+    
+    def event(self, event: QEvent):
+        """Override event handler to enable click-through except on close button."""
+        # Only process mouse events if they're on the close button
+        if event.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease, 
+                           QEvent.Type.MouseMove, QEvent.Type.Enter, QEvent.Type.Leave):
+            if isinstance(event, QMouseEvent):
+                # Check if click is on close button
+                if hasattr(self, 'close_button'):
+                    button_rect = self.close_button.geometry()
+                    if button_rect.contains(event.pos()):
+                        # Let close button handle it normally
+                        return super().event(event)
+                
+                # For all other mouse events, don't process them (click-through)
+                # Return False to indicate event wasn't handled
+                return False
+        
+        # Process all other events normally
+        return super().event(event)
+    
 
 
 class ToastManager:
@@ -276,7 +321,6 @@ class ToastManager:
         self.parent_widget = parent_widget
         self.theme_manager = theme_manager
         self.active_toasts: list[ToastNotification] = []
-        self.max_toasts = 3  # Maximum number of toasts to show
     
     def show_toast(self, message: str, notification_type: str = "info", duration: int = 3000):
         """Show a toast notification."""
@@ -291,7 +335,11 @@ class ToastManager:
         self.active_toasts.append(toast)
         
         # Clean up when toast closes
-        toast.destroyed.connect(lambda: self.active_toasts.remove(toast) if toast in self.active_toasts else None)
+        def remove_toast():
+            if toast in self.active_toasts:
+                self.active_toasts.remove(toast)
+        
+        toast.destroyed.connect(remove_toast)
     
     def show_info(self, message: str, duration: int = 3000):
         """Show info toast."""

@@ -173,10 +173,12 @@ class SettingsService:
         return self._settings.disabled_plugins.copy()
     
     def save_window_geometry(self, x: int, y: int, width: int, height: int) -> None:
-        """Save window geometry"""
-        self._settings.window_geometry = WindowGeometry(x=x, y=y, width=width, height=height)
+        """Save window geometry (only saves size, not position to avoid off-screen issues)"""
+        # Only save width and height, not x/y position
+        # This prevents windows from appearing off-screen when screen setup changes
+        self._settings.window_geometry = WindowGeometry(x=100, y=100, width=width, height=height)
         self._save_settings()
-        logger.debug(f"Window geometry saved: {x}, {y}, {width}x{height}")
+        logger.debug(f"Window geometry saved: {width}x{height}")
     
     def get_window_geometry(self) -> WindowGeometry:
         """Get saved window geometry"""
