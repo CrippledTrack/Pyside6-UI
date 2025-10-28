@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 # Version information
-VERSION = "2.3.0"
+VERSION = "3.0.0"
 VERSION_NAME = "Basic UI Application"
 SUPPORTED_PLATFORMS = ["Windows", "Linux"]
 

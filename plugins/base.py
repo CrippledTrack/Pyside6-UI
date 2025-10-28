@@ -26,6 +26,13 @@ class BaseTabPlugin(ABC):
     # If True, the plugin will be disabled by default on first discovery (can be enabled by user)
     disabled_by_default: bool = False
     
+    # Version requirements (optional)
+    # Simple minimum version (e.g., "3.0.0")
+    min_gui_version: Optional[str] = None
+    # Advanced range specification (e.g., ">=3.0.0,<4.0.0")
+    # Takes precedence over min_gui_version if both are specified
+    required_gui_version: Optional[str] = None
+    
     @classmethod
     @abstractmethod
     def create_widget(cls, parent: Optional[QWidget] = None) -> QWidget:
@@ -97,7 +104,9 @@ class BaseTabPlugin(ABC):
             'author': author_text,           # Backward-compatible single string for display
             'authors': authors_list,         # New field for multi-author support
             'compatible': cls.is_compatible(),
-            'current_platform': cls.get_current_platform()
+            'current_platform': cls.get_current_platform(),
+            'min_gui_version': getattr(cls, 'min_gui_version', None),
+            'required_gui_version': getattr(cls, 'required_gui_version', None)
         }
     
     @classmethod
@@ -118,6 +127,19 @@ class BaseTabPlugin(ABC):
         
         if not cls.plugin_version:
             errors.append("Plugin must define plugin_version")
+        
+        # Validate version requirements format (basic check)
+        if hasattr(cls, 'min_gui_version') and cls.min_gui_version:
+            import re
+            if not re.match(r'^\d+\.\d+(?:\.\d+)?', str(cls.min_gui_version)):
+                errors.append(f"Invalid min_gui_version format: {cls.min_gui_version}")
+        
+        if hasattr(cls, 'required_gui_version') and cls.required_gui_version:
+            # Basic format check for range specifications
+            # Should contain operators like >=, <, etc. and version numbers
+            req_str = str(cls.required_gui_version)
+            if not re.search(r'[><=]+', req_str):
+                errors.append(f"Invalid required_gui_version format (must include operators): {cls.required_gui_version}")
         
         return errors
 

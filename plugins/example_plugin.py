@@ -13,10 +13,19 @@ class ExampleTabPlugin(BaseTabPlugin):
     tab_description = "A simple example plugin showing how to create custom tabs"
     supported_platforms = ["Windows", "Linux"]
     requires_admin = False
-    plugin_version = "1.0.0"
+    plugin_version = "1.0.1"
     plugin_author = "Example Author"
+    min_gui_version = "3.0.0"
     # Optional: set to True to have the plugin appear disabled by default
     disabled_by_default = True
+    
+    # required_gui_version: Advanced range specification (takes precedence over min_gui_version)
+    # Examples:
+    #   ">=3.0.0"           - At least version 3.0.0
+    #   ">=3.0.0,<4.0.0"    - At least 3.0.0 but less than 4.0.0
+    #   "==3.0.0"           - Exactly version 3.0.0
+    #   ">2.0.0,<3.5.0"     - Greater than 2.0.0 but less than 3.5.0
+    # required_gui_version = ">=3.0.0,<4.0.0"
 
     @classmethod
     def create_widget(cls, parent=None):

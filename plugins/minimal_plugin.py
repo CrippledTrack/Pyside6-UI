@@ -10,8 +10,9 @@ class MinimalPlugin(BaseTabPlugin):
     tab_name = "Minimal Plugin"
     tab_description = "A minimal plugin with only required components"
     supported_platforms = ["Windows", "Linux"]
-    plugin_version = "1.0.0"
+    plugin_version = "1.0.1"
     plugin_author = "Plugin Creator"
+    min_gui_version = "3.0.0"
     disabled_by_default = True
 
     @classmethod

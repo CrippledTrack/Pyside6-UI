@@ -12,6 +12,8 @@ from .services.settings_service import load_settings as load_settings_service
 from ..themes.theme_manager import ThemeManager
 from .ui.main_window import MainWindow
 from .utils.console import apply_console_setting
+# Import GUI version first before it gets overridden by platforms
+from .constants import VERSION as GUI_API_VERSION
 # Try to import from platforms first, fallback to ui app constants
 try:
     from platforms.constants import VERSION, VERSION_NAME
@@ -40,10 +42,14 @@ def run(argv: List[str]) -> int:
     
     logger = setup_logging()
     logger.info(f"Starting {VERSION_NAME} v{VERSION} on {platform.system().lower()}")
+    logger.info(f"GUI API Version: v{GUI_API_VERSION}")
 
     # Load settings service
     settings_service = load_settings_service()
     logger.info("Settings service loaded")
+    
+    # Save current GUI version to settings for future reference
+    settings_service.save_gui_version(GUI_API_VERSION)
 
     # On Linux, before creating QApplication, ensure Qt xcb system dependencies are present
     if platform.system().lower() == "linux":

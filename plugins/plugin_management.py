@@ -86,6 +86,8 @@ class PluginManagementDialog(QDialog):
         self.details_requires_admin = QLabel("-")
         self.details_platforms = QLabel("-")
         self.details_module = QLabel("-")
+        self.details_min_gui_version = QLabel("-")
+        self.details_required_gui_version = QLabel("-")
         form.addRow("Name:", self.details_name)
         form.addRow("Version:", self.details_version)
         form.addRow("Authors:", self.details_author)
@@ -93,6 +95,8 @@ class PluginManagementDialog(QDialog):
         form.addRow("Requires Admin:", self.details_requires_admin)
         form.addRow("Platforms:", self.details_platforms)
         form.addRow("Module:", self.details_module)
+        form.addRow("Min GUI Version:", self.details_min_gui_version)
+        form.addRow("Required GUI Version:", self.details_required_gui_version)
 
         details_layout.addLayout(form)
         details_layout.addWidget(QLabel("Description:"))
@@ -262,6 +266,8 @@ class PluginManagementDialog(QDialog):
         self.details_platforms.setText(', '.join(info['supported_platforms']))
         self.details_requires_admin.setText("Yes" if info.get('requires_admin') else "No")
         self.details_module.setText(plugin_class.__module__)
+        self.details_min_gui_version.setText(info.get('min_gui_version') or "-")
+        self.details_required_gui_version.setText(info.get('required_gui_version') or "-")
         self.details_description.setPlainText(info.get('description', ''))
 
         # Configure button availability
@@ -279,6 +285,8 @@ class PluginManagementDialog(QDialog):
         self.details_type.setText("-")
         self.details_platforms.setText("-")
         self.details_module.setText("-")
+        self.details_min_gui_version.setText("-")
+        self.details_required_gui_version.setText("-")
         self.details_description.setPlainText("")
         self.configure_btn.setEnabled(False)
 

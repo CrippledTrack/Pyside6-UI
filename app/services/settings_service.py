@@ -37,6 +37,8 @@ class AppSettings:
     # Toast notifications
     toast_notifications_enabled: bool = True
     toast_duration: int = 3000
+    # GUI version (for future migration detection)
+    gui_version: str = ""
     
     def __post_init__(self):
         """Initialize default values for complex fields"""
@@ -105,6 +107,10 @@ class SettingsService:
             if 'toast_duration' in data:
                 self._settings.toast_duration = int(data['toast_duration'])
             
+            # Load GUI version
+            if 'gui_version' in data:
+                self._settings.gui_version = str(data['gui_version'])
+            
             logger.info(f"Settings loaded from {self._settings_file}")
         except Exception as e:
             logger.error(f"Failed to load settings: {e}")
@@ -130,7 +136,8 @@ class SettingsService:
                 'show_tooltips': self._settings.show_tooltips,
                 'shortcuts_enabled': self._settings.shortcuts_enabled,
                 'toast_notifications_enabled': self._settings.toast_notifications_enabled,
-                'toast_duration': self._settings.toast_duration
+                'toast_duration': self._settings.toast_duration,
+                'gui_version': self._settings.gui_version
             }
             
             # Write to file
@@ -220,6 +227,16 @@ class SettingsService:
     def get_toast_duration(self) -> int:
         """Get toast duration setting"""
         return self._settings.toast_duration
+    
+    def save_gui_version(self, version: str):
+        """Save GUI version to settings"""
+        self._settings.gui_version = version
+        self._save_settings()
+        logger.debug(f"GUI version saved: {version}")
+    
+    def get_gui_version(self) -> str:
+        """Get saved GUI version"""
+        return self._settings.gui_version
 
 
 def load_settings() -> SettingsService:
