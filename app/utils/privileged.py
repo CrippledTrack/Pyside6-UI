@@ -26,28 +26,33 @@ def run_privileged_command(command, timeout=300):
         
         daemon = get_daemon_client()
         
-        # Convert string commands to list for daemon (use shell=True when executing)
+        # Convert string commands to list for daemon
         if isinstance(command, str):
-            # For shell commands, we need to pass as a list with shell=True somehow
-            # The daemon expects a list, so for now we'll send as ['sh', '-c', command]
             cmd_to_send = ['sh', '-c', command]
         else:
             cmd_to_send = command
         
+        # Handle timeout: None means no timeout, otherwise convert to int
+        if timeout is None:
+            timeout_for_request = None
+        else:
+            timeout_for_request = int(timeout) if timeout else 300
+        
         response = daemon.request('run_command', {
             'command': cmd_to_send,
-            'timeout': timeout
-        })
+            'timeout': timeout_for_request
+        }, timeout=timeout_for_request)
         
         # Response has structure: {'id': ..., 'success': bool, 'result': {...}, 'error': ...}
         if not response.get('success', False):
-            error_msg = response.get('error', 'Unknown error')
+            error_msg = str(response.get('error', 'Unknown error'))
             result = response.get('result', {})
+            stderr_msg = str(result.get('stderr', '')) or error_msg
             raise subprocess.CalledProcessError(
                 result.get('returncode', -1),
                 command,
-                result.get('stdout', ''),
-                result.get('stderr', error_msg)
+                str(result.get('stdout', '')),
+                stderr_msg
             )
         
         # Extract result from response
@@ -56,17 +61,74 @@ def run_privileged_command(command, timeout=300):
         return subprocess.CompletedProcess(
             command,
             result.get('returncode', 0),
-            result.get('stdout', ''),
-            result.get('stderr', '')
+            str(result.get('stdout', '')),
+            str(result.get('stderr', ''))
         )
         
     except RuntimeError as e:
-        # Daemon not initialized
-        logger.warning(f"Daemon not available ({e}), falling back to direct subprocess")
-        # Fallback for backwards compatibility in development
-        if isinstance(command, str):
-            return subprocess.run(command, shell=True, capture_output=True, text=True, timeout=timeout)
-        return subprocess.run(command, capture_output=True, text=True, check=True, timeout=timeout)
+        # Daemon not initialized - raise error instead of falling back
+        # This allows calling code to handle the missing daemon gracefully
+        logger.error(f"Daemon not available ({e}). Privileged operations are disabled.")
+        raise RuntimeError("Privileged operations require daemon. Start application with admin privileges to enable.") from e
     except Exception as e:
-        logger.error(f"Error running privileged command: {e}")
+        logger.error(f"Error running privileged command: {str(e)}", exc_info=True)
         raise
+
+
+def read_privileged_file(file_path: str) -> str:
+    """Read content from a file with root privileges via daemon.
+    
+    Args:
+        file_path: Path to file to read
+        
+    Returns:
+        File content as string
+    """
+    try:
+        result = run_privileged_command(['cat', file_path], timeout=30)
+        if result.returncode == 0:
+            return result.stdout
+        else:
+            raise IOError(f"Failed to read {file_path}: {result.stderr}")
+    except Exception as e:
+        logger.error(f"Error reading privileged file {file_path}: {e}")
+        raise
+
+
+def write_privileged_file(file_path: str, content: str) -> bool:
+    """Write content to a file with root privileges via daemon.
+    
+    Args:
+        file_path: Path to file to write
+        content: Content to write to file
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        import tempfile
+        import os
+        
+        # Write to temp file first, then move via daemon
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, encoding='utf-8') as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+        
+        try:
+            # Move temp file to target via daemon
+            result = run_privileged_command(['cp', tmp_path, file_path], timeout=30)
+            if result.returncode != 0:
+                raise IOError(f"Failed to write {file_path}: {result.stderr}")
+            
+            # Set proper permissions
+            run_privileged_command(['chmod', '644', file_path], timeout=10)
+            
+            return True
+        finally:
+            # Clean up temp file
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+                
+    except Exception as e:
+        logger.error(f"Error writing privileged file {file_path}: {e}")
+        return False

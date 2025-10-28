@@ -82,7 +82,12 @@ class DaemonClient:
     
     def _send_recv(self, message: bytes, timeout: float = None) -> Dict[str, Any]:
         """Send message and receive response."""
-        timeout = timeout or self.OPERATION_TIMEOUT
+        # If timeout is None, use a very large timeout (effectively unlimited)
+        # Socket timeout of None blocks indefinitely, which we want for long operations
+        if timeout is None:
+            timeout = None  # No socket timeout - blocks until data arrives
+        else:
+            timeout = timeout or self.OPERATION_TIMEOUT
         
         if not self.is_connected():
             raise DaemonConnectionError("Not connected to daemon")
@@ -107,7 +112,7 @@ class DaemonClient:
                 return response
                 
             except socket.timeout:
-                raise DaemonTimeoutError(f"Operation timed out after {timeout}s")
+                raise DaemonTimeoutError(f"Operation timed out after {timeout} seconds")
             except (socket.error, OSError) as e:
                 self._connected = False
                 raise DaemonConnectionError(f"Socket error: {e}")
@@ -153,7 +158,7 @@ class DaemonClient:
             except DaemonTimeoutError:
                 raise  # Don't retry on timeout
             except Exception as e:
-                logger.error(f"Unexpected error in request: {e}")
+                logger.error(f"Unexpected error in request: {str(e)}", exc_info=True)
                 raise
     
     def __enter__(self):

@@ -96,11 +96,16 @@ class PrivilegedDaemon:
         logger.debug(f"Executing command: {' '.join(command)}")
         
         try:
+            # Handle timeout: None means no timeout
+            cmd_timeout = params.get('timeout')
+            if cmd_timeout is not None:
+                cmd_timeout = int(cmd_timeout)
+            
             result = subprocess.run(
                 command,
                 capture_output=True,
                 text=True,
-                timeout=params.get('timeout', 300)  # Default 5 minute timeout
+                timeout=cmd_timeout  # None means no timeout
             )
             
             return {

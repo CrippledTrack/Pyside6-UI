@@ -16,4 +16,14 @@ def get_daemon_client():
     return _daemon_client
 
 
-__all__ = ['set_daemon_client', 'get_daemon_client']
+def is_daemon_available() -> bool:
+    """Check if daemon client is available and connected."""
+    if _daemon_client is None:
+        return False
+    try:
+        return _daemon_client.is_connected()
+    except:
+        return False
+
+
+__all__ = ['set_daemon_client', 'get_daemon_client', 'is_daemon_available']

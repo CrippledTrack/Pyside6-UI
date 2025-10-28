@@ -80,25 +80,19 @@ def run(argv: List[str]) -> int:
     app.setStyle("Fusion")
     app.setFont(QFont("Segoe UI", 10))
 
-    # On Linux, start privileged daemon
+    # On Linux, start privileged daemon (optional - app can run without it)
     daemon_client = None
     if platform.system().lower() == "linux":
         logger.info("Starting privileged daemon...")
         daemon_client = start_daemon()
         if not daemon_client or not daemon_client.is_connected():
-            logger.error("Failed to start privileged daemon. Administrator privileges required.")
-            from PySide6.QtWidgets import QMessageBox
-            msg = QMessageBox()
-            msg.setIcon(QMessageBox.Critical)
-            msg.setWindowTitle("Administrator Privileges Required")
-            msg.setText("This application requires administrator privileges to function properly.")
-            msg.setInformativeText("The application will now exit.")
-            msg.exec()
-            return 1
-        
-        # Store daemon client globally for utils to use
-        set_daemon_client(daemon_client)
-        logger.info("Privileged daemon started successfully")
+            logger.warning("Failed to start privileged daemon. Some features requiring admin privileges will be disabled.")
+            logger.warning("The application will continue in limited mode. Tabs requiring admin privileges will be disabled.")
+            daemon_client = None
+        else:
+            # Store daemon client globally for utils to use
+            set_daemon_client(daemon_client)
+            logger.info("Privileged daemon started successfully")
 
     # Apply theme using ThemeManager with saved preference
     theme_manager = ThemeManager(settings_service=settings_service)
@@ -110,12 +104,13 @@ def run(argv: List[str]) -> int:
 
     exit_code = app.exec()
     
-    # Cleanup: Stop daemon on exit
+    # Cleanup: Stop daemon on exit (if it was started)
     if platform.system().lower() == "linux" and daemon_client:
         logger.info("Stopping privileged daemon...")
         try:
-            daemon_client.request('shutdown', {})
-            daemon_client.disconnect()
+            if daemon_client.is_connected():
+                daemon_client.request('shutdown', {})
+                daemon_client.disconnect()
         except:
             pass
         stop_daemon()

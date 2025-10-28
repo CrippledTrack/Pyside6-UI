@@ -286,6 +286,7 @@ class MainWindow(QMainWindow):
                 plugin_class = tab_info["plugin_class"]
                 requires_admin = bool(getattr(plugin_class, "requires_admin", False))
                 if needs_admin_for_plugin(CURRENT_PLATFORM == "windows", requires_admin, getattr(self, "is_admin", False)):
+                    # Show admin required placeholder (works for both Windows and Linux)
                     admin_widget = AdminRequiredPlaceholder(tab_name)
                     admin_widget.restartRequested.connect(self.restart_as_admin)
                     tab_info["instance"] = admin_widget
