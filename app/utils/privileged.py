@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import subprocess
 import logging
+import subprocess
+from typing import List, Union
 
 logger = logging.getLogger(__name__)
 
 
-def run_privileged_command(command, timeout=300):
+def run_privileged_command(command: Union[str, List[str]], timeout: int = 300):
     """Run a command with root privileges via daemon.
     
     Args:

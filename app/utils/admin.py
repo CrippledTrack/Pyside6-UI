@@ -1,4 +1,7 @@
+"""Utilities for determining admin requirements for plugins."""
+
 from __future__ import annotations
+
 import platform
 
 
@@ -12,7 +15,7 @@ def needs_admin_for_plugin(is_windows: bool, requires_admin: bool, is_admin: boo
         return False
     
     if is_windows:
-        return bool(is_windows and requires_admin and not is_admin)
+        return requires_admin and not is_admin
     
     # Linux: check daemon availability
     if platform.system().lower() == "linux":
