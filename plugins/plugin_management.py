@@ -464,3 +464,6 @@ class PluginManagementDialog(QDialog):
                 subprocess.Popen(['xdg-open', folder])
         except Exception as e:
             QMessageBox.critical(self, "Open Location", f"Failed to open location: {e}")
+
+
+__all__ = ['PluginManagementDialog']

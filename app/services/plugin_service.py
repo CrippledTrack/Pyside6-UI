@@ -12,12 +12,77 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Type
 
 from ...plugins import plugin_registry
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _with_sys_path(path: Path):
+    """Context manager for temporarily adding a path to sys.path."""
+    path_str = str(path)
+    was_in_path = path_str in sys.path
+    if not was_in_path:
+        sys.path.insert(0, path_str)
+    try:
+        yield
+    finally:
+        if not was_in_path and path_str in sys.path:
+            sys.path.remove(path_str)
+
+
+def _load_core_plugins_from_source(source: str) -> List[Type[Any]]:
+    """Load core plugins from a specific source.
+    
+    Args:
+        source: Either 'platforms' or 'gui'
+        
+    Returns:
+        List of plugin classes, empty list on error
+    """
+    try:
+        if source == "platforms":
+            parent_dir = Path(__file__).parent.parent.parent
+            with _with_sys_path(parent_dir):
+                from platforms.core_plugins import get_core_plugins  # type: ignore
+                plugins = get_core_plugins()
+            logger.info("Platforms core plugins retrieved: %d plugins", len(plugins))
+            return plugins
+        elif source == "gui":
+            from ...plugins.core_plugins import get_core_plugins
+            plugins = get_core_plugins()
+            logger.info("GUI core plugins retrieved: %d plugins", len(plugins))
+            return plugins
+        else:
+            logger.warning(f"Unknown core plugin source: {source}")
+            return []
+    except Exception as e:
+        logger.info("Failed to load %s core plugins: %s", source, e)
+        return []
+
+
+def _register_core_plugins(plugin_classes: List[Type[Any]]) -> List[Type[Any]]:
+    """Register a list of core plugin classes.
+    
+    Args:
+        plugin_classes: List of plugin classes to register
+        
+    Returns:
+        List of successfully registered plugin classes
+    """
+    registered: List[Type[Any]] = []
+    for plugin_class in plugin_classes:
+        try:
+            plugin_registry.register_plugin(plugin_class, is_core=True)
+            registered.append(plugin_class)
+            logger.info("Registered core plugin: %s", getattr(plugin_class, "tab_name", plugin_class.__name__))
+        except Exception as e:
+            logger.error("Failed to register core plugin %s: %s", plugin_class.__name__, e)
+    return registered
 
 
 def discover_and_register_all_plugins() -> Tuple[List[Type[Any]], Dict[str, Any]]:
@@ -31,45 +96,12 @@ def discover_and_register_all_plugins() -> Tuple[List[Type[Any]], Dict[str, Any]
     try:
         # Register core plugins from both sources
         logger.info("Attempting to load core plugins...")
+        platforms_plugins = _load_core_plugins_from_source("platforms")
+        gui_plugins = _load_core_plugins_from_source("gui")
         
-        # Try to load from platforms/core_plugins.py first
-        platforms_core_plugins = []
-        try:
-            # Add parent directory to sys.path temporarily for platforms import
-            parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-            if parent_dir not in sys.path:
-                sys.path.insert(0, parent_dir)
-            
-            from platforms.core_plugins import get_core_plugins as get_platforms_core_plugins
-            platforms_core_plugins = get_platforms_core_plugins()
-            logger.info("Platforms core plugins retrieved: %d plugins", len(platforms_core_plugins))
-            
-            # Remove parent directory from sys.path
-            if parent_dir in sys.path:
-                sys.path.remove(parent_dir)
-        except Exception as e:
-            logger.info("Failed to load platforms core plugins: %s", e)
-        
-        # Try to load from GUI/plugins/core_plugins.py
-        gui_core_plugins = []
-        try:
-            from ...plugins.core_plugins import get_core_plugins as get_gui_core_plugins
-            gui_core_plugins = get_gui_core_plugins()
-            logger.info("GUI core plugins retrieved: %d plugins", len(gui_core_plugins))
-        except Exception as e:
-            logger.info("Failed to load GUI core plugins: %s", e)
-        
-        # Combine and register all core plugins
-        all_core_plugins = platforms_core_plugins + gui_core_plugins
+        all_core_plugins = platforms_plugins + gui_plugins
         logger.info("Total core plugins to register: %d plugins", len(all_core_plugins))
-        
-        for plugin_class in all_core_plugins:
-            try:
-                plugin_registry.register_plugin(plugin_class, is_core=True)
-                registered_core.append(plugin_class)
-                logger.info("Registered core plugin: %s", getattr(plugin_class, "tab_name", plugin_class.__name__))
-            except Exception as e:  # pragma: no cover - logging branch
-                logger.error("Failed to register core plugin %s: %s", plugin_class.__name__, e)
+        registered_core = _register_core_plugins(all_core_plugins)
 
         # Discover plugins from both external and built-in locations
         try:
@@ -101,3 +133,6 @@ def discover_and_register_all_plugins() -> Tuple[List[Type[Any]], Dict[str, Any]
         raise
 
     return registered_core, summary
+
+
+__all__ = ['discover_and_register_all_plugins']

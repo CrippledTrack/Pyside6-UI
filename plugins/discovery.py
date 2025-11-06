@@ -5,14 +5,16 @@ Supports both entry points (for installed plugins) and local plugins folder.
 """
 from __future__ import annotations
 
-import os
-import sys
 import inspect
 import importlib
 import importlib.util
 import logging
+import os
+import sys
+from contextlib import contextmanager
 from pathlib import Path
-from typing import List, Dict, Type, Optional, Tuple, Any
+from typing import Any, Dict, List, Optional, Tuple, Type
+
 from .base import BaseTabPlugin, plugin_registry
 
 # Try to import entry_points (Python 3.8+)
@@ -119,8 +121,8 @@ class PluginDiscovery:
             List of tuples containing (plugin_name, plugin_class, "local")
         """
         plugins = []
-        
         plugins_path = Path(self.plugins_dir)
+        
         if not plugins_path.exists():
             logger.info(f"Plugins directory does not exist: {plugins_path}")
             return plugins
@@ -129,72 +131,95 @@ class PluginDiscovery:
             logger.warning(f"Plugins path is not a directory: {plugins_path}")
             return plugins
         
-        # Add plugins directory to Python path if not already there
+        with self._plugin_path_context(plugins_path):
+            plugins = self._load_plugins_from_directory(plugins_path)
+        
+        return plugins
+
+    @contextmanager
+    def _plugin_path_context(self, plugins_path: Path):
+        """Context manager for temporarily adding plugin paths to sys.path."""
         plugins_dir_str = str(plugins_path.absolute())
-        if plugins_dir_str not in sys.path:
+        is_gui_plugins_dir = self._is_gui_plugins_directory(plugins_path)
+        
+        # Add plugins directory to path
+        plugins_in_path = plugins_dir_str in sys.path
+        if not plugins_in_path:
             sys.path.insert(0, plugins_dir_str)
         
-        # For external plugins, we need to add the parent directory (project root) to the path
-        # so plugins can import from GUI.plugins and other project modules
-        # But only do this if we're not already in the GUI/plugins directory
-        if not plugins_dir_str.endswith('GUI/plugins') and not plugins_dir_str.endswith('GUI\\plugins'):
-            project_root = str(plugins_path.parent.absolute())
-            if project_root not in sys.path:
-                sys.path.insert(0, project_root)
+        # For external plugins, add project root to path
+        project_root_in_path = False
+        project_root_path = None
+        if not is_gui_plugins_dir:
+            project_root_path = plugins_path.parent
+            project_root_str = str(project_root_path.absolute())
+            project_root_in_path = project_root_str in sys.path
+            if not project_root_in_path:
+                sys.path.insert(0, project_root_str)
         
         try:
-            # Find all Python files in the plugins directory
-            python_files = list(plugins_path.glob("*.py"))
-            
-            # Files to skip (system files, not plugins)
-            skip_files = {
-                '__init__.py',
-                'base.py',
-                'discovery.py',
-                'core_plugins.py',
-                'plugin_management.py',
-                'registry.py'
-            }
-            
-            for py_file in python_files:
-                # Skip system files and files starting with underscore
-                if py_file.name.startswith('_') or py_file.name in skip_files:
-                    logger.debug(f"Skipping system file: {py_file.name}")
-                    continue
-                
-                try:
-                    module_name = py_file.stem
-                    logger.debug(f"Attempting to load local plugin module: {module_name}")
-                    
-                    # Load the module
-                    spec = importlib.util.spec_from_file_location(module_name, py_file)
-                    if spec is None or spec.loader is None:
-                        logger.warning(f"Could not create spec for {py_file}")
-                        continue
-                    
-                    module = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(module)
-                    
-                    # Find all BaseTabPlugin subclasses in the module
-                    plugin_classes = self._find_plugin_classes_in_module(module)
-                    
-                    for plugin_class in plugin_classes:
-                        plugin_name = plugin_class.tab_name
-                        plugins.append((plugin_name, plugin_class, f"local:{py_file.name}"))
-                        logger.info(f"Successfully loaded local plugin: {plugin_name} from {py_file.name}")
-                        
-                except Exception as e:
-                    logger.error(f"Failed to load local plugin from {py_file}: {e}")
-        
+            yield
         finally:
-            # Remove directories from Python path
-            if plugins_dir_str in sys.path:
+            # Clean up paths
+            if not plugins_in_path and plugins_dir_str in sys.path:
                 sys.path.remove(plugins_dir_str)
-            # Only remove project_root if we added it
-            if not plugins_dir_str.endswith('GUI/plugins') and not plugins_dir_str.endswith('GUI\\plugins'):
-                project_root = str(plugins_path.parent.absolute())
-                if project_root in sys.path:
-                    sys.path.remove(project_root)
+            if project_root_path and not project_root_in_path:
+                project_root_str = str(project_root_path.absolute())
+                if project_root_str in sys.path:
+                    sys.path.remove(project_root_str)
+
+    def _is_gui_plugins_directory(self, plugins_path: Path) -> bool:
+        """Check if the plugins path is the GUI/plugins directory."""
+        # Normalize path separators for comparison
+        path_str = str(plugins_path.absolute())
+        gui_plugins_patterns = ['GUI/plugins', 'GUI\\plugins']
+        return any(path_str.endswith(pattern) for pattern in gui_plugins_patterns)
+
+    def _load_plugins_from_directory(self, plugins_path: Path) -> List[Tuple[str, Type[BaseTabPlugin], str]]:
+        """Load all plugin files from a directory."""
+        plugins = []
+        python_files = list(plugins_path.glob("*.py"))
+        skip_files = {
+            '__init__.py',
+            'base.py',
+            'discovery.py',
+            'core_plugins.py',
+            'plugin_management.py',
+            'registry.py'
+        }
+        
+        for py_file in python_files:
+            if py_file.name.startswith('_') or py_file.name in skip_files:
+                logger.debug(f"Skipping system file: {py_file.name}")
+                continue
+            
+            try:
+                loaded_plugins = self._load_plugin_from_file(py_file)
+                plugins.extend(loaded_plugins)
+            except Exception as e:
+                logger.error(f"Failed to load local plugin from {py_file}: {e}")
+        
+        return plugins
+
+    def _load_plugin_from_file(self, py_file: Path) -> List[Tuple[str, Type[BaseTabPlugin], str]]:
+        """Load plugin classes from a single Python file."""
+        plugins = []
+        module_name = py_file.stem
+        logger.debug(f"Attempting to load local plugin module: {module_name}")
+        
+        spec = importlib.util.spec_from_file_location(module_name, py_file)
+        if spec is None or spec.loader is None:
+            logger.warning(f"Could not create spec for {py_file}")
+            return plugins
+        
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        
+        plugin_classes = self._find_plugin_classes_in_module(module)
+        for plugin_class in plugin_classes:
+            plugin_name = plugin_class.tab_name
+            plugins.append((plugin_name, plugin_class, f"local:{py_file.name}"))
+            logger.info(f"Successfully loaded local plugin: {plugin_name} from {py_file.name}")
         
         return plugins
     
@@ -330,4 +355,7 @@ def discover_and_register_plugins(plugins_dir: Optional[str] = None) -> Tuple[Di
     registration_results = discovery.register_discovered_plugins(discovered)
     summary = discovery.get_plugin_info_summary()
     
-    return registration_results, summary 
+    return registration_results, summary
+
+
+__all__ = ['PluginDiscovery', 'discover_and_register_plugins'] 

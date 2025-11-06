@@ -1,14 +1,39 @@
+"""
+Theme selection and management dialog.
+
+This module provides a dialog for selecting, previewing, importing, and exporting
+themes. It includes a preview widget and theme management functionality.
+"""
+
 from __future__ import annotations
 
+import json
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional
+
+from PySide6.QtCore import Qt, Signal, QPoint
+from PySide6.QtGui import QAction, QColor, QFont, QPalette
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
-    QLabel, QPushButton, QTextEdit, QSplitter, QFrame, QWidget, QComboBox,
-    QFormLayout, QGroupBox, QCheckBox, QMessageBox, QFileDialog, QMenu
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QFormLayout,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QMenu,
+    QMessageBox,
+    QPushButton,
+    QSplitter,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont, QPalette, QColor, QAction
+
 from .theme_manager import ThemeManager
 
 logger = logging.getLogger(__name__)
@@ -23,7 +48,7 @@ class ThemePreviewWidget(QFrame):
         self.setFrameStyle(QFrame.Shape.Box)
         self.setup_ui()
     
-    def setup_ui(self):
+    def setup_ui(self) -> None:
         """Setup the preview UI"""
         layout = QVBoxLayout(self)
         
@@ -50,7 +75,7 @@ class ThemePreviewWidget(QFrame):
         
         layout.addStretch()
     
-    def apply_theme(self, theme_data: dict):
+    def apply_theme(self, theme_data: Dict[str, Any]) -> None:
         """Apply theme to the preview widget"""
         try:
             stylesheet = theme_data.get('stylesheet', '')
@@ -64,7 +89,7 @@ class ThemePreviewWidget(QFrame):
         except Exception as e:
             logger.error(f"Failed to apply theme to preview: {e}")
     
-    def _apply_palette(self, palette_data: dict):
+    def _apply_palette(self, palette_data: Dict[str, Any]) -> None:
         """Apply color palette to the preview widget"""
         palette = QPalette()
         
@@ -113,7 +138,7 @@ class ThemeDialog(QDialog):
         self.setup_ui()
         self.load_themes()
     
-    def setup_ui(self):
+    def setup_ui(self) -> None:
         """Setup the dialog UI"""
         self.setWindowTitle("Theme Selection")
         self.setMinimumSize(800, 600)
@@ -189,7 +214,7 @@ class ThemeDialog(QDialog):
         
         layout.addLayout(button_layout)
     
-    def load_themes(self):
+    def load_themes(self) -> None:
         """Load available themes into the list"""
         self.theme_list.clear()
         theme_names = self.theme_manager.get_theme_names()
@@ -204,7 +229,7 @@ class ThemeDialog(QDialog):
                 item.setFont(QFont("Arial", 9, QFont.Weight.Bold))
             self.theme_list.addItem(item)
     
-    def on_theme_selected(self, current, previous):
+    def on_theme_selected(self, current: Optional[QListWidgetItem], previous: Optional[QListWidgetItem]) -> None:
         """Handle theme selection"""
         if not current:
             return
@@ -219,7 +244,7 @@ class ThemeDialog(QDialog):
             # Update info
             info_text = f"Name: {theme_data.get('name', theme_name)}\n"
             info_text += f"Description: {theme_data.get('description', 'No description')}\n"
-            info_text += f"Type: {'Built-in' if theme_name in ['dark', 'light', 'blue', 'green', 'purple', 'orange', 'red', 'cyberpunk', 'minimal', 'legacy', 'ocean_blue'] else 'Custom'}"
+            info_text += f"Type: {'Built-in' if self.theme_manager.is_builtin_theme(theme_name) else 'Custom'}"
             
             self.theme_info.setPlainText(info_text)
             
@@ -231,7 +256,7 @@ class ThemeDialog(QDialog):
             self.apply_button.setEnabled(False)
             self.export_button.setEnabled(False)
     
-    def apply_selected_theme(self):
+    def apply_selected_theme(self) -> None:
         """Apply the selected theme"""
         current_item = self.theme_list.currentItem()
         if not current_item:
@@ -247,7 +272,7 @@ class ThemeDialog(QDialog):
         else:
             QMessageBox.critical(self, "Error", f"Failed to apply theme '{theme_name}'")
     
-    def import_theme(self):
+    def import_theme(self) -> None:
         """Import a custom theme from file"""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
@@ -258,7 +283,6 @@ class ThemeDialog(QDialog):
         
         if file_path:
             try:
-                import json
                 with open(file_path, 'r', encoding='utf-8') as f:
                     theme_data = json.load(f)
                 
@@ -293,7 +317,7 @@ class ThemeDialog(QDialog):
                 logger.error(f"Failed to import theme: {e}")
                 QMessageBox.critical(self, "Error", f"Failed to import theme: {str(e)}")
     
-    def export_theme(self):
+    def export_theme(self) -> None:
         """Export the selected theme to file"""
         current_item = self.theme_list.currentItem()
         if not current_item:
@@ -315,7 +339,6 @@ class ThemeDialog(QDialog):
         
         if file_path:
             try:
-                import json
                 with open(file_path, 'w', encoding='utf-8') as f:
                     json.dump(theme_data, f, indent=2, ensure_ascii=False)
                 
@@ -325,13 +348,13 @@ class ThemeDialog(QDialog):
                 logger.error(f"Failed to export theme: {e}")
                 QMessageBox.critical(self, "Error", f"Failed to export theme: {str(e)}")
     
-    def show_theme_context_menu(self, position):
+    def show_theme_context_menu(self, position: QPoint) -> None:
         """Show context menu for theme list items."""
         item = self.theme_list.itemAt(position)
         if not item:
             return
         
-        theme_name = item.text().replace(" (Current)", "").replace("⭐ ", "")
+        theme_name = item.text().replace(" (Current)", "")
         
         context_menu = QMenu(self)
         
@@ -353,7 +376,7 @@ class ThemeDialog(QDialog):
         
         context_menu.exec(self.theme_list.mapToGlobal(position))
     
-    def toggle_favorite(self, theme_name: str):
+    def toggle_favorite(self, theme_name: str) -> None:
         """Toggle favorite status of a theme."""
         if theme_name in self.favorite_themes:
             self.favorite_themes.remove(theme_name)
@@ -364,8 +387,11 @@ class ThemeDialog(QDialog):
         self.load_themes()
         logger.debug(f"Toggled favorite for theme: {theme_name}")
     
-    def toggle_favorites_filter(self):
+    def toggle_favorites_filter(self) -> None:
         """Toggle showing only favorite themes."""
         # This is a placeholder for future implementation
         # For now, just refresh the list
-        self.load_themes() 
+        self.load_themes()
+
+
+__all__ = ['ThemePreviewWidget', 'ThemeDialog'] 

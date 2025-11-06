@@ -252,3 +252,6 @@ def run_daemon() -> int:
     except Exception as e:
         logger.error(f"Daemon error: {e}", exc_info=True)
         return 1
+
+
+__all__ = ['PrivilegedDaemon', 'run_daemon']

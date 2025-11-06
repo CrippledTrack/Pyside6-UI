@@ -67,3 +67,4 @@ def run_command_as_admin(command):
     return None
 
 
+__all__ = ['is_admin', 'run_as_admin', 'run_command_as_admin']

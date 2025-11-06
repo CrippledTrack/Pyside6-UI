@@ -132,3 +132,6 @@ def setup_logging() -> logging.Logger:
         logger = logging.getLogger(__name__)
         logger.error(f"Failed to configure logging: {str(e)}")
         return logger
+
+
+__all__ = ['setup_logging']

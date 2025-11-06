@@ -46,3 +46,13 @@ def deserialize_message(data: bytes) -> Dict[str, Any]:
 # Operation types
 OPERATION_RUN_COMMAND = 'run_command'
 OPERATION_SHUTDOWN = 'shutdown'
+
+
+__all__ = [
+    'create_request',
+    'create_response',
+    'serialize_message',
+    'deserialize_message',
+    'OPERATION_RUN_COMMAND',
+    'OPERATION_SHUTDOWN',
+]

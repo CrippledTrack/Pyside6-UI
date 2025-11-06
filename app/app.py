@@ -162,3 +162,5 @@ def run(argv: List[str]) -> int:
     logger.info(f"Application closed with code {exit_code}")
     return exit_code
 
+
+__all__ = ['run']

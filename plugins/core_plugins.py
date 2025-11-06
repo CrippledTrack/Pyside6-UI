@@ -29,3 +29,6 @@ CORE_PLUGINS: List[Type[BaseTabPlugin]] = [
 
 def get_core_plugins() -> List[Type[BaseTabPlugin]]:
     return CORE_PLUGINS
+
+
+__all__ = ['get_core_plugins']

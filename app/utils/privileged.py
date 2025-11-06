@@ -134,3 +134,6 @@ def write_privileged_file(file_path: str, content: str) -> bool:
     except Exception as e:
         logger.error(f"Error writing privileged file {file_path}: {e}")
         return False
+
+
+__all__ = ['run_privileged_command', 'read_privileged_file', 'write_privileged_file']

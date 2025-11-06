@@ -417,3 +417,4 @@ def stop_daemon(socket_path: str = '/tmp/cyberpatriot-daemon.sock'):
             pass
 
 
+__all__ = ['is_admin', 'run_command_as_admin', 'get_sudo_status', 'start_daemon', 'stop_daemon']

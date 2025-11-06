@@ -139,3 +139,4 @@ def ensure_qt_xcb_dependencies_installed() -> bool:
     return ok
 
 
+__all__ = ['ensure_qt_xcb_dependencies_installed']

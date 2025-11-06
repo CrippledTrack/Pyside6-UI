@@ -102,3 +102,6 @@ For entry point plugins (installable packages):
             f"Author: {ExampleTabPlugin.plugin_author}\n"
             f"Platform support: {', '.join(ExampleTabPlugin.supported_platforms)}"
         ) 
+
+
+__all__ = ['ExampleTabPlugin'] 

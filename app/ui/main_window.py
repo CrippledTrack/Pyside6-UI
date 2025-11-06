@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import platform
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..services.settings_service import SettingsService
@@ -84,48 +84,57 @@ class TabLoaderThread(QThread):
     def run(self) -> None:
         try:
             self.discover_and_register_plugins()
-            
-            # Load saved plugin states from settings if available
-            if self.settings_service:
-                try:
-                    saved_disabled = self.settings_service.get_disabled_plugins()
-                    
-                    if saved_disabled:  # Has saved user preferences
-                        logger.info(f"Loading saved user-disabled plugins: {saved_disabled}")
-                        
-                        # Apply user-disabled plugins on top of default states
-                        for plugin_name in saved_disabled:
-                            if plugin_registry.get_plugin(plugin_name):
-                                plugin_registry.disable_plugin(plugin_name)
-                                logger.debug(f"Applied user preference: {plugin_name} disabled")
-                    else:
-                        # First run - apply default plugin states only
-                        logger.info("First run detected, applying default plugin states (disabled_by_default flags)")
-                        # No action needed - defaults from registration are already applied
-                        
-                        # Log default states for information
-                        enabled_by_default = [name for name in plugin_registry.list_plugin_names() 
-                                            if plugin_registry.is_enabled(name)]
-                        disabled_by_default = [name for name in plugin_registry.list_plugin_names() 
-                                              if not plugin_registry.is_enabled(name)]
-                        logger.info(f"Default plugin states: {len(enabled_by_default)} enabled, "
-                                   f"{len(disabled_by_default)} disabled by default")
-                        if disabled_by_default:
-                            logger.info(f"Disabled by default: {', '.join(disabled_by_default)}")
-                        
-                        # Initialize empty disabled list (user hasn't disabled anything yet)
-                        self.settings_service.save_disabled_plugins([])
-                except Exception as e:
-                    logger.warning(f"Failed to load saved plugin states: {e}")
-                    # On error, keep current states (from disabled_by_default flags)
-            
-            enabled_plugins = plugin_registry.get_enabled_plugins()
-            for tab_name, plugin_class in enabled_plugins.items():
-                self.add_tab.emit(tab_name, plugin_class)
+            self._load_plugin_states()
+            self._emit_enabled_plugins()
             self.finished.emit()
         except Exception as e:  # pragma: no cover - runtime error path
             logger.error(f"Error in TabLoaderThread: {e}")
             self.error.emit(str(e))
+
+    def _load_plugin_states(self) -> None:
+        """Load and apply saved plugin states from settings."""
+        if not self.settings_service:
+            return
+
+        try:
+            saved_disabled = self.settings_service.get_disabled_plugins()
+            if saved_disabled:
+                self._apply_user_disabled_plugins(saved_disabled)
+            else:
+                self._handle_first_run()
+        except Exception as e:
+            logger.warning(f"Failed to load saved plugin states: {e}")
+
+    def _apply_user_disabled_plugins(self, disabled_plugins: List[str]) -> None:
+        """Apply user-disabled plugins from settings."""
+        logger.info(f"Loading saved user-disabled plugins: {disabled_plugins}")
+        for plugin_name in disabled_plugins:
+            if plugin_registry.get_plugin(plugin_name):
+                plugin_registry.disable_plugin(plugin_name)
+                logger.debug(f"Applied user preference: {plugin_name} disabled")
+
+    def _handle_first_run(self) -> None:
+        """Handle first run scenario - log defaults and initialize empty disabled list."""
+        logger.info("First run detected, applying default plugin states (disabled_by_default flags)")
+        # Log default states for information
+        enabled_by_default = [name for name in plugin_registry.list_plugin_names() 
+                            if plugin_registry.is_enabled(name)]
+        disabled_by_default = [name for name in plugin_registry.list_plugin_names() 
+                              if not plugin_registry.is_enabled(name)]
+        logger.info(f"Default plugin states: {len(enabled_by_default)} enabled, "
+                   f"{len(disabled_by_default)} disabled by default")
+        if disabled_by_default:
+            logger.info(f"Disabled by default: {', '.join(disabled_by_default)}")
+        
+        # Initialize empty disabled list (user hasn't disabled anything yet)
+        if self.settings_service:
+            self.settings_service.save_disabled_plugins([])
+
+    def _emit_enabled_plugins(self) -> None:
+        """Emit signals for all enabled plugins."""
+        enabled_plugins = plugin_registry.get_enabled_plugins()
+        for tab_name, plugin_class in enabled_plugins.items():
+            self.add_tab.emit(tab_name, plugin_class)
 
     def discover_and_register_plugins(self) -> None:
         discover_and_register_all_plugins()
@@ -136,51 +145,73 @@ class MainWindow(QMainWindow):
         super().__init__()
         logger.info(f"Initializing MainWindow for {VERSION_NAME} v{VERSION} on {CURRENT_PLATFORM}")
         self.settings_service = settings_service
-
-        if CURRENT_PLATFORM == "windows":
-            self.is_admin = is_admin()
-            if self.is_admin:
-                logger.info("Application running with admin privileges")
-            else:
-                if REQUIRE_ADMIN_BY_DEFAULT:
-                    try:
-                        logger.warning("Attempting to restart with elevated rights...")
-                        run_as_admin()
-                    except Exception as e:
-                        logger.warning(f"Elevation denied or failed ({e}); continuing without admin.")
-                    self.is_admin = is_admin()
-                    if not self.is_admin:
-                        logger.info(
-                            "Continuing without admin privileges. Some operations will be disabled until elevated."
-                        )
-                else:
-                    logger.info(
-                        "Running without admin privileges by default. Some operations will be disabled until elevated."
-                    )
-        elif CURRENT_PLATFORM == "linux":
-            self.sudo_status = get_sudo_status()
-            self.is_admin = self.sudo_status["is_admin"]
-            if self.is_admin:
-                logger.info("Application running with admin/root privileges")
-            else:
-                logger.info(f"Application running as user '{self.sudo_status['current_user']}'")
-                if self.sudo_status["sudo_available"]:
-                    logger.info("Sudo is available - operations requiring root will prompt for password")
-                else:
-                    logger.warning("Sudo not available - some operations may not work")
-
-        self.setWindowTitle(f"{VERSION_NAME} v{VERSION} ({CURRENT_PLATFORM.capitalize()})")
-        
-        # Load saved window geometry (only width/height, not position)
-        if self.settings_service:
-            geom = self.settings_service.get_window_geometry()
-            # Only restore size, let Qt handle positioning
-            self.resize(geom.width, geom.height)
-            if geom.maximized:
-                self.showMaximized()
-
         self.theme_manager = theme_manager
+        self.loaded_tabs: Dict[str, Dict[str, Any]] = {}
+        self.is_loading_tab = False
 
+        self._setup_admin_status()
+        self.setWindowTitle(f"{VERSION_NAME} v{VERSION} ({CURRENT_PLATFORM.capitalize()})")
+        self._setup_window_geometry()
+        self._setup_ui_components()
+        self.setup_toast_manager()
+        self.setup_shortcuts()
+        QApplication.processEvents()
+        self._start_tab_loader()
+        self._setup_menu_bar()
+        self.update_window_title()
+        self.setup_tooltips()
+
+    def _setup_admin_status(self) -> None:
+        """Handle all admin/elevation logic for the current platform."""
+        if CURRENT_PLATFORM == "windows":
+            self._check_windows_admin_status()
+        elif CURRENT_PLATFORM == "linux":
+            self._check_linux_admin_status()
+
+    def _check_windows_admin_status(self) -> None:
+        """Check and handle Windows admin status."""
+        self.is_admin = is_admin()
+        if self.is_admin:
+            logger.info("Application running with admin privileges")
+            return
+
+        if REQUIRE_ADMIN_BY_DEFAULT:
+            try:
+                logger.warning("Attempting to restart with elevated rights...")
+                run_as_admin()
+            except Exception as e:
+                logger.warning(f"Elevation denied or failed ({e}); continuing without admin.")
+            self.is_admin = is_admin()
+            if not self.is_admin:
+                logger.info("Continuing without admin privileges. Some operations will be disabled until elevated.")
+        else:
+            logger.info("Running without admin privileges by default. Some operations will be disabled until elevated.")
+
+    def _check_linux_admin_status(self) -> None:
+        """Check and handle Linux admin status."""
+        self.sudo_status = get_sudo_status()
+        self.is_admin = self.sudo_status["is_admin"]
+        if self.is_admin:
+            logger.info("Application running with admin/root privileges")
+        else:
+            logger.info(f"Application running as user '{self.sudo_status['current_user']}'")
+            if self.sudo_status["sudo_available"]:
+                logger.info("Sudo is available - operations requiring root will prompt for password")
+            else:
+                logger.warning("Sudo not available - some operations may not work")
+
+    def _setup_window_geometry(self) -> None:
+        """Restore window size and state from settings."""
+        if not self.settings_service:
+            return
+
+        geom = self.settings_service.get_window_geometry()
+        self.resize(geom.width, geom.height)
+        if geom.maximized:
+            self.showMaximized()
+
+    def _setup_ui_components(self) -> None:
+        """Create and configure all UI widgets and layouts."""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
@@ -193,22 +224,13 @@ class MainWindow(QMainWindow):
         self.tab_widget = QTabWidget()
         self.tab_widget.hide()
         self.tab_widget.currentChanged.connect(self.on_tab_changed)
-        # Enable drag-and-drop tab reordering
         self.tab_widget.setMovable(True)
-        # Enable context menu on tabs
         self.tab_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tab_widget.customContextMenuRequested.connect(self.show_tab_context_menu)
         layout.addWidget(self.tab_widget)
 
-        self.loaded_tabs: Dict[str, Dict[str, Any]] = {}
-        self.is_loading_tab = False
-        
-        # Initialize UX enhancements
-        self.setup_toast_manager()
-        self.setup_shortcuts()
-
-        QApplication.processEvents()
-
+    def _start_tab_loader(self) -> None:
+        """Configure and start the tab loading thread."""
         self.tab_loader = TabLoaderThread(settings_service=self.settings_service)
         self.tab_loader.set_tab_widget(self.tab_widget)
         self.tab_loader.finished.connect(self.on_tabs_loaded)
@@ -216,40 +238,36 @@ class MainWindow(QMainWindow):
         self.tab_loader.add_tab.connect(self.add_tab)
         self.tab_loader.start()
 
+    def _setup_menu_bar(self) -> None:
+        """Create menu bar and all menu items."""
         self.menu_bar = QMenuBar(self)
         self.setMenuBar(self.menu_bar)
+        self._create_settings_menu()
+        self._create_admin_menu()
 
-        # Create unified Settings menu
+    def _create_settings_menu(self) -> None:
+        """Create the Settings menu with plugin and theme options."""
         self.settings_menu = QMenu("Settings", self)
         self.menu_bar.addMenu(self.settings_menu)
-        
-        # Plugin management
+
         self.manage_plugins_action = QAction("Manage Plugins...", self)
         self.settings_menu.addAction(self.manage_plugins_action)
         self.manage_plugins_action.triggered.connect(self.open_plugin_management_dialog)
-        
-        # Theme selection
+
         self.select_theme_action = QAction("Select Theme...", self)
         self.settings_menu.addAction(self.select_theme_action)
         self.select_theme_action.triggered.connect(self.open_theme_dialog)
-        
-        # Separator
+
         self.settings_menu.addSeparator()
-        
 
-        if CURRENT_PLATFORM == "windows":
-            # Only show the admin menu/action when not already elevated
-            if not getattr(self, "is_admin", False):
-                self.admin_menu = QMenu("Admin", self)
-                self.menu_bar.addMenu(self.admin_menu)
-                self.restart_admin_action = QAction("Restart as Administrator", self)
-                self.restart_admin_action.triggered.connect(self.restart_as_admin)
-                self.admin_menu.addAction(self.restart_admin_action)
-
-        self.update_window_title()
-        
-        # Setup tooltips after menu is created
-        self.setup_tooltips()
+    def _create_admin_menu(self) -> None:
+        """Create the Admin menu if needed (Windows only, when not elevated)."""
+        if CURRENT_PLATFORM == "windows" and not getattr(self, "is_admin", False):
+            self.admin_menu = QMenu("Admin", self)
+            self.menu_bar.addMenu(self.admin_menu)
+            self.restart_admin_action = QAction("Restart as Administrator", self)
+            self.restart_admin_action.triggered.connect(self.restart_as_admin)
+            self.admin_menu.addAction(self.restart_admin_action)
 
     @Slot(str, object)
     def add_tab(self, tab_name: str, plugin_class: object) -> None:
@@ -605,5 +623,7 @@ Compatible: {'Yes' if info.get('compatible', False) else 'No'}"""
             else:
                 QMessageBox.information(self, f"Plugin Info - {tab_name}", "No plugin information available.")
         else:
-            QMessageBox.warning(self, "Plugin Info", f"Tab '{tab_name}' not found.")
+                QMessageBox.warning(self, "Plugin Info", f"Tab '{tab_name}' not found.")
 
+
+__all__ = ['MainWindow']

@@ -51,54 +51,104 @@ class PluginRegistry:
             return  # Skip incompatible plugins
         
         # Check version compatibility
+        if not self._check_plugin_compatibility(plugin_class, plugin_name):
+            return  # Skip incompatible plugins
+
+        # Handle name conflicts
+        if not self._handle_plugin_conflicts(plugin_name, is_core):
+            return  # Skip due to conflicts
+
+        # Register the plugin
+        self._add_plugin_to_registry(plugin_name, plugin_class, is_core)
+        self._apply_default_disabled_state(plugin_class, plugin_name)
+        self._seen_plugins.add(plugin_name)
+
+    def _check_plugin_compatibility(self, plugin_class: Type[BaseTabPlugin], plugin_name: str) -> bool:
+        """Check if plugin version is compatible with GUI version.
+        
+        Args:
+            plugin_class: The plugin class to check
+            plugin_name: Name of the plugin
+            
+        Returns:
+            True if compatible, False otherwise
+        """
         gui_version = get_gui_version()
         min_version = getattr(plugin_class, 'min_gui_version', None)
         required_version = getattr(plugin_class, 'required_gui_version', None)
         
-        if min_version or required_version:
-            is_compatible, error_msg = check_version_compatibility(
-                gui_version, 
-                min_gui_version=min_version,
-                required_gui_version=required_version
+        if not min_version and not required_version:
+            return True  # No version requirements
+        
+        is_compatible, error_msg = check_version_compatibility(
+            gui_version, 
+            min_gui_version=min_version,
+            required_gui_version=required_version
+        )
+        
+        if not is_compatible:
+            self._version_incompatibilities[plugin_name] = error_msg or "Version incompatible"
+            logger.warning(
+                f"Plugin '{plugin_name}' version requirement not met: "
+                f"{error_msg}. Skipping registration."
             )
+            return False
+        
+        logger.debug(
+            f"Plugin '{plugin_name}' version compatibility check passed: "
+            f"GUI {gui_version} meets requirements "
+            f"(min: {min_version}, required: {required_version})"
+        )
+        return True
+
+    def _handle_plugin_conflicts(self, plugin_name: str, is_core: bool) -> bool:
+        """Handle plugin name conflicts between core and external plugins.
+        
+        Args:
+            plugin_name: Name of the plugin
+            is_core: Whether this is a core plugin
             
-            if not is_compatible:
-                self._version_incompatibilities[plugin_name] = error_msg or "Version incompatible"
-                logger.warning(
-                    f"Plugin '{plugin_name}' version requirement not met: "
-                    f"{error_msg}. Skipping registration."
-                )
-                return  # Skip version-incompatible plugins
-            else:
-                logger.debug(
-                    f"Plugin '{plugin_name}' version compatibility check passed: "
-                    f"GUI {gui_version} meets requirements "
-                    f"(min: {min_version}, required: {required_version})"
-                )
+        Returns:
+            True if plugin should be registered, False if it should be skipped
+        """
+        if plugin_name not in self._plugins:
+            return True  # No conflict
+        
+        existing_is_core = plugin_name in self._core_plugins
+        if existing_is_core and not is_core:
+            # Skip external plugin that conflicts with existing core plugin
+            logger.warning(f"Skipping external plugin '{plugin_name}' - conflicts with existing core plugin")
+            return False
+        
+        if not existing_is_core and is_core:
+            # Replace external plugin with core plugin (core takes priority)
+            logger.info(f"Replacing external plugin '{plugin_name}' with core plugin")
+            if plugin_name in self._external_plugins:
+                del self._external_plugins[plugin_name]
+        
+        return True
 
-        # Handle name conflicts: core plugins take priority over external plugins
-        if plugin_name in self._plugins:
-            existing_is_core = plugin_name in self._core_plugins
-            if existing_is_core and not is_core:
-                # Skip external plugin that conflicts with existing core plugin
-                logger.warning(f"Skipping external plugin '{plugin_name}' - conflicts with existing core plugin")
-                return
-            elif not existing_is_core and is_core:
-                # Replace external plugin with core plugin (core takes priority)
-                logger.info(f"Replacing external plugin '{plugin_name}' with core plugin")
-                # Remove from external plugins
-                if plugin_name in self._external_plugins:
-                    del self._external_plugins[plugin_name]
-
+    def _add_plugin_to_registry(self, plugin_name: str, plugin_class: Type[BaseTabPlugin], is_core: bool) -> None:
+        """Add plugin to the appropriate registry dictionaries.
+        
+        Args:
+            plugin_name: Name of the plugin
+            plugin_class: The plugin class
+            is_core: Whether this is a core plugin
+        """
         self._plugins[plugin_name] = plugin_class
-
         if is_core:
             self._core_plugins[plugin_name] = plugin_class
         else:
             self._external_plugins[plugin_name] = plugin_class
 
-        # Apply default disabled state only on first sight in this app session,
-        # and do not override an existing user-enabled state
+    def _apply_default_disabled_state(self, plugin_class: Type[BaseTabPlugin], plugin_name: str) -> None:
+        """Apply default disabled state if plugin has disabled_by_default flag.
+        
+        Args:
+            plugin_class: The plugin class
+            plugin_name: Name of the plugin
+        """
         try:
             if (
                 getattr(plugin_class, 'disabled_by_default', False)
@@ -108,9 +158,6 @@ class PluginRegistry:
                 self._disabled_plugins.add(plugin_name)
         except Exception:
             pass
-
-        # Mark as seen for this session
-        self._seen_plugins.add(plugin_name)
 
     def get_all_plugins(self) -> Dict[str, BaseTabPlugin]:
         """Get all registered plugins."""

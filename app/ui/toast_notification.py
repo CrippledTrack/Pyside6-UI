@@ -386,3 +386,6 @@ class ToastManager:
     def update_theme_manager(self, theme_manager: Optional["ThemeManager"]) -> None:
         """Update the theme manager reference."""
         self.theme_manager = theme_manager
+
+
+__all__ = ['ToastNotification', 'ToastManager']
