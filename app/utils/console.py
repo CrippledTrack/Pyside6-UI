@@ -85,20 +85,31 @@ def apply_console_setting() -> bool:
         bool: True if operation succeeded or not needed, False if failed
     """
     try:
-        # Import SHOW_CONSOLE constant - try platforms first, fallback to GUI app constants
+        # Import SHOW_CONSOLE constant - try app_plugins first, then legacy platforms, then GUI app constants
         try:
-            from platforms.constants import SHOW_CONSOLE
+            # Try new name first
+            from app_plugins.constants import SHOW_CONSOLE
         except ImportError:
             try:
-                # If running from GUI directory, try parent directory
-                import sys
+                # If running from GUI directory, try parent directory with new name
                 import os
                 parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
                 if parent_dir not in sys.path:
                     sys.path.insert(0, parent_dir)
-                from platforms.constants import SHOW_CONSOLE
+                from app_plugins.constants import SHOW_CONSOLE
             except ImportError:
-                from ..constants import SHOW_CONSOLE
+                # LEGACY: Support for old 'platforms/' folder name (deprecated, 3.0.0 compatibility)
+                try:
+                    from platforms.constants import SHOW_CONSOLE
+                except ImportError:
+                    # LEGACY: Support for old 'platforms/' folder name with path manipulation (deprecated, 3.0.0 compatibility)
+                    try:
+                        parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+                        if parent_dir not in sys.path:
+                            sys.path.insert(0, parent_dir)
+                        from platforms.constants import SHOW_CONSOLE
+                    except ImportError:
+                        from ..constants import SHOW_CONSOLE
         
         return set_console_visibility(SHOW_CONSOLE)
     except ImportError:

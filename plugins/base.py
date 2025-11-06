@@ -8,7 +8,6 @@ from __future__ import annotations
 import platform
 from abc import ABC, abstractmethod
 from typing import Optional, List, Dict, Any, Type
-from PySide6.QtWidgets import QWidget
 
 class BaseTabPlugin(ABC):
     """
@@ -37,15 +36,18 @@ class BaseTabPlugin(ABC):
     
     @classmethod
     @abstractmethod
-    def create_widget(cls, parent: Optional[QWidget] = None) -> QWidget:
+    def create_widget(cls, parent: Optional[Any] = None) -> Any:
         """
-        Create and return the QWidget to be used as the tab's content.
+        Create and return a UI widget to be used as the tab's content.
+        
+        The specific widget type depends on the UI framework being used.
+        For PySide6 implementations, this should return a QWidget instance.
         
         Args:
-            parent: The parent widget (usually the QTabWidget)
+            parent: The parent widget (framework-specific, e.g., QTabWidget for PySide6)
             
         Returns:
-            QWidget: The widget to be displayed in the tab
+            Any: A UI widget appropriate for the framework being used
         """
         pass
     
@@ -151,7 +153,6 @@ class CoreTabPlugin(BaseTabPlugin):
     Base class for core (built-in) tab plugins.
     
     These are the original tabs that come with the application.
-    Note: This doesn't inherit from QWidget to avoid metaclass conflicts.
     """
     
     plugin_author: str = "Basic GUI Application Team"
