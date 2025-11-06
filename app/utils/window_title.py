@@ -13,3 +13,6 @@ def build_title(version_name: str, version: str, platform_name: str,
     return f"{base_title} - {tab_name}"
 
 
+__all__ = ['build_title']
+
+

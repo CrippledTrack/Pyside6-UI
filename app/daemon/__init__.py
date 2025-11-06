@@ -22,7 +22,7 @@ def is_daemon_available() -> bool:
         return False
     try:
         return _daemon_client.is_connected()
-    except:
+    except Exception:
         return False
 
 

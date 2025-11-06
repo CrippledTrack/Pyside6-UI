@@ -6,9 +6,9 @@ specifications (e.g., ">=3.0.0,<4.0.0").
 """
 from __future__ import annotations
 
-import re
 import logging
-from typing import Optional, List, Tuple
+import re
+from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -214,3 +214,13 @@ def get_gui_version() -> str:
         logger.warning(f"Could not import GUI_API_VERSION, assuming 3.0.0: {e}")
         return "3.0.0"
 
+
+__all__ = [
+    'parse_version',
+    'compare_versions',
+    'check_simple_version',
+    'parse_range_requirement',
+    'check_range_version',
+    'check_version_compatibility',
+    'get_gui_version',
+]

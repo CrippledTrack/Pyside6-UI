@@ -1,14 +1,25 @@
-from __future__ import annotations
-import platform
+"""
+Admin required placeholder widget for tabs that need administrator privileges.
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton
+This widget displays a message and button to restart the application with
+administrator privileges when a tab requires elevated permissions.
+"""
+
+from __future__ import annotations
+
+import platform
+from typing import Optional
+
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
 
 
 class AdminRequiredPlaceholder(QWidget):
+    """Widget that displays a message when admin privileges are required."""
+
     restartRequested = Signal()
 
-    def __init__(self, tab_name: str, parent: QWidget | None = None) -> None:
+    def __init__(self, tab_name: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
         
@@ -41,3 +52,4 @@ class AdminRequiredPlaceholder(QWidget):
         layout.addWidget(btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
 
+__all__ = ['AdminRequiredPlaceholder']

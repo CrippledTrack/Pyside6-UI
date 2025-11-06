@@ -3,6 +3,8 @@ Base plugin interface for Basic GUI Application tabs.
 
 All tab plugins must inherit from BaseTabPlugin.
 """
+from __future__ import annotations
+
 import platform
 from abc import ABC, abstractmethod
 from typing import Optional, List, Dict, Any, Type
@@ -157,3 +159,5 @@ class CoreTabPlugin(BaseTabPlugin):
 
 
 from .registry import PluginRegistry, plugin_registry  # re-export
+
+__all__ = ['BaseTabPlugin', 'CoreTabPlugin', 'PluginRegistry', 'plugin_registry']

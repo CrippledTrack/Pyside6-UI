@@ -1,53 +1,56 @@
+"""
+Main window implementation for the GUI application.
+
+This module provides the main application window, including tab management,
+plugin loading, menu bar, and user interface components.
+"""
+
 from __future__ import annotations
 
-import platform
-from typing import Optional, Dict, Any
-
-from PySide6.QtCore import Qt, Slot
-from PySide6.QtWidgets import (
-    QMainWindow,
-    QWidget,
-    QVBoxLayout,
-    QTabWidget,
-    QLabel,
-    QMessageBox,
-    QMenuBar,
-    QMenu,
-    QPushButton,
-    QApplication,
-)
-from PySide6.QtGui import QAction, QKeySequence, QFont
-from PySide6.QtCore import QPoint
-
 import logging
+import platform
+from typing import Any, Dict, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..services.settings_service import SettingsService
+
+from PySide6.QtCore import QPoint, Qt, QThread, Signal, Slot
+from PySide6.QtGui import QAction, QCloseEvent, QFont, QKeySequence
+from PySide6.QtWidgets import (
+    QApplication,
+    QLabel,
+    QMainWindow,
+    QMenu,
+    QMenuBar,
+    QMessageBox,
+    QPushButton,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from ...plugins import plugin_registry
 from ...plugins.plugin_management import PluginManagementDialog
-from ...themes.theme_manager import ThemeManager
 from ...themes.theme_dialog import ThemeDialog
-# Try to import from platforms first, fallback to ui app constants
-try:
-    from platforms.constants import VERSION, VERSION_NAME, SUPPORTED_PLATFORMS, VERSION_INFO, REQUIRE_ADMIN_BY_DEFAULT
-except ImportError:
-    try:
-        # If running from ui directory, try parent directory
-        import sys
-        import os
-        parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-        if parent_dir not in sys.path:
-            sys.path.insert(0, parent_dir)
-        from platforms.constants import VERSION, VERSION_NAME, SUPPORTED_PLATFORMS, VERSION_INFO, REQUIRE_ADMIN_BY_DEFAULT
-    except ImportError:
-        from ..constants import VERSION, VERSION_NAME, SUPPORTED_PLATFORMS, VERSION_INFO, REQUIRE_ADMIN_BY_DEFAULT
-from ..ui.widgets.loading_placeholder import LoadingPlaceholder
+from ...themes.theme_manager import ThemeManager
+from ..services.plugin_service import discover_and_register_all_plugins
+from ..ui.toast_notification import ToastManager
 from ..ui.widgets.admin_required_placeholder import AdminRequiredPlaceholder
 from ..ui.widgets.error_placeholder import ErrorPlaceholder
-from ..services.plugin_service import discover_and_register_all_plugins
-from ..utils.window_title import build_title
-from ..utils.version import build_version_details
+from ..ui.widgets.loading_placeholder import LoadingPlaceholder
 from ..utils.admin import needs_admin_for_plugin
-from ..ui.toast_notification import ToastManager
+from ..utils.imports import get_platforms_constants
 from ..utils.shortcuts import ShortcutManager
+from ..utils.version import build_version_details
+from ..utils.window_title import build_title
+
+# Import platform constants using the utility function
+constants = get_platforms_constants()
+REQUIRE_ADMIN_BY_DEFAULT = constants.REQUIRE_ADMIN_BY_DEFAULT
+SUPPORTED_PLATFORMS = constants.SUPPORTED_PLATFORMS
+VERSION = constants.VERSION
+VERSION_INFO = constants.VERSION_INFO
+VERSION_NAME = constants.VERSION_NAME
 
 CURRENT_PLATFORM = platform.system().lower()
 
@@ -55,24 +58,13 @@ try:
     if CURRENT_PLATFORM == "windows":
         from ..utils.elevation_windows import is_admin, run_as_admin
     elif CURRENT_PLATFORM == "linux":
-        from ..utils.elevation_linux import is_admin, get_sudo_status
+        from ..utils.elevation_linux import get_sudo_status, is_admin
     else:  # pragma: no cover - unsupported platforms
         raise RuntimeError(f"Unsupported platform: {CURRENT_PLATFORM}")
 except Exception as e:  # pragma: no cover - import-time platform errors
     raise
 
-
 logger = logging.getLogger(__name__)
-
-
-class TabLoaderThreadSignals:  # lightweight signal holder for typing clarity only
-    def __init__(self):
-        self.finished = None
-        self.error = None
-        self.add_tab = None
-
-
-from PySide6.QtCore import QThread, Signal  # placed here to keep import order tidy
 
 
 class TabLoaderThread(QThread):
@@ -80,7 +72,7 @@ class TabLoaderThread(QThread):
     error = Signal(str)
     add_tab = Signal(str, object)
 
-    def __init__(self, parent=None, settings_service=None):
+    def __init__(self, parent: Optional[QWidget] = None, settings_service: Optional["SettingsService"] = None) -> None:
         super().__init__(parent)
         self.setObjectName("TabLoaderThread")
         self.tab_widget: Optional[QTabWidget] = None
@@ -139,9 +131,8 @@ class TabLoaderThread(QThread):
         discover_and_register_all_plugins()
 
 
-
 class MainWindow(QMainWindow):
-    def __init__(self, theme_manager: Optional[ThemeManager] = None, settings_service=None):
+    def __init__(self, theme_manager: Optional[ThemeManager] = None, settings_service: Optional["SettingsService"] = None) -> None:
         super().__init__()
         logger.info(f"Initializing MainWindow for {VERSION_NAME} v{VERSION} on {CURRENT_PLATFORM}")
         self.settings_service = settings_service
@@ -187,12 +178,8 @@ class MainWindow(QMainWindow):
             self.resize(geom.width, geom.height)
             if geom.maximized:
                 self.showMaximized()
-            elif geom.fullscreen:
-                self.showFullScreen()
-        else:
-            self.resize(800, 600)
 
-        self.theme_manager = theme_manager if theme_manager is not None else ThemeManager()
+        self.theme_manager = theme_manager
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -440,11 +427,11 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "Error", f"Failed to restart as administrator:\n{e}")
     
     
-    def setup_toast_manager(self):
+    def setup_toast_manager(self) -> None:
         """Setup the toast notification manager."""
         self.toast_manager = ToastManager(self, self.theme_manager)
     
-    def setup_shortcuts(self):
+    def setup_shortcuts(self) -> None:
         """Setup keyboard shortcuts."""
         if not self.settings_service or not self.settings_service.get_shortcuts_enabled():
             return
@@ -456,7 +443,7 @@ class MainWindow(QMainWindow):
         self.shortcut_manager.prevTab.connect(self.previous_tab)
         self.shortcut_manager.toggleFullscreen.connect(self.toggle_fullscreen)
     
-    def setup_tooltips(self):
+    def setup_tooltips(self) -> None:
         """Setup tooltips for UI elements."""
         if not self.settings_service or not self.settings_service.get_show_tooltips():
             return
@@ -474,25 +461,25 @@ class MainWindow(QMainWindow):
     
     
     
-    def next_tab(self):
+    def next_tab(self) -> None:
         """Switch to next tab."""
         current = self.tab_widget.currentIndex()
         if current < self.tab_widget.count() - 1:
             self.tab_widget.setCurrentIndex(current + 1)
     
-    def previous_tab(self):
+    def previous_tab(self) -> None:
         """Switch to previous tab."""
         current = self.tab_widget.currentIndex()
         if current > 0:
             self.tab_widget.setCurrentIndex(current - 1)
     
-    def close_current_tab(self):
+    def close_current_tab(self) -> None:
         """Close the current tab."""
         current = self.tab_widget.currentIndex()
         if current >= 0:
             self.close_tab_by_index(current)
     
-    def toggle_fullscreen(self):
+    def toggle_fullscreen(self) -> None:
         """Toggle fullscreen mode."""
         if self.isFullScreen():
             self.showNormal()
@@ -500,7 +487,7 @@ class MainWindow(QMainWindow):
             self.showFullScreen()
     
     
-    def closeEvent(self, event):
+    def closeEvent(self, event: QCloseEvent) -> None:
         """Handle window close event to save settings."""
         if self.settings_service:
             # Save window geometry
@@ -521,7 +508,7 @@ class MainWindow(QMainWindow):
         
         event.accept()
     
-    def show_tab_context_menu(self, position: QPoint):
+    def show_tab_context_menu(self, position: QPoint) -> None:
         """Show context menu for tabs."""
         # Find the tab at the position
         tab_index = self.tab_widget.tabBar().tabAt(position)
@@ -559,7 +546,7 @@ class MainWindow(QMainWindow):
         # Show the context menu
         context_menu.exec(self.tab_widget.mapToGlobal(position))
     
-    def close_tab_by_index(self, index: int):
+    def close_tab_by_index(self, index: int) -> None:
         """Close tab by index."""
         if 0 <= index < self.tab_widget.count():
             tab_name = self.tab_widget.tabText(index)
@@ -572,7 +559,7 @@ class MainWindow(QMainWindow):
             if hasattr(self, 'toast_manager'):
                 self.toast_manager.show_info(f"Closed tab: {tab_name}")
     
-    def close_other_tabs(self, keep_index: int):
+    def close_other_tabs(self, keep_index: int) -> None:
         """Close all tabs except the one at keep_index."""
         if keep_index < 0 or keep_index >= self.tab_widget.count():
             return
@@ -582,7 +569,7 @@ class MainWindow(QMainWindow):
             if i != keep_index:
                 self.close_tab_by_index(i)
     
-    def close_all_tabs(self):
+    def close_all_tabs(self) -> None:
         """Close all tabs."""
         reply = QMessageBox.question(
             self, "Close All Tabs",
@@ -595,7 +582,7 @@ class MainWindow(QMainWindow):
             while self.tab_widget.count() > 0:
                 self.close_tab_by_index(0)
     
-    def show_plugin_info(self, tab_name: str):
+    def show_plugin_info(self, tab_name: str) -> None:
         """Show information about the plugin in the tab."""
         if tab_name in self.loaded_tabs:
             tab_info = self.loaded_tabs[tab_name]
@@ -619,5 +606,4 @@ Compatible: {'Yes' if info.get('compatible', False) else 'No'}"""
                 QMessageBox.information(self, f"Plugin Info - {tab_name}", "No plugin information available.")
         else:
             QMessageBox.warning(self, "Plugin Info", f"Tab '{tab_name}' not found.")
-
 

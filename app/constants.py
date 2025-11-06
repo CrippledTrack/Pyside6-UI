@@ -1,7 +1,14 @@
+"""
+Application constants and configuration.
+
+This module defines version information, platform support, and default
+configuration values for the GUI application.
+"""
+
 from __future__ import annotations
 
 # Version information
-VERSION = "3.0.0"
+VERSION = "3.0.1"
 VERSION_NAME = "Basic UI Application"
 SUPPORTED_PLATFORMS = ["Windows", "Linux"]
 
@@ -23,4 +30,15 @@ LOG_TO_FILE = True
 
 # Console configuration
 SHOW_CONSOLE = False
+
+__all__ = [
+    'VERSION',
+    'VERSION_NAME',
+    'SUPPORTED_PLATFORMS',
+    'VERSION_INFO',
+    'REQUIRE_ADMIN_BY_DEFAULT',
+    'LOGGING_ENABLED',
+    'LOG_TO_FILE',
+    'SHOW_CONSOLE',
+]
 

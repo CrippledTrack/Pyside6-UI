@@ -1,40 +1,38 @@
+"""
+Application entry point and bootstrap module.
+
+This module handles application initialization, platform-specific setup,
+daemon management, and the main application lifecycle.
+"""
+
 from __future__ import annotations
 
-import sys
 import os
-from typing import List
 import platform
+import sys
+from typing import List
 
-from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QFont
+from PySide6.QtWidgets import QApplication
 
+from .constants import VERSION as GUI_API_VERSION
 from .services.logging_service import setup_logging
 from .services.settings_service import load_settings as load_settings_service
-from ..themes.theme_manager import ThemeManager
 from .ui.main_window import MainWindow
 from .utils.console import apply_console_setting
-# Import GUI version first before it gets overridden by platforms
-from .constants import VERSION as GUI_API_VERSION
-# Try to import from platforms first, fallback to ui app constants
-try:
-    from platforms.constants import VERSION, VERSION_NAME
-except ImportError:
-    try:
-        # If running from ui directory, try parent directory
-        import sys
-        import os
-        parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        if parent_dir not in sys.path:
-            sys.path.insert(0, parent_dir)
-        from platforms.constants import VERSION, VERSION_NAME
-    except ImportError:
-        from .constants import VERSION, VERSION_NAME
+from .utils.imports import get_platforms_constants
+from ..themes.theme_manager import ThemeManager
+
+# Import platform constants using the utility function
+constants = get_platforms_constants()
+VERSION = constants.VERSION
+VERSION_NAME = constants.VERSION_NAME
 
 # Linux-specific checks
 if platform.system().lower() == "linux":
-    from .utils.qt_dependencies_linux import ensure_qt_xcb_dependencies_installed
-    from .utils.elevation_linux import start_daemon, stop_daemon
     from .daemon import set_daemon_client
+    from .utils.elevation_linux import start_daemon, stop_daemon
+    from .utils.qt_dependencies_linux import ensure_qt_xcb_dependencies_installed
 
 
 def run(argv: List[str]) -> int:
@@ -144,7 +142,8 @@ def run(argv: List[str]) -> int:
             if daemon_client.is_connected():
                 daemon_client.request('shutdown', {})
                 daemon_client.disconnect()
-        except:
+        except Exception:
+            # Ignore errors during cleanup - daemon may already be stopped
             pass
         stop_daemon()
     
@@ -156,10 +155,10 @@ def run(argv: List[str]) -> int:
             lock_file.close()
             if lock_file_path and os.path.exists(lock_file_path):
                 os.unlink(lock_file_path)
-        except:
+        except Exception:
+            # Ignore errors during cleanup - file may already be released
             pass
     
     logger.info(f"Application closed with code {exit_code}")
     return exit_code
-
 

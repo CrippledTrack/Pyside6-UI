@@ -3,8 +3,12 @@ Example plugin for Basic GUI Application.
 
 This demonstrates how to create a simple tab plugin.
 """
+from __future__ import annotations
+
+from typing import Optional
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QTextEdit
 from GUI.plugins.base import BaseTabPlugin
+
 
 class ExampleTabPlugin(BaseTabPlugin):
     """Example tab plugin demonstrating the plugin interface."""
@@ -28,7 +32,7 @@ class ExampleTabPlugin(BaseTabPlugin):
     # required_gui_version = ">=3.0.0,<4.0.0"
 
     @classmethod
-    def create_widget(cls, parent=None):
+    def create_widget(cls, parent: Optional[QWidget] = None) -> QWidget:
         """Create the widget for this tab."""
         return ExampleWidget(parent)
 
@@ -36,7 +40,7 @@ class ExampleTabPlugin(BaseTabPlugin):
 class ExampleWidget(QWidget):
     """The actual widget displayed in the tab."""
     
-    def __init__(self, parent=None):
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setup_ui()
     

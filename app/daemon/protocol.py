@@ -1,5 +1,7 @@
 """Protocol definitions for daemon communication."""
 
+from __future__ import annotations
+
 import json
 import uuid
 from typing import Dict, Any, Optional

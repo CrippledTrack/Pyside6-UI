@@ -12,6 +12,8 @@ Usage:
 - Optionally set `is_core_plugin = True` on the class for clarity; not required.
 """
 
+from __future__ import annotations
+
 from typing import List, Type
 
 from .base import BaseTabPlugin

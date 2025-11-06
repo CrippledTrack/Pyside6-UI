@@ -1,8 +1,16 @@
+"""
+Application settings service with JSON persistence.
+
+This module provides the SettingsService class for managing application settings,
+including theme preferences, plugin states, window geometry, UI preferences, and
+other user-configurable options. Settings are persisted to a JSON file.
+"""
+
 from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -40,7 +48,7 @@ class AppSettings:
     # GUI version (for future migration detection)
     gui_version: str = ""
     
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Initialize default values for complex fields"""
         if self.disabled_plugins is None:
             self.disabled_plugins = []
@@ -51,7 +59,7 @@ class AppSettings:
 class SettingsService:
     """Service for managing application settings with JSON persistence"""
     
-    def __init__(self):
+    def __init__(self) -> None:
         self._settings_file = get_base_path() / "settings.json"
         self._settings = AppSettings()
         self._load_settings()
@@ -193,7 +201,7 @@ class SettingsService:
         return self._settings.log_to_file
     
     # UI/UX settings methods
-    def save_ui_preferences(self, show_tooltips: bool):
+    def save_ui_preferences(self, show_tooltips: bool) -> None:
         """Save UI preferences"""
         self._settings.show_tooltips = show_tooltips
         self._save_settings()
@@ -204,7 +212,7 @@ class SettingsService:
         return self._settings.show_tooltips
     
     # Keyboard shortcuts methods
-    def save_shortcuts_enabled(self, enabled: bool):
+    def save_shortcuts_enabled(self, enabled: bool) -> None:
         """Save shortcuts enabled setting"""
         self._settings.shortcuts_enabled = enabled
         self._save_settings()
@@ -215,7 +223,7 @@ class SettingsService:
         return self._settings.shortcuts_enabled
     
     # Toast notifications methods
-    def save_toast_settings(self, enabled: bool, duration: int):
+    def save_toast_settings(self, enabled: bool, duration: int) -> None:
         """Save toast notification settings"""
         self._settings.toast_notifications_enabled = enabled
         self._settings.toast_duration = duration
@@ -230,7 +238,7 @@ class SettingsService:
         """Get toast duration setting"""
         return self._settings.toast_duration
     
-    def save_gui_version(self, version: str):
+    def save_gui_version(self, version: str) -> None:
         """Save GUI version to settings"""
         self._settings.gui_version = version
         self._save_settings()
@@ -246,3 +254,9 @@ def load_settings() -> SettingsService:
     return SettingsService()
 
 
+__all__ = [
+    'WindowGeometry',
+    'AppSettings',
+    'SettingsService',
+    'load_settings',
+]

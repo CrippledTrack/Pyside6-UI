@@ -1,25 +1,40 @@
+"""
+Theme management system for the application.
+
+This module handles loading, applying, and managing themes including
+built-in themes and custom theme files. It provides automatic theme
+detection based on system preferences.
+"""
+
+from __future__ import annotations
+
 import os
 import json
 import logging
-from typing import Dict, List, Optional, Any
+import platform
+from pathlib import Path
+from typing import Dict, List, Optional, Any, TYPE_CHECKING
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QPalette, QColor
 from PySide6.QtCore import Qt
-import platform
+
+if TYPE_CHECKING:
+    from ..app.services.settings_service import SettingsService
 
 logger = logging.getLogger(__name__)
+
 
 class ThemeManager:
     """Manages application themes including loading, saving, and applying themes"""
     
-    def __init__(self, themes_dir: str = "themes", settings_service=None):
-        self.themes_dir = themes_dir
-        self.themes = {}
+    def __init__(self, themes_dir: str = "themes", settings_service: Optional["SettingsService"] = None) -> None:
+        self.themes_dir = Path(themes_dir)
+        self.themes: Dict[str, Any] = {}
         self.settings_service = settings_service
         self.load_builtin_themes()
         self.load_custom_themes()
     
-    def load_builtin_themes(self):
+    def load_builtin_themes(self) -> None:
         """Load built-in themes"""
         self.themes.update({
             "dark": self._get_dark_theme(),
@@ -35,29 +50,26 @@ class ThemeManager:
             "ocean_blue": self._get_ocean_blue_theme()
         })
     
-    def load_custom_themes(self):
+    def load_custom_themes(self) -> None:
         """Load custom themes from the themes directory"""
-        if not os.path.exists(self.themes_dir):
+        if not self.themes_dir.exists():
             return
         
-        for filename in os.listdir(self.themes_dir):
-            if filename.endswith('.json'):
-                theme_path = os.path.join(self.themes_dir, filename)
-                try:
-                    with open(theme_path, 'r', encoding='utf-8') as f:
-                        theme_data = json.load(f)
-                        theme_name = os.path.splitext(filename)[0]
-                        self.themes[theme_name] = theme_data
-                        logger.info(f"Loaded custom theme: {theme_name}")
-                except Exception as e:
-                    logger.error(f"Failed to load theme {filename}: {e}")
+        for theme_file in self.themes_dir.glob("*.json"):
+            try:
+                with open(theme_file, 'r', encoding='utf-8') as f:
+                    theme_data = json.load(f)
+                    theme_name = theme_file.stem
+                    self.themes[theme_name] = theme_data
+                    logger.info(f"Loaded custom theme: {theme_name}")
+            except Exception as e:
+                logger.error(f"Failed to load theme {theme_file.name}: {e}")
     
-    def save_custom_theme(self, theme_name: str, theme_data: Dict[str, Any]):
+    def save_custom_theme(self, theme_name: str, theme_data: Dict[str, Any]) -> bool:
         """Save a custom theme to file"""
-        if not os.path.exists(self.themes_dir):
-            os.makedirs(self.themes_dir)
+        self.themes_dir.mkdir(parents=True, exist_ok=True)
         
-        theme_path = os.path.join(self.themes_dir, f"{theme_name}.json")
+        theme_path = self.themes_dir / f"{theme_name}.json"
         try:
             with open(theme_path, 'w', encoding='utf-8') as f:
                 json.dump(theme_data, f, indent=2, ensure_ascii=False)
@@ -116,7 +128,7 @@ class ThemeManager:
                 current_platform = ""
             return current_platform == "linux"
 
-    def apply_auto_theme(self, saved_theme: str = None) -> str:
+    def apply_auto_theme(self, saved_theme: Optional[str] = None) -> str:
         """Detect and apply the appropriate theme ('dark' or 'light').
         
         Args:
@@ -137,7 +149,7 @@ class ThemeManager:
         self.apply_theme(theme_name)
         return theme_name
     
-    def set_settings_service(self, settings_service):
+    def set_settings_service(self, settings_service: Optional["SettingsService"]) -> None:
         """Set the settings service for theme persistence"""
         self.settings_service = settings_service
     

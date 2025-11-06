@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import subprocess
 import sys
@@ -5,9 +7,15 @@ import pwd
 import grp
 import logging
 import time
+from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# Timeout constants (in seconds)
+PKEXEC_COMMAND_TIMEOUT = 600  # 10 minutes for privileged commands
+DAEMON_SHUTDOWN_TIMEOUT = 2   # Wait for daemon shutdown
+DAEMON_QUICK_TIMEOUT = 1      # Quick daemon status check
 
 # Global daemon process reference
 _daemon_process: Optional[subprocess.Popen] = None
@@ -102,7 +110,7 @@ def run_command_as_admin(command, description="This operation", interactive=Fals
             logger.info(f"Attempting elevation with pkexec: {pkexec_command}")
             # pkexec uses its own GUI prompt - it displays separately
             # We can capture output even with pkexec since the GUI prompt is independent
-            result = subprocess.run(pkexec_command, capture_output=True, text=True, timeout=600)
+            result = subprocess.run(pkexec_command, capture_output=True, text=True, timeout=PKEXEC_COMMAND_TIMEOUT)
             logger.info(f"pkexec completed with return code {result.returncode}")
             if result.returncode != 0:
                 logger.warning(f"pkexec command failed with return code {result.returncode}")
@@ -235,7 +243,7 @@ def is_daemon_running(socket_path: str = '/tmp/cyberpatriot-daemon.sock') -> boo
         sock.connect(socket_path)
         sock.close()
         return True
-    except:
+    except Exception:
         return False
 
 
@@ -256,26 +264,26 @@ def start_daemon(socket_path: str = '/tmp/cyberpatriot-daemon.sock') -> Optional
             return client
         logger.warning("Socket exists but connection failed, cleaning up...")
     
-    # Get path to current executable
-    # Find the main script path
-    if hasattr(sys, 'frozen') and sys.frozen:
-        # PyInstaller bundle - executable is the script
-        exe_path = sys.executable
-        daemon_cmd = [exe_path, '--daemon']
-    else:
-        # Development mode - need to run python with the script
-        exe_path = sys.executable  # python executable
-        # Find cyberpatriot.py in the current directory or parent
-        script_path = os.path.join(os.getcwd(), 'cyberpatriot.py')
-        if not os.path.exists(script_path):
-            # Try parent directory
-            script_path = os.path.join(os.path.dirname(os.getcwd()), 'cyberpatriot.py')
-        if not os.path.exists(script_path):
-            # Fallback: use current directory as script
-            script_path = os.path.abspath(os.path.dirname(__file__) + '/../../cyberpatriot.py').replace('\\', '/')
-        
-        logger.info(f"Daemon script path: {script_path}")
-        daemon_cmd = [exe_path, script_path, '--daemon']
+        # Get path to current executable
+        # Find the main script path
+        if hasattr(sys, 'frozen') and sys.frozen:
+            # PyInstaller bundle - executable is the script
+            exe_path = sys.executable
+            daemon_cmd = [exe_path, '--daemon']
+        else:
+            # Development mode - need to run python with the script
+            exe_path = sys.executable  # python executable
+            # Find cyberpatriot.py in the current directory or parent
+            script_path = Path.cwd() / 'cyberpatriot.py'
+            if not script_path.exists():
+                # Try parent directory
+                script_path = Path.cwd().parent / 'cyberpatriot.py'
+            if not script_path.exists():
+                # Fallback: use current directory as script
+                script_path = Path(__file__).parent.parent.parent / 'cyberpatriot.py'
+            
+            logger.info(f"Daemon script path: {script_path}")
+            daemon_cmd = [exe_path, str(script_path), '--daemon']
     
     # Try pkexec first, then sudo
     if check_pkexec_available():
@@ -301,7 +309,7 @@ def start_daemon(socket_path: str = '/tmp/cyberpatriot-daemon.sock') -> Optional
                         stderr_data = process.stderr.read().decode('utf-8', errors='ignore')
                         if stderr_data:
                             logger.error(f"Daemon stderr output: {stderr_data}")
-                    except:
+                    except Exception:
                         pass
             
             threading.Thread(target=check_daemon_stderr, daemon=True).start()
@@ -361,11 +369,11 @@ def start_daemon(socket_path: str = '/tmp/cyberpatriot-daemon.sock') -> Optional
     if _daemon_process:
         try:
             _daemon_process.terminate()
-            _daemon_process.wait(timeout=2)
-        except:
+            _daemon_process.wait(timeout=DAEMON_SHUTDOWN_TIMEOUT)
+        except Exception:
             try:
                 _daemon_process.kill()
-            except:
+            except Exception:
                 pass
         _daemon_process = None
     return None
@@ -393,7 +401,7 @@ def stop_daemon(socket_path: str = '/tmp/cyberpatriot-daemon.sock'):
         global _daemon_process
         if _daemon_process:
             try:
-                _daemon_process.wait(timeout=1)
+                _daemon_process.wait(timeout=DAEMON_QUICK_TIMEOUT)
             except:
                 pass
             _daemon_process = None
@@ -405,7 +413,7 @@ def stop_daemon(socket_path: str = '/tmp/cyberpatriot-daemon.sock'):
     if os.path.exists(socket_path):
         try:
             os.unlink(socket_path)
-        except:
+        except Exception:
             pass
 
 

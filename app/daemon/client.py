@@ -1,5 +1,7 @@
 """Daemon client for communicating with privileged daemon."""
 
+from __future__ import annotations
+
 import socket
 import logging
 import threading
@@ -62,7 +64,7 @@ class DaemonClient:
                 if self._socket:
                     try:
                         self._socket.close()
-                    except:
+                    except Exception:
                         pass
                 self._socket = None
                 self._connected = False
@@ -74,7 +76,7 @@ class DaemonClient:
             if self._socket:
                 try:
                     self._socket.close()
-                except:
+                except Exception:
                     pass
                 self._socket = None
             self._connected = False

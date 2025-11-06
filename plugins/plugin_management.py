@@ -1,17 +1,32 @@
+"""
+Plugin management dialog for enabling, disabling, and configuring plugins.
+
+This module provides a GUI interface for managing plugin lifecycle, including
+enabling/disabling plugins, viewing plugin information, and configuring
+plugin settings.
+"""
+
+from __future__ import annotations
+
+import inspect
+import os
+import sys
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem,
     QHeaderView, QCheckBox, QMessageBox, QLineEdit, QComboBox, QSplitter, QWidget, QFormLayout,
     QTextEdit, QAbstractItemView, QMenu
 )
-from .base import plugin_registry
 from PySide6.QtCore import Signal, Qt, QPoint
-import inspect
-import os
-import sys
+from typing import Optional, List, Tuple, Any, Type
+from .base import plugin_registry, BaseTabPlugin
+
 
 class PluginManagementDialog(QDialog):
+    """Dialog for managing plugin lifecycle and configuration."""
+    
     pluginToggled = Signal(str, bool)
-    def __init__(self, parent=None):
+    
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Plugin Management")
         self.resize(900, 560)
@@ -19,7 +34,8 @@ class PluginManagementDialog(QDialog):
         self.setup_ui()
         self.load_plugins()
 
-    def setup_ui(self):
+    def setup_ui(self) -> None:
+        """Setup the dialog UI."""
         layout = QVBoxLayout(self)
 
         # Filters/Search bar
@@ -144,19 +160,22 @@ class PluginManagementDialog(QDialog):
         bottom_layout.addWidget(self.close_btn)
         layout.addLayout(bottom_layout)
 
-    def load_plugins(self):
+    def load_plugins(self) -> None:
+        """Load all plugins from the registry."""
         plugins = plugin_registry.get_all_plugins()
         self._all_plugins = list(plugins.items())
         self.apply_filters()
 
-    def toggle_plugin(self, name, state):
+    def toggle_plugin(self, name: str, state: int) -> None:
+        """Toggle plugin enabled/disabled state."""
         if state:
             plugin_registry.enable_plugin(name)
         else:
             plugin_registry.disable_plugin(name)
         self.pluginToggled.emit(name, bool(state))
 
-    def reload_plugins(self):
+    def reload_plugins(self) -> None:
+        """Reload all plugins from the registry."""
         # Clear and re-discover plugins
         from GUI.app.services.plugin_service import discover_and_register_all_plugins
         plugin_registry.clear()
@@ -165,7 +184,7 @@ class PluginManagementDialog(QDialog):
         QMessageBox.information(self, "Plugins Reloaded", "Plugins have been reloaded.")
         self.load_plugins()
 
-    def apply_filters(self):
+    def apply_filters(self) -> None:
         search_text = self.search_input.text().strip().lower()
         type_sel = self.type_filter.currentText()
         status_sel = self.status_filter.currentText()
@@ -222,7 +241,7 @@ class PluginManagementDialog(QDialog):
 
         self.update_status_label()
 
-    def populate_table(self, data):
+    def populate_table(self, data: List[Tuple[str, Type[BaseTabPlugin]]]) -> None:
         self.table.setRowCount(len(data))
         core_names = set(plugin_registry.get_core_plugins().keys())
         for row, (name, plugin_class) in enumerate(data):
@@ -247,7 +266,7 @@ class PluginManagementDialog(QDialog):
             # Requires Admin
             self.table.setItem(row, 5, QTableWidgetItem("Yes" if info.get('requires_admin') else "No"))
 
-    def on_selection_changed(self):
+    def on_selection_changed(self) -> None:
         name = self.get_selected_plugin_name()
         if not name:
             self.clear_details()
@@ -278,7 +297,7 @@ class PluginManagementDialog(QDialog):
         ])
         self.configure_btn.setEnabled(has_config)
 
-    def clear_details(self):
+    def clear_details(self) -> None:
         self.details_name.setText("-")
         self.details_version.setText("-")
         self.details_author.setText("-")
@@ -290,20 +309,21 @@ class PluginManagementDialog(QDialog):
         self.details_description.setPlainText("")
         self.configure_btn.setEnabled(False)
 
-    def update_status_label(self):
+    def update_status_label(self) -> None:
         total = len(self._all_plugins)
         shown = self.table.rowCount()
         enabled_count = sum(1 for name, _ in self._all_plugins if plugin_registry.is_enabled(name))
         self.status_label.setText(f"Showing {shown}/{total} plugins  |  Enabled: {enabled_count}")
 
-    def get_selected_plugin_name(self):
+    def get_selected_plugin_name(self) -> Optional[str]:
         row = self.table.currentRow()
         if row < 0:
             return None
         item = self.table.item(row, 1)
         return item.text() if item else None
 
-    def enable_selected(self):
+    def enable_selected(self) -> None:
+        """Enable the currently selected plugin."""
         name = self.get_selected_plugin_name()
         if not name:
             return
@@ -311,7 +331,8 @@ class PluginManagementDialog(QDialog):
         self.pluginToggled.emit(name, True)
         self.apply_filters()
 
-    def disable_selected(self):
+    def disable_selected(self) -> None:
+        """Disable the currently selected plugin."""
         name = self.get_selected_plugin_name()
         if not name:
             return
@@ -319,19 +340,21 @@ class PluginManagementDialog(QDialog):
         self.pluginToggled.emit(name, False)
         self.apply_filters()
 
-    def enable_all(self):
+    def enable_all(self) -> None:
+        """Enable all plugins."""
         for name, _ in self._all_plugins:
             plugin_registry.enable_plugin(name)
             self.pluginToggled.emit(name, True)
         self.apply_filters()
 
-    def disable_all(self):
+    def disable_all(self) -> None:
+        """Disable all plugins."""
         for name, _ in self._all_plugins:
             plugin_registry.disable_plugin(name)
             self.pluginToggled.emit(name, False)
         self.apply_filters()
 
-    def on_table_context_menu(self, pos: QPoint):
+    def on_table_context_menu(self, pos: QPoint) -> None:
         index = self.table.indexAt(pos)
         if not index.isValid():
             return
@@ -387,7 +410,7 @@ class PluginManagementDialog(QDialog):
             QApplication.clipboard().setText("\n".join(lines))
         # Removed "Open Module Location" from context menu since Module column was removed
 
-    def configure_selected(self):
+    def configure_selected(self) -> None:
         name = self.get_selected_plugin_name()
         if not name:
             return
@@ -421,7 +444,7 @@ class PluginManagementDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "Configuration Error", f"Failed to open configuration for '{name}':\n{e}")
 
-    def open_module_location(self, plugin_class):
+    def open_module_location(self, plugin_class: Type[BaseTabPlugin]) -> None:
         try:
             path = inspect.getsourcefile(plugin_class)
             if not path:

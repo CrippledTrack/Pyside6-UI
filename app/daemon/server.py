@@ -1,5 +1,7 @@
 """Privileged daemon server for executing root operations."""
 
+from __future__ import annotations
+
 import os
 import sys
 import socket
@@ -222,7 +224,7 @@ class PrivilegedDaemon:
         if self.server_socket:
             try:
                 self.server_socket.close()
-            except:
+            except Exception:
                 pass
         
         # Wait for active tasks to complete

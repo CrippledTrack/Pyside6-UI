@@ -1,11 +1,21 @@
+"""
+Error placeholder widget for tabs that failed to load.
+
+This widget displays an error message when a tab fails to load or initialize.
+"""
+
 from __future__ import annotations
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from typing import Optional
+
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 
 class ErrorPlaceholder(QWidget):
-    def __init__(self, tab_name: str, error_message: str, parent: QWidget | None = None) -> None:
+    """Widget that displays an error message when a tab fails to load."""
+
+    def __init__(self, tab_name: str, error_message: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
         label = QLabel(f"Error loading {tab_name}:\n{error_message}")
@@ -14,3 +24,4 @@ class ErrorPlaceholder(QWidget):
         layout.addWidget(label)
 
 
+__all__ = ['ErrorPlaceholder']

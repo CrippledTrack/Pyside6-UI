@@ -1,3 +1,13 @@
+"""
+Plugin registry system for managing discovered and loaded plugins.
+
+This module provides the PluginRegistry class which maintains a registry of all
+available plugins, handles plugin registration, enables/disables plugins, and
+manages version compatibility checks.
+"""
+
+from __future__ import annotations
+
 import logging
 from typing import Optional, List, Dict, Type
 
@@ -11,7 +21,7 @@ logger = logging.getLogger(__name__)
 class PluginRegistry:
     """Registry for managing discovered plugins."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._plugins: Dict[str, Type[BaseTabPlugin]] = {}
         self._core_plugins: Dict[str, Type[BaseTabPlugin]] = {}
         self._external_plugins: Dict[str, Type[BaseTabPlugin]] = {}
@@ -21,7 +31,7 @@ class PluginRegistry:
         # Track version incompatibility reasons for plugins
         self._version_incompatibilities: Dict[str, str] = {}
 
-    def register_plugin(self, plugin_class: Type[BaseTabPlugin], is_core: bool = False):
+    def register_plugin(self, plugin_class: Type[BaseTabPlugin], is_core: bool = False) -> None:
         """
         Register a plugin in the registry.
 
@@ -122,7 +132,7 @@ class PluginRegistry:
         """Get list of all plugin names."""
         return list(self._plugins.keys())
 
-    def clear(self):
+    def clear(self) -> None:
         """Clear all registered plugins."""
         self._plugins.clear()
         self._core_plugins.clear()
@@ -143,11 +153,11 @@ class PluginRegistry:
         """
         return self._version_incompatibilities.get(name)
 
-    def disable_plugin(self, name: str):
+    def disable_plugin(self, name: str) -> None:
         """Disable a plugin by name."""
         self._disabled_plugins.add(name)
 
-    def enable_plugin(self, name: str):
+    def enable_plugin(self, name: str) -> None:
         """Enable a plugin by name."""
         self._disabled_plugins.discard(name)
 
@@ -164,3 +174,4 @@ class PluginRegistry:
 plugin_registry = PluginRegistry()
 
 
+__all__ = ['PluginRegistry', 'plugin_registry']

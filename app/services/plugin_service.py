@@ -1,8 +1,19 @@
+"""
+Plugin discovery and registration service.
+
+This module provides functionality for discovering plugins from multiple sources
+(core plugins from platforms/core_plugins.py and GUI/plugins/core_plugins.py,
+entry point plugins, and local plugin files) and registering them with the
+plugin registry.
+"""
+
 from __future__ import annotations
 
 import logging
+import os
+import sys
 from pathlib import Path
-from typing import Tuple, Dict, Any, List, Type
+from typing import Any, Dict, List, Tuple, Type
 
 from ...plugins import plugin_registry
 
@@ -25,8 +36,6 @@ def discover_and_register_all_plugins() -> Tuple[List[Type[Any]], Dict[str, Any]
         platforms_core_plugins = []
         try:
             # Add parent directory to sys.path temporarily for platforms import
-            import sys
-            import os
             parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
             if parent_dir not in sys.path:
                 sys.path.insert(0, parent_dir)
@@ -92,5 +101,3 @@ def discover_and_register_all_plugins() -> Tuple[List[Type[Any]], Dict[str, Any]
         raise
 
     return registered_core, summary
-
-

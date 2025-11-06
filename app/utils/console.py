@@ -1,5 +1,7 @@
 """Console utility functions for controlling console window visibility."""
 
+from __future__ import annotations
+
 import sys
 import platform
 from typing import Optional
@@ -102,3 +104,12 @@ def apply_console_setting() -> bool:
     except ImportError:
         # If import fails, default to hiding console (production behavior)
         return set_console_visibility(False)
+
+
+__all__ = [
+    'hide_console_window',
+    'show_console_window',
+    'set_console_visibility',
+    'apply_console_setting',
+]
+

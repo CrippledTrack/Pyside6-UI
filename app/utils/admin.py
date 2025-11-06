@@ -19,10 +19,13 @@ def needs_admin_for_plugin(is_windows: bool, requires_admin: bool, is_admin: boo
         try:
             from GUI.app.daemon import is_daemon_available
             return not is_daemon_available()
-        except:
+        except Exception:
             # If daemon module not available, assume admin required
             return True
     
     return False
+
+
+__all__ = ['needs_admin_for_plugin']
 
 

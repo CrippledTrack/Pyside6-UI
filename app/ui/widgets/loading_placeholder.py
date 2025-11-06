@@ -1,11 +1,21 @@
+"""
+Loading placeholder widget for tabs that are being loaded.
+
+This widget displays a loading message while a tab's content is being initialized.
+"""
+
 from __future__ import annotations
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from typing import Optional
+
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 
 class LoadingPlaceholder(QWidget):
-    def __init__(self, tab_name: str, parent: QWidget | None = None) -> None:
+    """Widget that displays a loading message for a tab."""
+
+    def __init__(self, tab_name: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
         label = QLabel(f"Loading {tab_name}...")
@@ -13,3 +23,4 @@ class LoadingPlaceholder(QWidget):
         layout.addWidget(label)
 
 
+__all__ = ['LoadingPlaceholder']

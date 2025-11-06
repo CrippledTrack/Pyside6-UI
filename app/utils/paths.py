@@ -43,6 +43,15 @@ def app_root() -> Path:
 
 
 def logs_dir() -> Path:
+    """Get the logs directory path."""
     return app_root() / "logs"
+
+
+__all__ = [
+    'get_base_path',
+    'get_plugins_dir',
+    'app_root',
+    'logs_dir',
+]
 
 

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 from typing import Optional
 from PySide6.QtWidgets import (
@@ -11,10 +13,11 @@ from .theme_manager import ThemeManager
 
 logger = logging.getLogger(__name__)
 
+
 class ThemePreviewWidget(QFrame):
     """Widget for previewing themes"""
     
-    def __init__(self, parent=None):
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setMinimumSize(300, 200)
         self.setFrameStyle(QFrame.Shape.Box)
@@ -102,7 +105,7 @@ class ThemeDialog(QDialog):
     
     themeSelected = Signal(str)  # Signal emitted when a theme is selected
     
-    def __init__(self, theme_manager: ThemeManager, parent=None):
+    def __init__(self, theme_manager: ThemeManager, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.theme_manager = theme_manager
         self.current_theme = theme_manager.get_current_theme()

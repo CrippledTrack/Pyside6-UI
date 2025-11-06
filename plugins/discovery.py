@@ -3,6 +3,8 @@ Plugin discovery system for Basic GUI Application.
 
 Supports both entry points (for installed plugins) and local plugins folder.
 """
+from __future__ import annotations
+
 import os
 import sys
 import inspect

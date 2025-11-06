@@ -3,25 +3,19 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import threading
 import traceback
-from datetime import datetime
-from logging.handlers import RotatingFileHandler
 import warnings
-# Try to import from platforms first, fallback to ui app constants
-try:
-    from platforms.constants import LOGGING_ENABLED, LOG_TO_FILE
-except ImportError:
-    try:
-        # If running from ui directory, try parent directory
-        import sys
-        import os
-        parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        if parent_dir not in sys.path:
-            sys.path.insert(0, parent_dir)
-        from platforms.constants import LOGGING_ENABLED, LOG_TO_FILE
-    except ImportError:
-        from app.constants import LOGGING_ENABLED, LOG_TO_FILE
+from datetime import datetime
+from pathlib import Path
+from logging.handlers import RotatingFileHandler
 
+from ..utils.imports import get_platforms_constants
+
+# Import platform constants using the utility function
+constants = get_platforms_constants()
+LOGGING_ENABLED = constants.LOGGING_ENABLED
+LOG_TO_FILE = constants.LOG_TO_FILE
 
 SAVE_LOGS_TO_FILE = LOG_TO_FILE
 MAX_LOG_SIZE = 5 * 1024 * 1024  # 5MB
@@ -35,7 +29,6 @@ class CustomFormatter(logging.Formatter):
         elif record.threadName and record.threadName.startswith("Dummy-"):
             # Replace Qt internal thread names with more descriptive names
             # This handles cases where Qt creates internal threads with "Dummy-X" names
-            import threading
             current_thread = threading.current_thread()
             if hasattr(current_thread, 'objectName') and current_thread.objectName():
                 record.threadName = current_thread.objectName()
@@ -71,11 +64,10 @@ def _configure_handlers(root_logger: logging.Logger) -> None:
     )
 
     if SAVE_LOGS_TO_FILE:
-        log_dir = "logs"
-        os.makedirs(log_dir, exist_ok=True)
-        log_file = os.path.join(
-            log_dir, f"app_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-        )
+        from ..utils.paths import logs_dir
+        log_dir = logs_dir()
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / f"app_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
         file_handler = RotatingFileHandler(
             log_file, maxBytes=MAX_LOG_SIZE, backupCount=MAX_LOG_FILES, encoding="utf-8"
         )
@@ -140,5 +132,3 @@ def setup_logging() -> logging.Logger:
         logger = logging.getLogger(__name__)
         logger.error(f"Failed to configure logging: {str(e)}")
         return logger
-
-

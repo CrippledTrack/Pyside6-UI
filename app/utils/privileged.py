@@ -1,5 +1,7 @@
 """Helper module for running privileged commands via daemon."""
 
+from __future__ import annotations
+
 import subprocess
 import logging
 

@@ -6,12 +6,15 @@ Provides animated toast notifications that appear temporarily.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 from PySide6.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QFrame, QMainWindow
 )
 from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QRect, QEvent
 from PySide6.QtGui import QFont, QPalette, QColor, QMouseEvent
+
+if TYPE_CHECKING:
+    from ...themes.theme_manager import ThemeManager
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +22,14 @@ logger = logging.getLogger(__name__)
 class ToastNotification(QFrame):
     """A toast notification widget that appears temporarily."""
     
-    def __init__(self, message: str, notification_type: str = "info", duration: int = 3000, parent=None, theme_manager=None):
+    def __init__(
+        self, 
+        message: str, 
+        notification_type: str = "info", 
+        duration: int = 3000, 
+        parent: Optional[QWidget] = None, 
+        theme_manager: Optional["ThemeManager"] = None
+    ) -> None:
         super().__init__(parent)  # Set parent for proper window hierarchy
         self.message = message
         self.notification_type = notification_type
@@ -137,7 +147,7 @@ class ToastNotification(QFrame):
                 # Calculate luminance
                 luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
                 return luminance < 0.5
-        except:
+        except Exception:
             pass
         return False
     
@@ -317,12 +327,12 @@ class ToastNotification(QFrame):
 class ToastManager:
     """Manages multiple toast notifications."""
     
-    def __init__(self, parent_widget: Optional[QWidget] = None, theme_manager=None):
+    def __init__(self, parent_widget: Optional[QWidget] = None, theme_manager: Optional["ThemeManager"] = None) -> None:
         self.parent_widget = parent_widget
         self.theme_manager = theme_manager
         self.active_toasts: list[ToastNotification] = []
     
-    def show_toast(self, message: str, notification_type: str = "info", duration: int = 3000):
+    def show_toast(self, message: str, notification_type: str = "info", duration: int = 3000) -> None:
         """Show a toast notification."""
         # Close all existing toasts when showing a new one
         self.clear_all()
@@ -341,38 +351,38 @@ class ToastManager:
         
         toast.destroyed.connect(remove_toast)
     
-    def show_info(self, message: str, duration: int = 3000):
+    def show_info(self, message: str, duration: int = 3000) -> None:
         """Show info toast."""
         self.show_toast(message, "info", duration)
     
-    def show_success(self, message: str, duration: int = 3000):
+    def show_success(self, message: str, duration: int = 3000) -> None:
         """Show success toast."""
         self.show_toast(message, "success", duration)
     
-    def show_warning(self, message: str, duration: int = 4000):
+    def show_warning(self, message: str, duration: int = 4000) -> None:
         """Show warning toast."""
         self.show_toast(message, "warning", duration)
     
-    def show_error(self, message: str, duration: int = 5000):
+    def show_error(self, message: str, duration: int = 5000) -> None:
         """Show error toast."""
         self.show_toast(message, "error", duration)
     
-    def show_loading(self, message: str, duration: int = 2000):
+    def show_loading(self, message: str, duration: int = 2000) -> None:
         """Show loading toast."""
         self.show_toast(message, "loading", duration)
     
-    def clear_all(self):
+    def clear_all(self) -> None:
         """Clear all active toasts."""
         for toast in self.active_toasts.copy():
             toast.close_toast()
         self.active_toasts.clear()
     
-    def refresh_theme(self):
+    def refresh_theme(self) -> None:
         """Refresh all active toasts with current theme."""
         for toast in self.active_toasts:
             if hasattr(toast, 'apply_theme'):
                 toast.apply_theme()
     
-    def update_theme_manager(self, theme_manager):
+    def update_theme_manager(self, theme_manager: Optional["ThemeManager"]) -> None:
         """Update the theme manager reference."""
         self.theme_manager = theme_manager
