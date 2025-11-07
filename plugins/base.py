@@ -146,6 +146,83 @@ class BaseTabPlugin(ABC):
                 errors.append(f"Invalid required_gui_version format (must include operators): {cls.required_gui_version}")
         
         return errors
+    
+    @classmethod
+    def on_tab_activated(cls, widget: Any) -> None:
+        """
+        Called when the tab becomes active.
+        
+        This method is optional and can be overridden by plugins to perform
+        actions when their tab is activated (e.g., refresh data, update UI).
+        
+        Args:
+            widget: The widget instance for this tab
+        """
+        pass
+    
+    @classmethod
+    def on_tab_deactivated(cls, widget: Any) -> None:
+        """
+        Called when the tab becomes inactive.
+        
+        This method is optional and can be overridden by plugins to perform
+        actions when their tab is deactivated (e.g., save state, pause updates).
+        
+        Args:
+            widget: The widget instance for this tab
+        """
+        pass
+    
+    @classmethod
+    def on_plugin_enabled(cls) -> None:
+        """
+        Called when the plugin is enabled.
+        
+        This method is optional and can be overridden by plugins to perform
+        initialization when the plugin is enabled.
+        """
+        pass
+    
+    @classmethod
+    def on_plugin_disabled(cls) -> None:
+        """
+        Called when the plugin is disabled.
+        
+        This method is optional and can be overridden by plugins to perform
+        cleanup when the plugin is disabled.
+        """
+        pass
+    
+    @classmethod
+    def on_settings_changed(cls, settings_dict: Dict[str, Any]) -> None:
+        """
+        Called when plugin settings are changed.
+        
+        This method is optional and can be overridden by plugins to react
+        to settings changes.
+        
+        Args:
+            settings_dict: Dictionary containing the updated settings
+        """
+        pass
+    
+    @classmethod
+    def get_settings_widget(cls, parent: Optional[Any] = None) -> Optional[Any]:
+        """
+        Get a settings widget for this plugin.
+        
+        This method is optional and can be overridden by plugins to provide
+        a configuration widget. The widget should contain controls for all
+        plugin settings that the user can configure.
+        
+        Args:
+            parent: Parent widget for the settings widget
+            
+        Returns:
+            A widget containing settings controls, or None if the plugin
+            has no configurable settings
+        """
+        return None
 
 
 class CoreTabPlugin(BaseTabPlugin):

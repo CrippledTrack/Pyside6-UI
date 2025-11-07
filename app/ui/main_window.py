@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from ..services.settings_service import SettingsService
 
-from PySide6.QtCore import QPoint, Qt, QThread, Signal, Slot
+from PySide6.QtCore import QPoint, QTimer, Qt, QThread, Signal, Slot
 from PySide6.QtGui import QAction, QCloseEvent, QFont, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QMenuBar,
     QMessageBox,
     QPushButton,
+    QStatusBar,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -39,10 +40,9 @@ from ..ui.widgets.admin_required_placeholder import AdminRequiredPlaceholder
 from ..ui.widgets.error_placeholder import ErrorPlaceholder
 from ..ui.widgets.loading_placeholder import LoadingPlaceholder
 from ..utils.admin import needs_admin_for_plugin
+from ..utils.display_utils import build_title, build_version_details
 from ..utils.imports import get_platforms_constants
 from ..utils.shortcuts import ShortcutManager
-from ..utils.version import build_version_details
-from ..utils.window_title import build_title
 
 # Import platform constants using the utility function
 constants = get_platforms_constants()
@@ -148,11 +148,13 @@ class MainWindow(QMainWindow):
         self.theme_manager = theme_manager
         self.loaded_tabs: Dict[str, Dict[str, Any]] = {}
         self.is_loading_tab = False
+        self._status_timer: Optional[QTimer] = None
 
         self._setup_admin_status()
         self.setWindowTitle(f"{VERSION_NAME} v{VERSION} ({CURRENT_PLATFORM.capitalize()})")
         self._setup_window_geometry()
         self._setup_ui_components()
+        self._setup_status_bar()
         self.setup_toast_manager()
         self.setup_shortcuts()
         QApplication.processEvents()
@@ -238,6 +240,47 @@ class MainWindow(QMainWindow):
         self.tab_loader.add_tab.connect(self.add_tab)
         self.tab_loader.start()
 
+    def _setup_status_bar(self) -> None:
+        """Create and configure the status bar."""
+        self.status_bar = QStatusBar(self)
+        self.setStatusBar(self.status_bar)
+        # Make status bar smaller
+        self.status_bar.setMaximumHeight(20)
+    
+    def show_status(self, message: str, timeout: int = 0) -> None:
+        """
+        Show a status message in the status bar.
+        
+        Args:
+            message: Status message to display
+            timeout: Timeout in milliseconds (0 = permanent, clears on next show_status call)
+        """
+        # Clear any existing timer
+        if self._status_timer:
+            self._status_timer.stop()
+            self._status_timer.deleteLater()
+            self._status_timer = None
+        
+        # Show the message
+        if timeout > 0:
+            self.status_bar.showMessage(message, timeout)
+            # Set up timer to clear after timeout
+            self._status_timer = QTimer(self)
+            self._status_timer.setSingleShot(True)
+            self._status_timer.timeout.connect(self.clear_status)
+            self._status_timer.start(timeout)
+        else:
+            self.status_bar.showMessage(message)
+    
+    def clear_status(self) -> None:
+        """Clear the status bar message."""
+        # Clear any existing timer
+        if self._status_timer:
+            self._status_timer.stop()
+            self._status_timer.deleteLater()
+            self._status_timer = None
+        self.status_bar.clearMessage()
+
     def _setup_menu_bar(self) -> None:
         """Create menu bar and all menu items."""
         self.menu_bar = QMenuBar(self)
@@ -283,6 +326,20 @@ class MainWindow(QMainWindow):
     def on_tab_changed(self, index: int) -> None:
         if self.is_loading_tab or index < 0:
             return
+        
+        # Call deactivation hook for previously active tab
+        previous_index = getattr(self, '_previous_tab_index', -1)
+        if previous_index >= 0 and previous_index != index:
+            try:
+                prev_tab_name = self.tab_widget.tabText(previous_index)
+                prev_tab_info = self.loaded_tabs.get(prev_tab_name)
+                if prev_tab_info and prev_tab_info["instance"]:
+                    plugin_class = prev_tab_info["plugin_class"]
+                    if hasattr(plugin_class, 'on_tab_deactivated'):
+                        plugin_class.on_tab_deactivated(prev_tab_info["instance"])
+            except Exception as e:
+                logger.debug(f"Error calling deactivation hook: {e}")
+        
         try:
             self.is_loading_tab = True
             tab_name = self.tab_widget.tabText(index)
@@ -301,6 +358,15 @@ class MainWindow(QMainWindow):
                 self.tab_widget.insertTab(index, tab_info["instance"], tab_name)
                 self.tab_widget.setCurrentIndex(index)
                 logger.info(f"Lazy loaded plugin tab: {tab_name}")
+            
+            # Call activation hook for newly active tab
+            if tab_info and tab_info["instance"]:
+                plugin_class = tab_info["plugin_class"]
+                if hasattr(plugin_class, 'on_tab_activated'):
+                    try:
+                        plugin_class.on_tab_activated(tab_info["instance"])
+                    except Exception as e:
+                        logger.debug(f"Error calling activation hook for {tab_name}: {e}")
         except Exception as e:
             logger.error(f"Error loading tab {tab_name}: {e}")
             # Replace current tab content with an error placeholder
@@ -310,6 +376,7 @@ class MainWindow(QMainWindow):
             self.tab_widget.setCurrentIndex(index)
         finally:
             self.is_loading_tab = False
+            self._previous_tab_index = index
             self.update_window_title()
 
     def update_window_title(self) -> None:
@@ -383,7 +450,7 @@ class MainWindow(QMainWindow):
         return False
 
     def open_plugin_management_dialog(self) -> None:
-        dlg = PluginManagementDialog(self)
+        dlg = PluginManagementDialog(self, self.settings_service)
         dlg.pluginToggled.connect(self.on_plugin_toggled)
         dlg.resize(900, 560)
         dlg.exec()
