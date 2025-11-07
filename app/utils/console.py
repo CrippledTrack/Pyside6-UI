@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-import sys
+import logging
+import os
 import platform
+import sys
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 def hide_console_window() -> bool:
@@ -101,6 +105,7 @@ def apply_console_setting() -> bool:
                 # LEGACY: Support for old 'platforms/' folder name (deprecated, 3.0.0 compatibility)
                 try:
                     from platforms.constants import SHOW_CONSOLE
+                    logger.warning("Using legacy 'platforms/' folder for SHOW_CONSOLE constant (deprecated, 3.0.0 compatibility). Consider migrating to 'app_plugins/'")
                 except ImportError:
                     # LEGACY: Support for old 'platforms/' folder name with path manipulation (deprecated, 3.0.0 compatibility)
                     try:
@@ -108,6 +113,7 @@ def apply_console_setting() -> bool:
                         if parent_dir not in sys.path:
                             sys.path.insert(0, parent_dir)
                         from platforms.constants import SHOW_CONSOLE
+                        logger.warning("Using legacy 'platforms/' folder for SHOW_CONSOLE constant (deprecated, 3.0.0 compatibility). Consider migrating to 'app_plugins/'")
                     except ImportError:
                         from ..constants import SHOW_CONSOLE
         

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def get_platforms_constants() -> Any:
@@ -43,6 +46,7 @@ def get_platforms_constants() -> Any:
     # LEGACY: Support for old 'platforms/' folder name (deprecated, 3.0.0 compatibility)
     try:
         from platforms import constants
+        logger.warning("Using legacy 'platforms/' folder for constants (deprecated, 3.0.0 compatibility). Consider migrating to 'app_plugins/'")
         return constants
     except ImportError:
         pass
@@ -56,6 +60,7 @@ def get_platforms_constants() -> Any:
             sys.path.insert(0, str(parent_dir))
         
         from platforms import constants
+        logger.warning("Using legacy 'platforms/' folder for constants (deprecated, 3.0.0 compatibility). Consider migrating to 'app_plugins/'")
         return constants
     except ImportError:
         pass
