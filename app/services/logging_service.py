@@ -19,7 +19,23 @@ LOG_TO_FILE = constants.LOG_TO_FILE
 
 SAVE_LOGS_TO_FILE = LOG_TO_FILE
 MAX_LOG_SIZE = 5 * 1024 * 1024  # 5MB
-MAX_LOG_FILES = 5
+MAX_LOG_FILES = 6
+LOG_FORMAT = "%(asctime)s - %(levelname)s - [%(threadName)s] - %(name)s - %(message)s%(exc_text)s"
+
+ANSI_RESET = "\033[0m"
+LEVEL_COLOR_MAP = {
+    logging.DEBUG: "\033[36m",     # Cyan
+    logging.INFO: "\033[32m",      # Green
+    logging.WARNING: "\033[33m",   # Yellow
+    logging.ERROR: "\033[31m",     # Red
+    logging.CRITICAL: "\033[35m",  # Magenta
+}
+THREAD_COLOR = "\033[94m"  # Bright blue
+LOGGER_COLOR_MAP = [
+    ("GUI.", "\033[96m"),             # Bright cyan
+    ("platforms.", "\033[92m"),       # Bright green
+    ("app_plugins.", "\033[92m"),     # Bright green
+]
 
 
 class CustomFormatter(logging.Formatter):
@@ -53,15 +69,84 @@ class CustomFormatter(logging.Formatter):
         return super().format(record)
 
 
+def _prune_old_logs(log_dir: Path, keep: int) -> None:
+    """Remove oldest log files beyond the retention limit."""
+    try:
+        log_files = sorted(
+            (path for path in log_dir.glob("app_*.log") if path.is_file()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+
+        for old_file in log_files[keep:]:
+            try:
+                old_file.unlink()
+            except Exception:
+                logging.getLogger(__name__).debug("Failed to remove log file %s", old_file, exc_info=True)
+    except Exception:
+        logging.getLogger(__name__).debug("Error while pruning old log files", exc_info=True)
+
+
+def _enable_windows_ansi_support() -> None:
+    """Enable ANSI processing on Windows consoles if needed."""
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+        mode = ctypes.c_uint()
+        if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            kernel32.SetConsoleMode(handle, mode.value | 0x0004)  # ENABLE_VIRTUAL_TERMINAL_PROCESSING
+    except Exception:
+        # If enabling ANSI support fails, silently continue without color.
+        pass
+
+
+def _supports_color(stream) -> bool:
+    if os.environ.get("NO_COLOR"):
+        return False
+    try:
+        return hasattr(stream, "isatty") and stream.isatty()
+    except Exception:
+        return False
+
+
+class ColorFormatter(CustomFormatter):
+    def __init__(self, fmt: str):
+        super().__init__(fmt)
+
+    def format(self, record: logging.LogRecord) -> str:
+        color = LEVEL_COLOR_MAP.get(record.levelno)
+        if not color:
+            return super().format(record)
+
+        original_levelname = record.levelname
+        original_threadname = record.threadName
+        original_logger_name = record.name
+        
+        record.levelname = f"{color}{original_levelname}{ANSI_RESET}"
+        record.threadName = f"{THREAD_COLOR}{original_threadname}{ANSI_RESET}"
+        for prefix, color_code in LOGGER_COLOR_MAP:
+            if original_logger_name.startswith(prefix):
+                record.name = f"{color_code}{original_logger_name}{ANSI_RESET}"
+                break
+        try:
+            formatted = super().format(record)
+        finally:
+            record.levelname = original_levelname
+            record.threadName = original_threadname
+            record.name = original_logger_name
+        return formatted
+
+
 def _configure_handlers(root_logger: logging.Logger) -> None:
     # Remove any existing handlers
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
 
-    formatter = CustomFormatter(
-        "%(asctime)s - %(levelname)s - [%(threadName)s] - %(name)s - %(message)s"
-        "%(exc_text)s"
-    )
+    base_formatter = CustomFormatter(LOG_FORMAT)
 
     if SAVE_LOGS_TO_FILE:
         from ..utils.paths import logs_dir
@@ -72,12 +157,18 @@ def _configure_handlers(root_logger: logging.Logger) -> None:
             log_file, maxBytes=MAX_LOG_SIZE, backupCount=MAX_LOG_FILES, encoding="utf-8"
         )
         file_handler.setLevel(logging.INFO)
-        file_handler.setFormatter(formatter)
+        file_handler.setFormatter(base_formatter)
         root_logger.addHandler(file_handler)
+        _prune_old_logs(log_dir, MAX_LOG_FILES)
 
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(formatter)
+    stream = console_handler.stream
+    if _supports_color(stream):
+        _enable_windows_ansi_support()
+        console_handler.setFormatter(ColorFormatter(LOG_FORMAT))
+    else:
+        console_handler.setFormatter(base_formatter)
     root_logger.addHandler(console_handler)
 
 
