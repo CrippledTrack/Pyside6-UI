@@ -31,10 +31,15 @@ LEVEL_COLOR_MAP = {
     logging.CRITICAL: "\033[35m",  # Magenta
 }
 THREAD_COLOR = "\033[94m"  # Bright blue
+DAEMON_THREAD_COLOR = "\033[95m"  # Bright magenta
 LOGGER_COLOR_MAP = [
     ("GUI.", "\033[96m"),             # Bright cyan
     ("platforms.", "\033[92m"),       # Bright green
     ("app_plugins.", "\033[92m"),     # Bright green
+]
+DAEMON_LOGGER_PREFIXES = [
+    "GUI.app.daemon",
+    "daemon",
 ]
 
 
@@ -127,11 +132,22 @@ class ColorFormatter(CustomFormatter):
         original_logger_name = record.name
         
         record.levelname = f"{color}{original_levelname}{ANSI_RESET}"
+        
+        # Always use normal thread color
         record.threadName = f"{THREAD_COLOR}{original_threadname}{ANSI_RESET}"
-        for prefix, color_code in LOGGER_COLOR_MAP:
-            if original_logger_name.startswith(prefix):
-                record.name = f"{color_code}{original_logger_name}{ANSI_RESET}"
-                break
+        
+        # Check if this is a daemon logger (by logger name prefix)
+        is_daemon_logger = any(original_logger_name.startswith(prefix) for prefix in DAEMON_LOGGER_PREFIXES)
+        
+        if is_daemon_logger:
+            # Color daemon logger name in bright magenta
+            record.name = f"{DAEMON_THREAD_COLOR}{original_logger_name}{ANSI_RESET}"
+        else:
+            # Use normal logger color mapping
+            for prefix, color_code in LOGGER_COLOR_MAP:
+                if original_logger_name.startswith(prefix):
+                    record.name = f"{color_code}{original_logger_name}{ANSI_RESET}"
+                    break
         try:
             formatted = super().format(record)
         finally:

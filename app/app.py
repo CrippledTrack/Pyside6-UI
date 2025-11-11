@@ -40,7 +40,7 @@ def run(argv: List[str]) -> int:
     # Check for daemon mode before GUI initialization
     if '--daemon' in argv and platform.system().lower() == 'linux':
         from .daemon.server import run_daemon
-        return run_daemon()
+        return run_daemon(argv)
     
     # Check if this is a Qt probe subprocess (Python -c mode) - skip all initialization
     if '-c' in argv:

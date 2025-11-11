@@ -233,8 +233,19 @@ def get_sudo_status():
 def is_daemon_running(socket_path: Optional[str] = None) -> bool:
     """Check if daemon is running by checking socket existence."""
     if socket_path is None:
-        from ..daemon.protocol import SOCKET_PATH
-        socket_path = SOCKET_PATH
+        from ..daemon.protocol import get_socket_path
+        # Get UID from environment to determine correct socket path
+        # When running normally (not via sudo/pkexec), get current user's UID directly
+        uid_str = os.environ.get('SUDO_UID') or os.environ.get('PKEXEC_UID')
+        if not uid_str:
+            # Not running via sudo/pkexec, get current user's UID directly
+            try:
+                uid = os.getuid()
+            except (AttributeError, OSError):
+                uid = None
+        else:
+            uid = int(uid_str) if uid_str else None
+        socket_path = get_socket_path(uid)
     if not os.path.exists(socket_path):
         return False
     
@@ -259,8 +270,20 @@ def start_daemon(socket_path: Optional[str] = None) -> Optional[object]:
     global _daemon_process
     
     if socket_path is None:
-        from ..daemon.protocol import SOCKET_PATH
-        socket_path = SOCKET_PATH
+        from ..daemon.protocol import get_socket_path
+        # Get UID from environment to determine correct socket path
+        # When running normally (not via sudo/pkexec), get current user's UID directly
+        uid_str = os.environ.get('SUDO_UID') or os.environ.get('PKEXEC_UID')
+        if not uid_str:
+            # Not running via sudo/pkexec, get current user's UID directly
+            try:
+                uid = os.getuid()
+            except (AttributeError, OSError):
+                uid = None
+        else:
+            uid = int(uid_str) if uid_str else None
+        socket_path = get_socket_path(uid)
+        logger.info(f"Determined socket path: {socket_path} (UID: {uid})")
     
     # Check if already running
     if is_daemon_running(socket_path):
@@ -331,34 +354,78 @@ def start_daemon(socket_path: Optional[str] = None) -> Optional[object]:
         logger.info(f"Daemon script path: {script_path}")
         daemon_cmd = [exe_path, str(script_path), '--daemon']
     
+    # Get UID/GID before starting daemon (needed for socket path and permissions)
+    # When running normally (not via sudo/pkexec), we need to get current user's UID
+    uid_str = os.environ.get('SUDO_UID') or os.environ.get('PKEXEC_UID')
+    if not uid_str:
+        # Not running via sudo/pkexec, get current user's UID directly
+        try:
+            original_uid = os.getuid()
+            original_gid = os.getgid()
+            logger.info(f"Running as normal user, UID: {original_uid}, GID: {original_gid}")
+        except (AttributeError, OSError):
+            original_uid = None
+            original_gid = None
+    else:
+        original_uid = int(uid_str) if uid_str else None
+        gid_str = os.environ.get('SUDO_GID') or os.environ.get('PKEXEC_GID')
+        original_gid = int(gid_str) if gid_str else None
+        logger.info(f"Running via elevation, original UID: {original_uid}, GID: {original_gid}")
+    
+    # Pass UID/GID as command-line arguments (pkexec doesn't preserve env vars)
+    if original_uid is not None:
+        daemon_cmd.extend(['--uid', str(original_uid)])
+        logger.info(f"Passing --uid {original_uid} to daemon")
+    if original_gid is not None:
+        daemon_cmd.extend(['--gid', str(original_gid)])
+        logger.info(f"Passing --gid {original_gid} to daemon")
+    
+    # Prepare environment (still pass it, but UID/GID are in command line as backup)
+    daemon_env = os.environ.copy()
+    if original_uid is not None:
+        daemon_env['PKEXEC_UID'] = str(original_uid)
+        daemon_env['SUDO_UID'] = str(original_uid)
+    if original_gid is not None:
+        daemon_env['PKEXEC_GID'] = str(original_gid)
+        daemon_env['SUDO_GID'] = str(original_gid)
+    
     # Try pkexec first, then sudo
     if check_pkexec_available():
         logger.info("Starting daemon with pkexec...")
         try:
             # Capture stderr to see daemon startup errors
             # stdout can stay uncaptured for pkexec GUI prompt if needed
+            # Pass environment variables so daemon can determine socket path
             process = subprocess.Popen(
                 ['pkexec'] + daemon_cmd,
+                env=daemon_env,
                 stderr=subprocess.PIPE,
                 start_new_session=True  # Detach from parent
             )
             _daemon_process = process
             logger.info(f"Daemon process started with PID {process.pid}")
             
-            # Wait a moment and check for immediate errors
+            # Monitor daemon stderr in background to catch errors
             import threading
-            def check_daemon_stderr():
-                time.sleep(1)  # Give daemon a moment to start
-                if process.stderr and process.poll() is not None:
-                    # Process already exited, read stderr
-                    try:
-                        stderr_data = process.stderr.read().decode('utf-8', errors='ignore')
-                        if stderr_data:
-                            logger.error(f"Daemon stderr output: {stderr_data}")
-                    except Exception:
-                        pass
+            def check_daemon_stderr_periodically():
+                """Periodically check daemon stderr for errors."""
+                if not process.stderr:
+                    return
+                try:
+                    # Wait a bit, then check if process exited
+                    time.sleep(2)
+                    if process.poll() is not None:
+                        # Process exited, read stderr
+                        try:
+                            stderr_data = process.stderr.read().decode('utf-8', errors='ignore')
+                            if stderr_data:
+                                logger.error(f"Daemon exited with stderr: {stderr_data}")
+                        except Exception:
+                            pass
+                except Exception as e:
+                    logger.debug(f"Error checking daemon stderr: {e}")
             
-            threading.Thread(target=check_daemon_stderr, daemon=True).start()
+            threading.Thread(target=check_daemon_stderr_periodically, daemon=True).start()
             
         except Exception as e:
             logger.error(f"Failed to start daemon with pkexec: {e}")
@@ -368,8 +435,11 @@ def start_daemon(socket_path: Optional[str] = None) -> Optional[object]:
         logger.info("Starting daemon with sudo...")
         try:
             # Don't capture stdout/stderr so password prompt can display
+            # Pass environment variables so daemon can determine socket path
+            # Use -E flag to preserve environment, or explicitly pass env
             process = subprocess.Popen(
-                ['sudo'] + daemon_cmd,
+                ['sudo', '-E'] + daemon_cmd,
+                env=daemon_env,
                 start_new_session=True  # Detach from parent
             )
             _daemon_process = process
@@ -389,25 +459,51 @@ def start_daemon(socket_path: Optional[str] = None) -> Optional[object]:
     max_wait = 600 if using_interactive else 20  # 5 minutes for interactive, 10 seconds for non-interactive
     check_interval = 0.5
     
-    logger.info("Waiting for daemon to start...")
+    logger.info(f"Waiting for daemon to start... (checking socket at: {socket_path})")
+    logger.info(f"Daemon process PID: {_daemon_process.pid if _daemon_process else None}")
+    
     for i in range(max_wait):
         time.sleep(check_interval)
         
+        # Periodically check if process is still running (every 2 seconds)
+        if i > 0 and i % 4 == 0:
+            if _daemon_process:
+                is_running = _daemon_process.poll() is None
+                logger.debug(f"Daemon process status: {'running' if is_running else 'exited'}")
+        
         # Check if process is still alive
         if _daemon_process and _daemon_process.poll() is not None:
-            # Process exited, check return code
+            # Process exited, check return code and read stderr
             returncode = _daemon_process.returncode
             logger.error(f"Daemon process exited with return code {returncode}")
+            
+            # Try to read stderr for error messages
+            if _daemon_process.stderr:
+                try:
+                    stderr_data = _daemon_process.stderr.read().decode('utf-8', errors='ignore')
+                    if stderr_data:
+                        logger.error(f"Daemon stderr output: {stderr_data}")
+                except Exception:
+                    pass
+            
             _daemon_process = None
             return None
         
         # Check if socket appeared (daemon started)
         if is_daemon_running(socket_path):
-            logger.info("Daemon started successfully")
+            logger.info(f"Daemon started successfully, socket found at: {socket_path}")
             from ..daemon.client import DaemonClient
             client = DaemonClient(socket_path)
             if client.connect():
+                logger.info("Successfully connected to daemon")
                 return client
+            else:
+                logger.warning("Socket exists but connection failed, continuing to wait...")
+        
+        # Log progress every 10 seconds
+        if i > 0 and i % 20 == 0:
+            elapsed = i * check_interval
+            logger.debug(f"Still waiting for daemon... ({elapsed:.1f}s elapsed, process running: {_daemon_process.poll() is None if _daemon_process else False})")
         
         # Process still running but socket not ready yet - continue waiting
         # (user might be entering password in pkexec/sudo prompt)
@@ -444,8 +540,19 @@ def start_daemon(socket_path: Optional[str] = None) -> Optional[object]:
 def stop_daemon(socket_path: Optional[str] = None):
     """Stop the daemon by sending shutdown request."""
     if socket_path is None:
-        from ..daemon.protocol import SOCKET_PATH
-        socket_path = SOCKET_PATH
+        from ..daemon.protocol import get_socket_path
+        # Get UID from environment to determine correct socket path
+        # When running normally (not via sudo/pkexec), get current user's UID directly
+        uid_str = os.environ.get('SUDO_UID') or os.environ.get('PKEXEC_UID')
+        if not uid_str:
+            # Not running via sudo/pkexec, get current user's UID directly
+            try:
+                uid = os.getuid()
+            except (AttributeError, OSError):
+                uid = None
+        else:
+            uid = int(uid_str) if uid_str else None
+        socket_path = get_socket_path(uid)
     if not is_daemon_running(socket_path):
         logger.info("Daemon not running")
         return

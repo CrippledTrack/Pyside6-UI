@@ -1,3 +1,9 @@
+"""Import utilities for handling platform constants with fallback support.
+
+This module provides functions to import constants from various locations
+with backward compatibility for legacy folder structures.
+"""
+
 from __future__ import annotations
 
 import sys

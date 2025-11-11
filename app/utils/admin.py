@@ -1,15 +1,31 @@
-"""Utilities for determining admin requirements for plugins."""
+"""Utilities for determining admin requirements for plugins.
+
+This module provides functions to check if admin privileges are required
+for plugin operations on different platforms.
+"""
 
 from __future__ import annotations
 
+import logging
 import platform
+
+logger = logging.getLogger(__name__)
 
 
 def needs_admin_for_plugin(is_windows: bool, requires_admin: bool, is_admin: bool) -> bool:
-    """Predicate to decide whether admin is required for a plugin tab creation.
+    """Determine whether admin privileges are required for a plugin tab creation.
     
-    On Windows: admin is required if plugin requires it and app is not running as admin
-    On Linux: admin is required if plugin requires it and daemon is not available
+    Args:
+        is_windows: True if running on Windows, False otherwise
+        requires_admin: True if the plugin requires admin privileges
+        is_admin: True if the application is currently running with admin privileges
+        
+    Returns:
+        True if admin privileges are required, False otherwise
+        
+    Note:
+        On Windows: admin is required if plugin requires it and app is not running as admin.
+        On Linux: admin is required if plugin requires it and daemon is not available.
     """
     if not requires_admin:
         return False

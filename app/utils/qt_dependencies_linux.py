@@ -1,15 +1,25 @@
+"""Qt dependencies management for Linux platforms.
+
+This module handles detection and installation of Qt xcb platform dependencies
+required for Qt applications to run on Linux systems.
+"""
+
 from __future__ import annotations
 
-import os
-import sys
-import subprocess
 import logging
-
+import os
+import subprocess
+import sys
 
 logger = logging.getLogger(__name__)
 
 
 def _detect_distribution_id() -> str:
+    """Detect the Linux distribution ID.
+    
+    Returns:
+        Distribution ID string (e.g., 'debian', 'ubuntu') or 'unknown'
+    """
     try:
         with open('/etc/os-release', 'r') as f:
             for line in f:
@@ -23,7 +33,17 @@ def _detect_distribution_id() -> str:
     return 'unknown'
 
 
-def _run(cmd, env=None, timeout=600):
+def _run(cmd: list[str], env: dict[str, str] | None = None, timeout: int = 600) -> tuple[str, str, int]:
+    """Run a command and return stdout, stderr, and return code.
+    
+    Args:
+        cmd: Command and arguments as a list
+        env: Optional environment variables dictionary
+        timeout: Command timeout in seconds (default 600)
+        
+    Returns:
+        Tuple of (stdout, stderr, returncode)
+    """
     try:
         proc = subprocess.run(
             cmd,
@@ -40,7 +60,7 @@ def _run(cmd, env=None, timeout=600):
         return '', str(e), -1
 
 
-def _probe_qt_xcb_in_subprocess() -> tuple:
+def _probe_qt_xcb_in_subprocess() -> tuple[bool, str]:
     """Attempt to initialize a minimal QApplication forcing the xcb platform in a subprocess.
     
     Returns (ok: bool, stderr: str)
@@ -59,7 +79,11 @@ def _probe_qt_xcb_in_subprocess() -> tuple:
 
 
 def _install_qt_xcb_dependencies_debian() -> bool:
-    """Install required Qt xcb dependencies on Debian/Ubuntu using apt."""
+    """Install required Qt xcb dependencies on Debian/Ubuntu systems.
+    
+    Returns:
+        True if installation succeeded, False otherwise
+    """
     # Minimal set known to be required by Qt 6.5+ for xcb
     apt_packages = [
         'libxcb-cursor0',

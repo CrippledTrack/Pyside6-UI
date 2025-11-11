@@ -1,4 +1,8 @@
-"""Helper module for running privileged commands via daemon."""
+"""Helper module for running privileged commands via daemon.
+
+This module provides functions to execute commands, read files, and write files
+with root privileges using the privileged daemon on Linux systems.
+"""
 
 from __future__ import annotations
 

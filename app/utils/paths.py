@@ -1,3 +1,9 @@
+"""Path utilities for determining application directories.
+
+This module provides functions to locate various application directories
+whether running from source or as a PyInstaller bundle.
+"""
+
 from __future__ import annotations
 
 import os

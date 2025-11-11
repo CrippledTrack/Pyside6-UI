@@ -1,11 +1,18 @@
-"""Console utility functions for controlling console window visibility."""
+"""Console utility functions for controlling console window visibility.
+
+This module provides functions to show, hide, and configure console window
+visibility on Windows systems.
+"""
 
 from __future__ import annotations
 
+import logging
 import os
 import platform
 import sys
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 def hide_console_window() -> bool:
