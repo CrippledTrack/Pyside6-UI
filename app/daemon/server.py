@@ -14,6 +14,7 @@ from typing import Dict, Any, Optional
 from .protocol import (
     OPERATION_RUN_COMMAND,
     OPERATION_SHUTDOWN,
+    SOCKET_PATH,
     deserialize_message,
     create_response,
     serialize_message
@@ -25,7 +26,6 @@ logger = logging.getLogger(__name__)
 log_format = '[Daemon] %(asctime)s - %(name)s - %(levelname)s - %(message)s'
 logging.basicConfig(level=logging.INFO, format=log_format)
 
-SOCKET_PATH = '/tmp/cyberpatriot-daemon.sock'
 MAX_WORKERS = 8
 SHUTDOWN_REQUESTED = threading.Event()
 

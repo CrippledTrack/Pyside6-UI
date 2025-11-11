@@ -87,24 +87,20 @@ def _install_qt_xcb_dependencies_debian() -> bool:
     env = os.environ.copy()
     env['DEBIAN_FRONTEND'] = 'noninteractive'
 
-    # apt-get update - must succeed before installation
-    logger.info('Updating apt package lists to prepare Qt dependency installation...')
-    update_cmd = ['env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get', 'update']
-    result = run_command_as_admin(update_cmd, interactive=True)
+    # Combine apt-get update and install into a single command to avoid double authentication
+    logger.info('Updating apt package lists and installing Qt xcb dependencies...')
+    packages_str = ' '.join(apt_packages)
+    combined_cmd = [
+        'sh', '-c',
+        f'env DEBIAN_FRONTEND=noninteractive apt-get update && '
+        f'env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends {packages_str}'
+    ]
+    result = run_command_as_admin(combined_cmd, interactive=True)
     if getattr(result, 'returncode', 1) != 0:
         stderr = getattr(result, 'stderr', '') or getattr(result, 'stdout', '')
-        logger.error(f"Failed to update package lists: {stderr}")
-        logger.error("Cannot proceed with Qt dependency installation without updated package lists")
+        logger.error(f"Failed to update package lists or install Qt dependencies: {stderr}")
         return False
-    logger.info("Package lists updated successfully")
-
-    install_cmd = ['env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get', 'install', '-y', '--no-install-recommends'] + apt_packages
-    logger.info('Installing missing Qt xcb dependencies via apt...')
-    result = run_command_as_admin(install_cmd, interactive=True)
-    if getattr(result, 'returncode', 1) != 0:
-        stderr = getattr(result, 'stderr', '') or getattr(result, 'stdout', '')
-        logger.error(f"Failed to install Qt dependencies: {stderr}")
-        return False
+    logger.info("Package lists updated and Qt dependencies installed successfully")
     return True
 
 

@@ -7,7 +7,7 @@ import logging
 import threading
 import time
 from typing import Dict, Any, Optional
-from .protocol import create_request, serialize_message, deserialize_message
+from .protocol import create_request, serialize_message, deserialize_message, SOCKET_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -25,14 +25,13 @@ class DaemonTimeoutError(Exception):
 class DaemonClient:
     """Client for communicating with privileged daemon."""
     
-    SOCKET_PATH = '/tmp/cyberpatriot-daemon.sock'
     CONNECT_TIMEOUT = 5.0
     OPERATION_TIMEOUT = 30.0
     RECONNECT_RETRIES = 3
     RECONNECT_DELAY = 1.0
     
     def __init__(self, socket_path: Optional[str] = None):
-        self.socket_path = socket_path or self.SOCKET_PATH
+        self.socket_path = socket_path or SOCKET_PATH
         self._socket: Optional[socket.socket] = None
         self._lock = threading.Lock()
         self._connected = False

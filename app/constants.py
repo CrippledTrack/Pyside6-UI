@@ -8,7 +8,7 @@ configuration values for the GUI application.
 from __future__ import annotations
 
 # Version information
-VERSION = "3.1.0"
+VERSION = "3.1.1"
 VERSION_NAME = "Basic UI Application"
 SUPPORTED_PLATFORMS = ["Windows", "Linux"]
 

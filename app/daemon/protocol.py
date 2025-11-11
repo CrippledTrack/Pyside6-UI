@@ -47,6 +47,9 @@ def deserialize_message(data: bytes) -> Dict[str, Any]:
 OPERATION_RUN_COMMAND = 'run_command'
 OPERATION_SHUTDOWN = 'shutdown'
 
+# Socket path for daemon communication
+SOCKET_PATH = '/tmp/privileged-daemon.sock'
+
 
 __all__ = [
     'create_request',
@@ -55,4 +58,5 @@ __all__ = [
     'deserialize_message',
     'OPERATION_RUN_COMMAND',
     'OPERATION_SHUTDOWN',
+    'SOCKET_PATH',
 ]
