@@ -230,6 +230,140 @@ def get_sudo_status():
     }
 
 
+def run_as_admin() -> bool:
+    """Attempt to re-launch the current application with root privileges.
+    
+    Behavior:
+    - If already running as root: returns False immediately (no relaunch).
+    - If elevation request succeeds: starts elevated instance and exits current process.
+    - If elevation request fails (e.g., password denied): raises RuntimeError.
+    
+    Returns:
+        False if already running as root, otherwise exits current process
+        
+    Raises:
+        RuntimeError: If elevation request fails or no elevation method is available
+    """
+    if is_admin():
+        return False
+    
+    # Get the script/executable path
+    script = os.path.abspath(sys.argv[0])
+    python_exe = sys.executable
+    
+    # Build command arguments - preserve all original arguments
+    cmd_args = [python_exe, script] + sys.argv[1:]
+    
+    # Try pkexec first (preferred for GUI applications)
+    if check_pkexec_available():
+        try:
+            # pkexec expects: pkexec <command> [args...]
+            # We use Popen and don't wait, so the new process starts and we exit
+            process = subprocess.Popen(
+                ['pkexec'] + cmd_args,
+                start_new_session=True
+            )
+            # Wait for authentication - give user time to enter password
+            # Check periodically if process is still running (waiting for auth or started)
+            # If process exits quickly (< 2 seconds), it likely failed
+            # If process is still running after 2 seconds, assume auth is in progress or succeeded
+            max_wait = 120  # 2 minutes max wait for authentication
+            check_interval = 0.5
+            waited = 0
+            
+            while waited < max_wait:
+                time.sleep(check_interval)
+                waited += check_interval
+                
+                poll_result = process.poll()
+                if poll_result is None:
+                    # Process is still running - either waiting for auth or app has started
+                    # If we've waited at least 2 seconds, assume auth succeeded and app is starting
+                    if waited >= 2.0:
+                        # Give it a bit more time to actually start the app, then exit
+                        time.sleep(1.0)
+                        sys.exit(0)
+                else:
+                    # Process exited
+                    # If it exited very quickly (< 1 second), it's likely an immediate failure
+                    if waited < 1.0:
+                        returncode = poll_result
+                        # pkexec returns 126 for authentication failure, 127 for command not found
+                        raise RuntimeError(f"pkexec authentication failed or was cancelled (return code: {returncode})")
+                    # If it ran for a while then exited, might have started but crashed
+                    # Or user cancelled after some time - treat as failure
+                    returncode = poll_result
+                    raise RuntimeError(f"pkexec process exited (return code: {returncode})")
+            
+            # Timeout - process still running but we've waited too long
+            # This shouldn't happen, but if it does, assume it's working and exit
+            logger.warning("pkexec authentication wait timed out, assuming success and exiting")
+            sys.exit(0)
+            
+        except FileNotFoundError:
+            # pkexec not found, fall through to sudo
+            pass
+        except Exception as e:
+            # If it's already a RuntimeError, re-raise it
+            if isinstance(e, RuntimeError):
+                raise
+            raise RuntimeError(f"pkexec failed: {e}") from e
+    
+    # Fall back to sudo
+    if check_sudo_available():
+        try:
+            # sudo expects: sudo <command> [args...]
+            # We use Popen and don't wait, so the new process starts and we exit
+            process = subprocess.Popen(
+                ['sudo'] + cmd_args,
+                start_new_session=True
+            )
+            # Wait for authentication - give user time to enter password
+            # Same logic as pkexec
+            max_wait = 120  # 2 minutes max wait for authentication
+            check_interval = 0.5
+            waited = 0
+            
+            while waited < max_wait:
+                time.sleep(check_interval)
+                waited += check_interval
+                
+                poll_result = process.poll()
+                if poll_result is None:
+                    # Process is still running - either waiting for auth or app has started
+                    # If we've waited at least 2 seconds, assume auth succeeded and app is starting
+                    if waited >= 2.0:
+                        # Give it a bit more time to actually start the app, then exit
+                        time.sleep(1.0)
+                        sys.exit(0)
+                else:
+                    # Process exited
+                    # If it exited very quickly (< 1 second), it's likely an immediate failure
+                    if waited < 1.0:
+                        returncode = poll_result
+                        raise RuntimeError(f"sudo authentication failed or was cancelled (return code: {returncode})")
+                    # If it ran for a while then exited, might have started but crashed
+                    # Or user cancelled after some time - treat as failure
+                    returncode = poll_result
+                    raise RuntimeError(f"sudo process exited (return code: {returncode})")
+            
+            # Timeout - process still running but we've waited too long
+            # This shouldn't happen, but if it does, assume it's working and exit
+            logger.warning("sudo authentication wait timed out, assuming success and exiting")
+            sys.exit(0)
+            
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            # If it's already a RuntimeError, re-raise it
+            if isinstance(e, RuntimeError):
+                raise
+            raise RuntimeError(f"sudo failed: {e}") from e
+    
+    # No elevation method available
+    raise RuntimeError("Neither pkexec nor sudo is available. Cannot restart with elevated privileges.")
+
+
 def is_daemon_running(socket_path: Optional[str] = None) -> bool:
     """Check if daemon is running by checking socket existence."""
     if socket_path is None:

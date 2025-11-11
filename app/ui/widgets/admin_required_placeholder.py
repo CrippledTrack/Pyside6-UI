@@ -29,12 +29,12 @@ class AdminRequiredPlaceholder(QWidget):
         if is_linux:
             msg_text = (
                 f"{tab_name} requires administrator privileges to run.\n\n"
-                "The privileged daemon could not be started.\n"
+                "The privileged daemon is not currently running.\n"
                 "Some features requiring root access will be disabled.\n\n"
-                "To enable this tab, restart the application and\n"
+                "Click the button below to start the daemon and\n"
                 "grant administrator privileges when prompted."
             )
-            btn_text = "Restart with Privileges"
+            btn_text = "Start Privileged Daemon"
         else:
             msg_text = (
                 f"{tab_name} requires administrator privileges to run.\n"

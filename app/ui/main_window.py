@@ -8,6 +8,7 @@ plugin loading, menu bar, and user interface components.
 from __future__ import annotations
 
 import logging
+import os
 import platform
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
@@ -34,6 +35,8 @@ from ...plugins import plugin_registry
 from ...plugins.plugin_management import PluginManagementDialog
 from ...themes.theme_dialog import ThemeDialog
 from ...themes.theme_manager import ThemeManager
+from ..services.admin_service import get_admin_service
+from ..services.daemon_service import get_daemon_service
 from ..services.plugin_service import discover_and_register_all_plugins
 from ..ui.toast_notification import ToastManager
 from ..ui.widgets.admin_required_placeholder import AdminRequiredPlaceholder
@@ -54,15 +57,11 @@ VERSION_NAME = constants.VERSION_NAME
 
 CURRENT_PLATFORM = platform.system().lower()
 
-try:
-    if CURRENT_PLATFORM == "windows":
-        from ..utils.elevation_windows import is_admin, run_as_admin
-    elif CURRENT_PLATFORM == "linux":
-        from ..utils.elevation_linux import get_sudo_status, is_admin
-    else:  # pragma: no cover - unsupported platforms
-        raise RuntimeError(f"Unsupported platform: {CURRENT_PLATFORM}")
-except Exception as e:  # pragma: no cover - import-time platform errors
-    raise
+# Platform-specific elevation imports (for restart_as_admin)
+if CURRENT_PLATFORM == "windows":
+    from ..utils.elevation_windows import run_as_admin
+elif CURRENT_PLATFORM == "linux":
+    from ..utils.elevation_linux import run_as_admin
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +141,12 @@ class TabLoaderThread(QThread):
 
 class MainWindow(QMainWindow):
     def __init__(self, theme_manager: Optional[ThemeManager] = None, settings_service: Optional["SettingsService"] = None) -> None:
+        """Initialize the main window.
+        
+        Args:
+            theme_manager: Optional theme manager instance
+            settings_service: Optional settings service instance
+        """
         super().__init__()
         logger.info(f"Initializing MainWindow for {VERSION_NAME} v{VERSION} on {CURRENT_PLATFORM}")
         self.settings_service = settings_service
@@ -149,8 +154,14 @@ class MainWindow(QMainWindow):
         self.loaded_tabs: Dict[str, Dict[str, Any]] = {}
         self.is_loading_tab = False
         self._status_timer: Optional[QTimer] = None
-
-        self._setup_admin_status()
+        
+        # Initialize services
+        self.daemon_service = get_daemon_service()
+        if CURRENT_PLATFORM == "linux":
+            self.daemon_service.register_refresh_callback(self._refresh_admin_tabs)
+        
+        # Initialize admin service (pass daemon service for Linux)
+        self.admin_service = get_admin_service(self.daemon_service if CURRENT_PLATFORM == "linux" else None)
         self.setWindowTitle(f"{VERSION_NAME} v{VERSION} ({CURRENT_PLATFORM.capitalize()})")
         self._setup_window_geometry()
         self._setup_ui_components()
@@ -163,44 +174,6 @@ class MainWindow(QMainWindow):
         self.update_window_title()
         self.setup_tooltips()
 
-    def _setup_admin_status(self) -> None:
-        """Handle all admin/elevation logic for the current platform."""
-        if CURRENT_PLATFORM == "windows":
-            self._check_windows_admin_status()
-        elif CURRENT_PLATFORM == "linux":
-            self._check_linux_admin_status()
-
-    def _check_windows_admin_status(self) -> None:
-        """Check and handle Windows admin status."""
-        self.is_admin = is_admin()
-        if self.is_admin:
-            logger.info("Application running with admin privileges")
-            return
-
-        if REQUIRE_ADMIN_BY_DEFAULT:
-            try:
-                logger.warning("Attempting to restart with elevated rights...")
-                run_as_admin()
-            except Exception as e:
-                logger.warning(f"Elevation denied or failed ({e}); continuing without admin.")
-            self.is_admin = is_admin()
-            if not self.is_admin:
-                logger.info("Continuing without admin privileges. Some operations will be disabled until elevated.")
-        else:
-            logger.info("Running without admin privileges by default. Some operations will be disabled until elevated.")
-
-    def _check_linux_admin_status(self) -> None:
-        """Check and handle Linux admin status."""
-        self.sudo_status = get_sudo_status()
-        self.is_admin = self.sudo_status["is_admin"]
-        if self.is_admin:
-            logger.info("Application running with admin/root privileges")
-        else:
-            logger.info(f"Application running as user '{self.sudo_status['current_user']}'")
-            if self.sudo_status["sudo_available"]:
-                logger.info("Sudo is available - operations requiring root will prompt for password")
-            else:
-                logger.warning("Sudo not available - some operations may not work")
 
     def _setup_window_geometry(self) -> None:
         """Restore window size and state from settings."""
@@ -304,11 +277,40 @@ class MainWindow(QMainWindow):
         self.settings_menu.addSeparator()
 
     def _create_admin_menu(self) -> None:
-        """Create the Admin menu if needed (Windows only, when not elevated)."""
-        if CURRENT_PLATFORM == "windows" and not getattr(self, "is_admin", False):
+        """Create the Admin menu if needed.
+        
+        On Windows: Shows when not running as administrator.
+        On Linux: Always shows to allow starting the daemon.
+        """
+        should_show = False
+        if CURRENT_PLATFORM == "windows":
+            should_show = not self.admin_service.is_admin()
+        elif CURRENT_PLATFORM == "linux":
+            # On Linux, always show the menu to allow starting the daemon
+            should_show = True
+        
+        if should_show:
             self.admin_menu = QMenu("Admin", self)
             self.menu_bar.addMenu(self.admin_menu)
-            self.restart_admin_action = QAction("Restart as Administrator", self)
+            # Platform-specific menu text
+            if CURRENT_PLATFORM == "linux":
+                # Check if daemon is already running
+                if self.daemon_service.is_available():
+                    action_text = "Daemon Running"
+                    tooltip_text = "The privileged daemon is currently running"
+                    enabled = False
+                else:
+                    action_text = "Start Privileged Daemon"
+                    tooltip_text = "Start the privileged daemon for root operations"
+                    enabled = True
+            else:
+                action_text = "Restart as Administrator"
+                tooltip_text = "Restart the application with administrator privileges"
+                enabled = True
+            
+            self.restart_admin_action = QAction(action_text, self)
+            self.restart_admin_action.setToolTip(tooltip_text)
+            self.restart_admin_action.setEnabled(enabled)
             self.restart_admin_action.triggered.connect(self.restart_as_admin)
             self.admin_menu.addAction(self.restart_admin_action)
 
@@ -344,10 +346,26 @@ class MainWindow(QMainWindow):
             self.is_loading_tab = True
             tab_name = self.tab_widget.tabText(index)
             tab_info = self.loaded_tabs.get(tab_name)
+            
+            # On Linux, check if tab is showing AdminRequiredPlaceholder and daemon is now available
+            if CURRENT_PLATFORM == "linux" and tab_info and tab_info.get("instance"):
+                if isinstance(tab_info["instance"], AdminRequiredPlaceholder):
+                    plugin_class = tab_info["plugin_class"]
+                    requires_admin = getattr(plugin_class, 'requires_admin', False)
+                    
+                    # Check if daemon is now available
+                    if self.daemon_service.is_available() and not needs_admin_for_plugin(False, requires_admin, False):
+                        # Daemon is available, reload the tab
+                        logger.info(f"Daemon available, reloading tab '{tab_name}'")
+                        self._reload_tab(tab_name)
+                        self._previous_tab_index = index
+                        self.is_loading_tab = False
+                        return
+            
             if tab_info and not tab_info["instance"]:
                 plugin_class = tab_info["plugin_class"]
                 requires_admin = bool(getattr(plugin_class, "requires_admin", False))
-                if needs_admin_for_plugin(CURRENT_PLATFORM == "windows", requires_admin, getattr(self, "is_admin", False)):
+                if needs_admin_for_plugin(CURRENT_PLATFORM == "windows", requires_admin, self.admin_service.is_admin()):
                     # Show admin required placeholder (works for both Windows and Linux)
                     admin_widget = AdminRequiredPlaceholder(tab_name)
                     admin_widget.restartRequested.connect(self.restart_as_admin)
@@ -416,38 +434,15 @@ class MainWindow(QMainWindow):
         return build_version_details(VERSION_INFO, CURRENT_PLATFORM)
 
     def prompt_for_admin_operation(self, operation_description: str) -> bool:
-        if CURRENT_PLATFORM == "windows":
-            if self.is_admin:
-                return True
-            QMessageBox.warning(
-                self,
-                "Admin Privileges Required",
-                f"{operation_description} requires administrator privileges.\n"
-                "Please restart the application as administrator.",
-            )
-            return False
-        elif CURRENT_PLATFORM == "linux":
-            if self.is_admin:
-                return True
-            if not self.sudo_status["sudo_available"]:
-                QMessageBox.warning(
-                    self,
-                    "Admin Privileges Required",
-                    f"{operation_description} requires root privileges, but sudo is not available.\n"
-                    "Please run the application as root or install sudo.",
-                )
-                return False
-            reply = QMessageBox.question(
-                self,
-                "Admin Privileges Required",
-                f"{operation_description} requires root privileges.\n"
-                "The application will prompt for your password when needed.\n\n"
-                "Do you want to continue?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.Yes,
-            )
-            return reply == QMessageBox.StandardButton.Yes
-        return False
+        """Prompt user for admin operation and check if admin is available.
+        
+        Args:
+            operation_description: Description of the operation requiring admin
+            
+        Returns:
+            True if admin is available, False otherwise
+        """
+        return self.admin_service.prompt_for_admin_operation(operation_description, self)
 
     def open_plugin_management_dialog(self) -> None:
         dlg = PluginManagementDialog(self, self.settings_service)
@@ -504,12 +499,121 @@ class MainWindow(QMainWindow):
             self.toast_manager.refresh_theme()
 
     def restart_as_admin(self) -> None:
-        if CURRENT_PLATFORM == "windows":
-            try:
+        """Restart the application with administrator/root privileges.
+        
+        On Windows: Restarts the entire application as administrator.
+        On Linux: Starts the privileged daemon (GUI continues running as normal user).
+        """
+        try:
+            if CURRENT_PLATFORM == "windows":
                 run_as_admin()
-            except Exception as e:
-                logger.error(f"Failed to restart as administrator: {e}")
-                QMessageBox.critical(self, "Error", f"Failed to restart as administrator:\n{e}")
+            elif CURRENT_PLATFORM == "linux":
+                # Use daemon service to start the daemon
+                success, error_msg = self.daemon_service.start()
+                
+                if success:
+                    self.toast_manager.show_success("Privileged daemon started successfully")
+                else:
+                    self.toast_manager.show_error(
+                        f"Failed to start daemon: {error_msg or 'Check system permissions'}"
+                    )
+            else:
+                logger.warning(f"Restart as admin not supported on platform: {CURRENT_PLATFORM}")
+                self.toast_manager.show_warning(
+                    f"Not supported on {CURRENT_PLATFORM}"
+                )
+        except Exception as e:
+            logger.error(f"Failed to restart as administrator: {e}")
+            self.toast_manager.show_error(f"Failed to restart as administrator: {e}")
+    
+    def _refresh_admin_tabs(self) -> None:
+        """Refresh tabs that require admin privileges.
+        
+        This is called automatically by the daemon service when the daemon becomes available.
+        """
+        logger.info("Refreshing admin-required tabs")
+        
+        # Update menu action text/tooltip if daemon is now running
+        if CURRENT_PLATFORM == "linux" and hasattr(self, 'restart_admin_action'):
+            if self.daemon_service.is_available():
+                self.restart_admin_action.setText("Daemon Running")
+                self.restart_admin_action.setEnabled(False)
+                self.restart_admin_action.setToolTip("The privileged daemon is currently running")
+            else:
+                self.restart_admin_action.setText("Start Privileged Daemon")
+                self.restart_admin_action.setEnabled(True)
+                self.restart_admin_action.setToolTip("Start the privileged daemon for root operations")
+        
+        # Reload tabs that are showing AdminRequiredPlaceholder
+        if CURRENT_PLATFORM == "linux" and self.daemon_service.is_available():
+            from ..utils.admin import needs_admin_for_plugin
+            
+            logger.info("Checking admin tabs - daemon available")
+            
+            # Check all tabs for AdminRequiredPlaceholder and reload them
+            for tab_name, tab_info in self.loaded_tabs.items():
+                if tab_info.get("instance") and isinstance(tab_info["instance"], AdminRequiredPlaceholder):
+                    # This tab needs admin and is showing placeholder
+                    plugin_class = tab_info["plugin_class"]
+                    requires_admin = getattr(plugin_class, 'requires_admin', False)
+                    
+                    logger.info(f"Found placeholder for tab '{tab_name}', requires_admin: {requires_admin}")
+                    
+                    # Check if admin is still needed (it shouldn't be if daemon is available)
+                    still_needs_admin = needs_admin_for_plugin(False, requires_admin, False)
+                    logger.info(f"Tab '{tab_name}' still_needs_admin: {still_needs_admin}")
+                    
+                    if not still_needs_admin:
+                        # Daemon is available, reload the tab
+                        logger.info(f"Reloading tab '{tab_name}' now that daemon is available")
+                        self._reload_tab(tab_name)
+                    else:
+                        logger.warning(f"Tab '{tab_name}' still needs admin even though daemon is available")
+    
+    def _reload_tab(self, tab_name: str) -> None:
+        """Reload a specific tab by replacing its widget."""
+        tab_info = self.loaded_tabs.get(tab_name)
+        if not tab_info:
+            logger.warning(f"Tab info not found for '{tab_name}'")
+            return
+        
+        plugin_class = tab_info["plugin_class"]
+        requires_admin = getattr(plugin_class, 'requires_admin', False)
+        
+        # Find the tab index
+        for i in range(self.tab_widget.count()):
+            if self.tab_widget.tabText(i) == tab_name:
+                index = i
+                break
+        else:
+            logger.warning(f"Tab '{tab_name}' not found in tab widget")
+            return
+        
+        try:
+            # Check if admin is still needed
+            if needs_admin_for_plugin(CURRENT_PLATFORM == "windows", requires_admin, self.admin_service.is_admin()):
+                # Still needs admin, keep placeholder
+                logger.debug(f"Tab '{tab_name}' still needs admin, keeping placeholder")
+                return
+            
+            logger.info(f"Creating widget for tab '{tab_name}' (daemon available)")
+            # Create the actual widget
+            widget = plugin_class.create_widget(self.tab_widget)
+            tab_info["instance"] = widget
+            
+            # Replace the tab widget
+            self.tab_widget.removeTab(index)
+            self.tab_widget.insertTab(index, widget, tab_name)
+            
+            # If this was the current tab, make sure it's still selected
+            current_index = self.tab_widget.currentIndex()
+            if current_index != index:
+                self.tab_widget.setCurrentIndex(index)
+            
+            logger.info(f"Successfully reloaded tab '{tab_name}'")
+        except Exception as e:
+            logger.error(f"Error reloading tab '{tab_name}': {e}", exc_info=True)
+            # Keep the placeholder on error
     
     
     def setup_toast_manager(self) -> None:
@@ -542,7 +646,11 @@ class MainWindow(QMainWindow):
             self.preferences_action.setToolTip("Configure application settings and preferences")
         
         if hasattr(self, 'restart_admin_action'):
-            self.restart_admin_action.setToolTip("Restart the application with administrator privileges")
+            # Update tooltip based on platform
+            if CURRENT_PLATFORM == "linux":
+                self.restart_admin_action.setToolTip("Start the privileged daemon for root operations")
+            else:
+                self.restart_admin_action.setToolTip("Restart the application with administrator privileges")
     
     
     
