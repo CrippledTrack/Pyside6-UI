@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .theme_manager import ThemeManager
+from ....themes.theme_manager import ThemeManager
 
 logger = logging.getLogger(__name__)
 
@@ -394,4 +394,5 @@ class ThemeDialog(QDialog):
         self.load_themes()
 
 
-__all__ = ['ThemePreviewWidget', 'ThemeDialog'] 
+__all__ = ['ThemePreviewWidget', 'ThemeDialog']
+

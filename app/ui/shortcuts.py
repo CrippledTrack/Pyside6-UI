@@ -99,3 +99,4 @@ class ShortcutManager(QObject):
 
 
 __all__ = ['ShortcutManager']
+

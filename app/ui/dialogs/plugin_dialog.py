@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal, Qt, QPoint
 from typing import Optional, List, Tuple, Any, Type
-from .base import plugin_registry, BaseTabPlugin
+from ....plugins.base import plugin_registry, BaseTabPlugin
 
 
 class PluginManagementDialog(QDialog):
@@ -178,7 +178,7 @@ class PluginManagementDialog(QDialog):
     def reload_plugins(self) -> None:
         """Reload all plugins from the registry."""
         # Clear and re-discover plugins
-        from GUI.app.services.plugin_service import discover_and_register_all_plugins
+        from ...services.plugin_service import discover_and_register_all_plugins
         plugin_registry.clear()
         # Use the comprehensive plugin discovery that handles both external and built-in plugins
         discover_and_register_all_plugins()
@@ -559,3 +559,4 @@ class PluginManagementDialog(QDialog):
 
 
 __all__ = ['PluginManagementDialog']
+
