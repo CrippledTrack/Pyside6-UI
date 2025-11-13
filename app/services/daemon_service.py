@@ -87,30 +87,15 @@ class DaemonService:
                     self._notify_refresh_callbacks()
                     return True, None
                 else:
-                    return False, "Daemon socket exists but connection failed"
+                    logger.warning(
+                        "Failed to connect to existing daemon, attempting restart"
+                    )
+                    return self._restart_daemon_from_stale_socket()
             else:
                 # Daemon is running and client is set
                 return True, None
-        
-        # Start the daemon
-        logger.info("Starting privileged daemon...")
-        try:
-            client = start_daemon()
-            
-            if client:
-                # Set the daemon client globally so is_daemon_available() works
-                set_daemon_client(client)
-                logger.info("Daemon client set globally")
-                
-                # Notify callbacks to refresh UI
-                self._notify_refresh_callbacks()
-                
-                return True, None
-            else:
-                return False, "Failed to start the privileged daemon"
-        except Exception as e:
-            logger.error(f"Error starting daemon: {e}", exc_info=True)
-            return False, f"Error starting daemon: {e}"
+
+        return self._start_new_daemon()
     
     def _connect_to_existing_daemon(self) -> bool:
         """Connect to an existing daemon and set the client globally.
@@ -130,6 +115,51 @@ class DaemonService:
             set_daemon_client(client)
             return True
         return False
+
+    def _start_new_daemon(self) -> tuple[bool, Optional[str]]:
+        """Launch a new daemon instance and configure the global client."""
+
+        logger.info("Starting privileged daemon...")
+        try:
+            client = start_daemon()
+
+            if client:
+                # Set the daemon client globally so is_daemon_available() works
+                set_daemon_client(client)
+                logger.info("Daemon client set globally")
+
+                # Notify callbacks to refresh UI
+                self._notify_refresh_callbacks()
+
+                return True, None
+            else:
+                return False, "Failed to start the privileged daemon"
+        except Exception as e:
+            logger.error(f"Error starting daemon: {e}", exc_info=True)
+            return False, f"Error starting daemon: {e}"
+
+    def _restart_daemon_from_stale_socket(self) -> tuple[bool, Optional[str]]:
+        """Remove a stale socket and attempt to start a fresh daemon."""
+
+        try:
+            uid = os.getuid()
+        except (AttributeError, OSError):
+            uid = None
+
+        socket_path = get_socket_path(uid)
+
+        if os.path.exists(socket_path):
+            try:
+                os.unlink(socket_path)
+                logger.info("Removed stale daemon socket at %s", socket_path)
+            except OSError as e:
+                logger.warning(
+                    "Failed to remove stale daemon socket at %s: %s",
+                    socket_path,
+                    e,
+                )
+
+        return self._start_new_daemon()
     
     def register_refresh_callback(self, callback: Callable[[], None]) -> None:
         """Register a callback to be called when daemon becomes available.
