@@ -177,21 +177,5 @@ class DaemonService:
             return "The privileged daemon is not running"
 
 
-# Global service instance
-_daemon_service: Optional[DaemonService] = None
-
-
-def get_daemon_service() -> DaemonService:
-    """Get the global daemon service instance.
-    
-    Returns:
-        The daemon service instance
-    """
-    global _daemon_service
-    if _daemon_service is None:
-        _daemon_service = DaemonService()
-    return _daemon_service
-
-
-__all__ = ['DaemonService', 'get_daemon_service']
+__all__ = ['DaemonService']
 

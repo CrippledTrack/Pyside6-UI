@@ -8,7 +8,7 @@ and loading in a separate thread to avoid blocking the main UI.
 from __future__ import annotations
 
 import logging
-from typing import List, Optional, TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING, Any
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QTabWidget, QWidget

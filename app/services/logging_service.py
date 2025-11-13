@@ -68,7 +68,10 @@ class CustomFormatter(logging.Formatter):
         if not hasattr(record, "process"):
             record.process = os.getpid()
         if record.exc_info:
-            record.exc_text = "".join(traceback.format_exception(*record.exc_info))
+            exc_lines = traceback.format_exception(*record.exc_info)
+            record.exc_text = "\n" + "".join(exc_lines)
+            # Clear exc_info to prevent parent formatter from also processing it
+            record.exc_info = None
         else:
             record.exc_text = ""
         return super().format(record)

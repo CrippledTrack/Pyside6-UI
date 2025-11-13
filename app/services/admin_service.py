@@ -205,24 +205,5 @@ class AdminService:
             raise RuntimeError(f"Admin elevation not supported on {CURRENT_PLATFORM}")
 
 
-# Global service instance
-_admin_service: Optional[AdminService] = None
-
-
-def get_admin_service(daemon_service: Optional[Any] = None) -> AdminService:
-    """Get the global admin service instance.
-    
-    Args:
-        daemon_service: Optional daemon service instance (for Linux)
-        
-    Returns:
-        The admin service instance
-    """
-    global _admin_service
-    if _admin_service is None:
-        _admin_service = AdminService(daemon_service)
-    return _admin_service
-
-
-__all__ = ['AdminService', 'get_admin_service']
+__all__ = ['AdminService']
 
