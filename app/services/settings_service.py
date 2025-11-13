@@ -33,7 +33,7 @@ class WindowGeometry:
 @dataclass
 class AppSettings:
     """Application settings with persistence"""
-    theme: str = "ocean_blue"  # Default theme
+    theme: str = "dark"  # Default theme (renamed from 'ocean_blue')
     disabled_plugins: List[str] = None  # User-disabled plugins (separate from disabled_by_default)
     logging_enabled: bool = True
     log_to_file: bool = True
@@ -78,9 +78,13 @@ class SettingsService:
             with open(self._settings_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
-            # Load theme
+            # Load theme with backward compatibility for renamed defaults
             if 'theme' in data:
-                self._settings.theme = data['theme']
+                theme = data['theme']
+                if theme == 'ocean_blue':
+                    logger.info("Migrating theme preference from 'ocean_blue' to 'dark'")
+                    theme = 'dark'
+                self._settings.theme = theme
             
             # Load disabled plugins (user-disabled, not including disabled_by_default)
             if 'disabled_plugins' in data and isinstance(data['disabled_plugins'], list):
