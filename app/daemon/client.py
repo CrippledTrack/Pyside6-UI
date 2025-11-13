@@ -7,7 +7,7 @@ import logging
 import threading
 import time
 from typing import Dict, Any, Optional
-from .protocol import create_request, serialize_message, deserialize_message
+from .protocol import create_request, serialize_message, deserialize_message, get_socket_path
 
 logger = logging.getLogger(__name__)
 
@@ -25,14 +25,28 @@ class DaemonTimeoutError(Exception):
 class DaemonClient:
     """Client for communicating with privileged daemon."""
     
-    SOCKET_PATH = '/tmp/cyberpatriot-daemon.sock'
     CONNECT_TIMEOUT = 5.0
     OPERATION_TIMEOUT = 30.0
     RECONNECT_RETRIES = 3
     RECONNECT_DELAY = 1.0
     
     def __init__(self, socket_path: Optional[str] = None):
-        self.socket_path = socket_path or self.SOCKET_PATH
+        if socket_path is None:
+            # Get UID from environment to determine correct socket path
+            # When running normally (not via sudo/pkexec), get current user's UID directly
+            import os
+            uid_str = os.environ.get('SUDO_UID') or os.environ.get('PKEXEC_UID')
+            if not uid_str:
+                # Not running via sudo/pkexec, get current user's UID directly
+                try:
+                    uid = os.getuid()
+                except (AttributeError, OSError):
+                    uid = None
+            else:
+                uid = int(uid_str) if uid_str else None
+            self.socket_path = get_socket_path(uid)
+        else:
+            self.socket_path = socket_path
         self._socket: Optional[socket.socket] = None
         self._lock = threading.Lock()
         self._connected = False

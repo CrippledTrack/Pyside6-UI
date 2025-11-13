@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal, Qt, QPoint
 from typing import Optional, List, Tuple, Any, Type
-from .base import plugin_registry, BaseTabPlugin
+from ....plugins.base import plugin_registry, BaseTabPlugin
 
 
 class PluginManagementDialog(QDialog):
@@ -26,11 +26,12 @@ class PluginManagementDialog(QDialog):
     
     pluginToggled = Signal(str, bool)
     
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: Optional[QWidget] = None, settings_service: Optional[Any] = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Plugin Management")
         self.resize(900, 560)
         self._all_plugins = []  # List of (name, plugin_class)
+        self.settings_service = settings_service
         self.setup_ui()
         self.load_plugins()
 
@@ -177,7 +178,7 @@ class PluginManagementDialog(QDialog):
     def reload_plugins(self) -> None:
         """Reload all plugins from the registry."""
         # Clear and re-discover plugins
-        from GUI.app.services.plugin_service import discover_and_register_all_plugins
+        from ...services.plugin_service import discover_and_register_all_plugins
         plugin_registry.clear()
         # Use the comprehensive plugin discovery that handles both external and built-in plugins
         discover_and_register_all_plugins()
@@ -291,6 +292,7 @@ class PluginManagementDialog(QDialog):
 
         # Configure button availability
         has_config = any([
+            hasattr(plugin_class, 'get_settings_widget') and callable(getattr(plugin_class, 'get_settings_widget', None)),
             hasattr(plugin_class, 'open_settings_dialog'),
             hasattr(plugin_class, 'get_configuration_widget'),
             hasattr(plugin_class, 'configure')
@@ -323,34 +325,70 @@ class PluginManagementDialog(QDialog):
         return item.text() if item else None
 
     def enable_selected(self) -> None:
-        """Enable the currently selected plugin."""
+        """Enable the currently selected plugin and call lifecycle hook."""
         name = self.get_selected_plugin_name()
         if not name:
             return
         plugin_registry.enable_plugin(name)
+        # Call lifecycle hook
+        plugin_class = plugin_registry.get_plugin(name)
+        if plugin_class and hasattr(plugin_class, 'on_plugin_enabled'):
+            try:
+                plugin_class.on_plugin_enabled()
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.debug(f"Error calling on_plugin_enabled hook for {name}: {e}")
         self.pluginToggled.emit(name, True)
         self.apply_filters()
 
     def disable_selected(self) -> None:
-        """Disable the currently selected plugin."""
+        """Disable the currently selected plugin and call lifecycle hook."""
         name = self.get_selected_plugin_name()
         if not name:
             return
         plugin_registry.disable_plugin(name)
+        # Call lifecycle hook
+        plugin_class = plugin_registry.get_plugin(name)
+        if plugin_class and hasattr(plugin_class, 'on_plugin_disabled'):
+            try:
+                plugin_class.on_plugin_disabled()
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.debug(f"Error calling on_plugin_disabled hook for {name}: {e}")
         self.pluginToggled.emit(name, False)
         self.apply_filters()
 
     def enable_all(self) -> None:
-        """Enable all plugins."""
+        """Enable all plugins and call lifecycle hooks."""
         for name, _ in self._all_plugins:
             plugin_registry.enable_plugin(name)
+            # Call lifecycle hook
+            plugin_class = plugin_registry.get_plugin(name)
+            if plugin_class and hasattr(plugin_class, 'on_plugin_enabled'):
+                try:
+                    plugin_class.on_plugin_enabled()
+                except Exception as e:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.debug(f"Error calling on_plugin_enabled hook for {name}: {e}")
             self.pluginToggled.emit(name, True)
         self.apply_filters()
 
     def disable_all(self) -> None:
-        """Disable all plugins."""
+        """Disable all plugins and call lifecycle hooks."""
         for name, _ in self._all_plugins:
             plugin_registry.disable_plugin(name)
+            # Call lifecycle hook
+            plugin_class = plugin_registry.get_plugin(name)
+            if plugin_class and hasattr(plugin_class, 'on_plugin_disabled'):
+                try:
+                    plugin_class.on_plugin_disabled()
+                except Exception as e:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.debug(f"Error calling on_plugin_disabled hook for {name}: {e}")
             self.pluginToggled.emit(name, False)
         self.apply_filters()
 
@@ -373,6 +411,7 @@ class PluginManagementDialog(QDialog):
         toggle_action = menu.addAction("Disable" if is_enabled else "Enable")
         configure_action = menu.addAction("Configure...")
         configure_action.setEnabled(any([
+            hasattr(plugin_class, 'get_settings_widget') and callable(getattr(plugin_class, 'get_settings_widget', None)),
             hasattr(plugin_class, 'open_settings_dialog'),
             hasattr(plugin_class, 'get_configuration_widget'),
             hasattr(plugin_class, 'configure')
@@ -411,13 +450,65 @@ class PluginManagementDialog(QDialog):
         # Removed "Open Module Location" from context menu since Module column was removed
 
     def configure_selected(self) -> None:
+        """Configure the selected plugin using get_settings_widget() method."""
         name = self.get_selected_plugin_name()
         if not name:
             return
         plugin_class = plugin_registry.get_plugin(name)
         if not plugin_class:
             return
+        
         try:
+            # Try new get_settings_widget() method first
+            if hasattr(plugin_class, 'get_settings_widget') and callable(getattr(plugin_class, 'get_settings_widget')):
+                settings_widget = plugin_class.get_settings_widget(self)
+                if settings_widget:
+                    # Load current settings
+                    current_settings = {}
+                    if self.settings_service:
+                        current_settings = self.settings_service.get_plugin_settings(name)
+                    
+                    # If widget has a load_settings method, call it
+                    if hasattr(settings_widget, 'load_settings') and callable(getattr(settings_widget, 'load_settings')):
+                        settings_widget.load_settings(current_settings)
+                    
+                    # Create and show dialog
+                    dlg = QDialog(self)
+                    dlg.setWindowTitle(f"Configure {name}")
+                    layout = QVBoxLayout(dlg)
+                    layout.addWidget(settings_widget)
+                    
+                    # Add buttons
+                    button_layout = QHBoxLayout()
+                    button_layout.addStretch()
+                    cancel_btn = QPushButton("Cancel")
+                    cancel_btn.clicked.connect(dlg.reject)
+                    save_btn = QPushButton("Save")
+                    save_btn.clicked.connect(dlg.accept)
+                    save_btn.setDefault(True)
+                    button_layout.addWidget(cancel_btn)
+                    button_layout.addWidget(save_btn)
+                    layout.addLayout(button_layout)
+                    
+                    dlg.resize(480, 360)
+                    if dlg.exec() == QDialog.DialogCode.Accepted:
+                        # Extract settings from widget
+                        if hasattr(settings_widget, 'get_settings') and callable(getattr(settings_widget, 'get_settings')):
+                            new_settings = settings_widget.get_settings()
+                            # Save settings
+                            if self.settings_service:
+                                self.settings_service.save_plugin_settings(name, new_settings)
+                            # Call settings changed hook
+                            if hasattr(plugin_class, 'on_settings_changed'):
+                                try:
+                                    plugin_class.on_settings_changed(new_settings)
+                                except Exception as e:
+                                    import logging
+                                    logger = logging.getLogger(__name__)
+                                    logger.debug(f"Error calling on_settings_changed hook for {name}: {e}")
+                    return
+            
+            # Fallback to legacy methods for backward compatibility
             if hasattr(plugin_class, 'open_settings_dialog') and callable(getattr(plugin_class, 'open_settings_dialog')):
                 plugin_class.open_settings_dialog(self)
                 return
@@ -440,6 +531,7 @@ class PluginManagementDialog(QDialog):
             if hasattr(plugin_class, 'configure') and callable(getattr(plugin_class, 'configure')):
                 plugin_class.configure(self)
                 return
+            
             QMessageBox.information(self, "No Configuration", f"Plugin '{name}' has no configurable settings.")
         except Exception as e:
             QMessageBox.critical(self, "Configuration Error", f"Failed to open configuration for '{name}':\n{e}")
@@ -467,3 +559,4 @@ class PluginManagementDialog(QDialog):
 
 
 __all__ = ['PluginManagementDialog']
+

@@ -1,15 +1,25 @@
+"""Qt dependencies management for Linux platforms.
+
+This module handles detection and installation of Qt xcb platform dependencies
+required for Qt applications to run on Linux systems.
+"""
+
 from __future__ import annotations
 
-import os
-import sys
-import subprocess
 import logging
-
+import os
+import subprocess
+import sys
 
 logger = logging.getLogger(__name__)
 
 
 def _detect_distribution_id() -> str:
+    """Detect the Linux distribution ID.
+    
+    Returns:
+        Distribution ID string (e.g., 'debian', 'ubuntu') or 'unknown'
+    """
     try:
         with open('/etc/os-release', 'r') as f:
             for line in f:
@@ -23,7 +33,17 @@ def _detect_distribution_id() -> str:
     return 'unknown'
 
 
-def _run(cmd, env=None, timeout=600):
+def _run(cmd: list[str], env: dict[str, str] | None = None, timeout: int = 600) -> tuple[str, str, int]:
+    """Run a command and return stdout, stderr, and return code.
+    
+    Args:
+        cmd: Command and arguments as a list
+        env: Optional environment variables dictionary
+        timeout: Command timeout in seconds (default 600)
+        
+    Returns:
+        Tuple of (stdout, stderr, returncode)
+    """
     try:
         proc = subprocess.run(
             cmd,
@@ -40,7 +60,7 @@ def _run(cmd, env=None, timeout=600):
         return '', str(e), -1
 
 
-def _probe_qt_xcb_in_subprocess() -> tuple:
+def _probe_qt_xcb_in_subprocess() -> tuple[bool, str]:
     """Attempt to initialize a minimal QApplication forcing the xcb platform in a subprocess.
     
     Returns (ok: bool, stderr: str)
@@ -59,7 +79,11 @@ def _probe_qt_xcb_in_subprocess() -> tuple:
 
 
 def _install_qt_xcb_dependencies_debian() -> bool:
-    """Install required Qt xcb dependencies on Debian/Ubuntu using apt."""
+    """Install required Qt xcb dependencies on Debian/Ubuntu systems.
+    
+    Returns:
+        True if installation succeeded, False otherwise
+    """
     # Minimal set known to be required by Qt 6.5+ for xcb
     apt_packages = [
         'libxcb-cursor0',
@@ -87,24 +111,20 @@ def _install_qt_xcb_dependencies_debian() -> bool:
     env = os.environ.copy()
     env['DEBIAN_FRONTEND'] = 'noninteractive'
 
-    # apt-get update - must succeed before installation
-    logger.info('Updating apt package lists to prepare Qt dependency installation...')
-    update_cmd = ['env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get', 'update']
-    result = run_command_as_admin(update_cmd, interactive=True)
+    # Combine apt-get update and install into a single command to avoid double authentication
+    logger.info('Updating apt package lists and installing Qt xcb dependencies...')
+    packages_str = ' '.join(apt_packages)
+    combined_cmd = [
+        'sh', '-c',
+        f'env DEBIAN_FRONTEND=noninteractive apt-get update && '
+        f'env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends {packages_str}'
+    ]
+    result = run_command_as_admin(combined_cmd, interactive=True)
     if getattr(result, 'returncode', 1) != 0:
         stderr = getattr(result, 'stderr', '') or getattr(result, 'stdout', '')
-        logger.error(f"Failed to update package lists: {stderr}")
-        logger.error("Cannot proceed with Qt dependency installation without updated package lists")
+        logger.error(f"Failed to update package lists or install Qt dependencies: {stderr}")
         return False
-    logger.info("Package lists updated successfully")
-
-    install_cmd = ['env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get', 'install', '-y', '--no-install-recommends'] + apt_packages
-    logger.info('Installing missing Qt xcb dependencies via apt...')
-    result = run_command_as_admin(install_cmd, interactive=True)
-    if getattr(result, 'returncode', 1) != 0:
-        stderr = getattr(result, 'stderr', '') or getattr(result, 'stdout', '')
-        logger.error(f"Failed to install Qt dependencies: {stderr}")
-        return False
+    logger.info("Package lists updated and Qt dependencies installed successfully")
     return True
 
 

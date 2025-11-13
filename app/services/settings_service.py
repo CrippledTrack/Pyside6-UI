@@ -25,7 +25,7 @@ class WindowGeometry:
     x: int = 100
     y: int = 100
     width: int = 800
-    height: int = 600
+    height: int = 620
     maximized: bool = False
     fullscreen: bool = False
 
@@ -33,7 +33,7 @@ class WindowGeometry:
 @dataclass
 class AppSettings:
     """Application settings with persistence"""
-    theme: str = "ocean_blue"  # Default theme
+    theme: str = "dark"  # Default theme (renamed from 'ocean_blue')
     disabled_plugins: List[str] = None  # User-disabled plugins (separate from disabled_by_default)
     logging_enabled: bool = True
     log_to_file: bool = True
@@ -47,6 +47,8 @@ class AppSettings:
     toast_duration: int = 3000
     # GUI version (for future migration detection)
     gui_version: str = ""
+    # Plugin settings
+    plugin_settings: Dict[str, Dict[str, Any]] = None
     
     def __post_init__(self) -> None:
         """Initialize default values for complex fields"""
@@ -54,6 +56,8 @@ class AppSettings:
             self.disabled_plugins = []
         if self.window_geometry is None:
             self.window_geometry = WindowGeometry()
+        if self.plugin_settings is None:
+            self.plugin_settings = {}
 
 
 class SettingsService:
@@ -74,9 +78,13 @@ class SettingsService:
             with open(self._settings_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
-            # Load theme
+            # Load theme with backward compatibility for renamed defaults
             if 'theme' in data:
-                self._settings.theme = data['theme']
+                theme = data['theme']
+                if theme == 'ocean_blue':
+                    logger.info("Migrating theme preference from 'ocean_blue' to 'dark'")
+                    theme = 'dark'
+                self._settings.theme = theme
             
             # Load disabled plugins (user-disabled, not including disabled_by_default)
             if 'disabled_plugins' in data and isinstance(data['disabled_plugins'], list):
@@ -96,7 +104,7 @@ class SettingsService:
                     x=geom.get('x', 100),
                     y=geom.get('y', 100),
                     width=geom.get('width', 800),
-                    height=geom.get('height', 600),
+                    height=geom.get('height', 620),
                     maximized=geom.get('maximized', False),
                     fullscreen=geom.get('fullscreen', False)
                 )
@@ -118,6 +126,10 @@ class SettingsService:
             # Load GUI version
             if 'gui_version' in data:
                 self._settings.gui_version = str(data['gui_version'])
+            
+            # Load plugin settings
+            if 'plugin_settings' in data and isinstance(data['plugin_settings'], dict):
+                self._settings.plugin_settings = data['plugin_settings'].copy()
             
             logger.info(f"Settings loaded from {self._settings_file}")
         except Exception as e:
@@ -145,7 +157,8 @@ class SettingsService:
                 'shortcuts_enabled': self._settings.shortcuts_enabled,
                 'toast_notifications_enabled': self._settings.toast_notifications_enabled,
                 'toast_duration': self._settings.toast_duration,
-                'gui_version': self._settings.gui_version
+                'gui_version': self._settings.gui_version,
+                'plugin_settings': self._settings.plugin_settings.copy()
             }
             
             # Write to file
@@ -247,6 +260,30 @@ class SettingsService:
     def get_gui_version(self) -> str:
         """Get saved GUI version"""
         return self._settings.gui_version
+    
+    def save_plugin_settings(self, plugin_name: str, settings: Dict[str, Any]) -> None:
+        """
+        Save settings for a specific plugin.
+        
+        Args:
+            plugin_name: Name of the plugin
+            settings: Dictionary containing plugin settings
+        """
+        self._settings.plugin_settings[plugin_name] = settings.copy()
+        self._save_settings()
+        logger.debug(f"Plugin settings saved for '{plugin_name}'")
+    
+    def get_plugin_settings(self, plugin_name: str) -> Dict[str, Any]:
+        """
+        Get settings for a specific plugin.
+        
+        Args:
+            plugin_name: Name of the plugin
+            
+        Returns:
+            Dictionary containing plugin settings, or empty dict if none exist
+        """
+        return self._settings.plugin_settings.get(plugin_name, {}).copy()
 
 
 def load_settings() -> SettingsService:

@@ -265,10 +265,10 @@ def get_legacy_theme() -> Dict[str, Any]:
     }
 
 
-def get_dark_theme() -> Dict[str, Any]:
-    """Get dark theme data"""
+def get_purple_dark_theme() -> Dict[str, Any]:
+    """Get purple-accent dark theme data (previously 'Dark')"""
     return {
-        "name": "Dark",
+        "name": "Purple Dark",
         "description": "Dark theme with purple accents",
         "stylesheet": """
             QMainWindow {
@@ -1369,11 +1369,11 @@ def get_minimal_theme() -> Dict[str, Any]:
     }
 
 
-def get_ocean_blue_theme() -> Dict[str, Any]:
-    """Get Ocean Blue theme data (integrated from sample_custom_theme.json)"""
+def get_dark_theme() -> Dict[str, Any]:
+    """Get Dark theme data (previously 'Ocean Blue')"""
     return {
-        "name": "Ocean Blue",
-        "description": "A calming ocean-inspired theme with blue and teal colors",
+        "name": "Dark",
+        "description": "A calming dark theme with blue and teal colors",
         "stylesheet": "QMainWindow {\n    background-color: #0f1419;\n}\nQWidget {\n    background-color: #0f1419;\n    color: #e6f3ff;\n}\n#loadingWidget {\n    background-color: #1a2332;\n}\nQTabWidget::pane {\n    border: 1px solid #2d3748;\n    background-color: #1a2332;\n    border-radius: 4px;\n}\nQTabBar::tab {\n    background-color: #1a2332;\n    color: #e6f3ff;\n    border: 1px solid #2d3748;\n    padding: 8px 16px;\n    margin-right: 2px;\n    border-top-left-radius: 4px;\n    border-top-right-radius: 4px;\n}\nQTabBar::tab:selected {\n    background-color: #2d3748;\n    border-bottom-color: #2d3748;\n}\nQTabBar::tab:hover {\n    background-color: #2d3748;\n}\nQPushButton {\n    background-color: #3182ce;\n    color: white;\n    border: none;\n    padding: 8px 16px;\n    border-radius: 4px;\n}\nQPushButton:hover {\n    background-color: #4299e1;\n}\nQPushButton:pressed {\n    background-color: #2b6cb0;\n}\nQLineEdit, QTextEdit, QComboBox {\n    border: 1px solid #2d3748;\n    border-radius: 4px;\n    padding: 4px;\n    background-color: #1a2332;\n    color: #e6f3ff;\n}\nQLineEdit:focus, QTextEdit:focus, QComboBox:focus {\n    border-color: #3182ce;\n}\nQLabel {\n    color: #e6f3ff;\n}\nQMessageBox {\n    background-color: #1a2332;\n}\nQMessageBox QPushButton {\n    min-width: 80px;\n}\nQScrollBar:vertical {\n    border: none;\n    background-color: #1a2332;\n    width: 10px;\n    margin: 0px;\n}\nQScrollBar::handle:vertical {\n    background-color: #2d3748;\n    min-height: 20px;\n    border-radius: 5px;\n}\nQScrollBar::handle:vertical:hover {\n    background-color: #3182ce;\n}\nQScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {\n    height: 0px;\n}\nQScrollBar:horizontal {\n    border: none;\n    background-color: #1a2332;\n    height: 10px;\n    margin: 0px;\n}\nQScrollBar::handle:horizontal {\n    background-color: #2d3748;\n    min-width: 20px;\n    border-radius: 5px;\n}\nQScrollBar::handle:horizontal:hover {\n    background-color: #3182ce;\n}\nQScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {\n    width: 0px;\n}",
         "palette": {
             "window": "#0f1419",
@@ -1396,7 +1396,7 @@ def get_ocean_blue_theme() -> Dict[str, Any]:
 __all__ = [
     'get_default_theme',
     'get_legacy_theme',
-    'get_dark_theme',
+    'get_purple_dark_theme',
     'get_light_theme',
     'get_blue_theme',
     'get_green_theme',
@@ -1405,6 +1405,6 @@ __all__ = [
     'get_red_theme',
     'get_cyberpunk_theme',
     'get_minimal_theme',
-    'get_ocean_blue_theme',
+    'get_dark_theme',
 ]
 

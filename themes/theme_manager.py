@@ -30,13 +30,40 @@ from .builtin_themes import (
     get_red_theme,
     get_cyberpunk_theme,
     get_minimal_theme,
-    get_ocean_blue_theme,
+    get_purple_dark_theme,
 )
 
 if TYPE_CHECKING:
     from ..app.services.settings_service import SettingsService
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_version_tuple(v: str) -> Optional[tuple]:
+    """Parse a semantic version string like '3.1.2' -> (3, 1, 2). Returns None on failure."""
+    try:
+        parts = v.strip().split(".")
+        if len(parts) < 2:
+            return None
+        major = int(parts[0])
+        minor = int(parts[1])
+        patch = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+        return (major, minor, patch)
+    except Exception:
+        return None
+
+
+def _is_version_lte(version_str: str, major: int, minor: int) -> bool:
+    """Return True if version_str <= major.minor.x (any patch)."""
+    t = _parse_version_tuple(version_str)
+    if t is None:
+        return False
+    v_major, v_minor, _ = t
+    if v_major < major:
+        return True
+    if v_major > major:
+        return False
+    return v_minor <= minor
 
 
 class ThemeManager:
@@ -46,6 +73,8 @@ class ThemeManager:
         self.themes_dir = Path(themes_dir)
         self.themes: Dict[str, Any] = {}
         self.builtin_theme_names: set = set()  # Track built-in theme names
+        # Built-in aliases that should not be shown in UI theme pickers
+        self._hidden_theme_names: set = {"ocean_blue"}
         self.settings_service = settings_service
         self.load_builtin_themes()
         self.load_custom_themes()
@@ -53,17 +82,17 @@ class ThemeManager:
     def load_builtin_themes(self) -> None:
         """Load built-in themes"""
         builtin_themes = {
-            "dark": get_dark_theme(),
+            "dark": get_dark_theme(), 
             "light": get_light_theme(),
             "blue": get_blue_theme(),
             "green": get_green_theme(),
             "purple": get_purple_theme(),
+            "purple_dark": get_purple_dark_theme(),
             "orange": get_orange_theme(),
             "red": get_red_theme(),
             "cyberpunk": get_cyberpunk_theme(),
             "minimal": get_minimal_theme(),
             "legacy": get_legacy_theme(),
-            "ocean_blue": get_ocean_blue_theme()
         }
         self.builtin_theme_names = set(builtin_themes.keys())
         self.themes.update(builtin_themes)
@@ -104,7 +133,8 @@ class ThemeManager:
     
     def get_theme_names(self) -> List[str]:
         """Get list of available theme names"""
-        return list(self.themes.keys())
+        # Hide compatibility aliases from UI
+        return [name for name in self.themes.keys() if name not in self._hidden_theme_names]
     
     def get_current_theme(self) -> str:
         """Get current theme name"""
@@ -165,7 +195,7 @@ class ThemeManager:
         else:
             # Auto-detect based on system preference
             is_dark = self.detect_system_dark_mode()
-            theme_name = "ocean_blue" if is_dark else "light"
+            theme_name = "dark" if is_dark else "light"
             logger.info(f"Applying auto-detected theme: {theme_name}")
         
         self.apply_theme(theme_name)

@@ -17,7 +17,8 @@ from PySide6.QtWidgets import QApplication
 
 from .constants import VERSION as GUI_API_VERSION
 from .services.logging_service import setup_logging
-from .services.settings_service import load_settings as load_settings_service
+from .services.container import ServiceContainer
+from .services.settings_service import SettingsService
 from .ui.main_window import MainWindow
 from .utils.console import apply_console_setting
 from .utils.imports import get_platforms_constants
@@ -40,7 +41,7 @@ def run(argv: List[str]) -> int:
     # Check for daemon mode before GUI initialization
     if '--daemon' in argv and platform.system().lower() == 'linux':
         from .daemon.server import run_daemon
-        return run_daemon()
+        return run_daemon(argv)
     
     # Check if this is a Qt probe subprocess (Python -c mode) - skip all initialization
     if '-c' in argv:
@@ -81,8 +82,13 @@ def run(argv: List[str]) -> int:
     logger.info(f"Starting {VERSION_NAME} v{VERSION} on {platform.system().lower()}")
     logger.info(f"GUI API Version: v{GUI_API_VERSION}")
 
-    # Load settings service
-    settings_service = load_settings_service()
+    # Initialize service container
+    container = ServiceContainer()
+    container.initialize_services()
+    logger.info("Service container initialized")
+    
+    # Get settings service from container
+    settings_service = container.get(SettingsService)
     logger.info("Settings service loaded")
     
     # Save current GUI version to settings for future reference
@@ -114,6 +120,8 @@ def run(argv: List[str]) -> int:
     # On Linux, start privileged daemon (optional - app can run without it)
     daemon_client = None
     if platform.system().lower() == "linux":
+        from .services.daemon_service import DaemonService
+        daemon_service = container.get(DaemonService)
         logger.info("Starting privileged daemon...")
         daemon_client = start_daemon()
         if not daemon_client or not daemon_client.is_connected():
@@ -130,7 +138,8 @@ def run(argv: List[str]) -> int:
     saved_theme = settings_service.get_theme_preference()
     theme_manager.apply_auto_theme(saved_theme=saved_theme)
 
-    window = MainWindow(theme_manager, settings_service=settings_service)
+    # Create MainWindow with service container
+    window = MainWindow(theme_manager, settings_service=settings_service, container=container)
     window.show()
 
     exit_code = app.exec()

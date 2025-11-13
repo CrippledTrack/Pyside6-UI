@@ -9,11 +9,13 @@ import logging
 import subprocess
 import threading
 import signal
+import struct
 from concurrent.futures import ThreadPoolExecutor
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from .protocol import (
     OPERATION_RUN_COMMAND,
     OPERATION_SHUTDOWN,
+    get_socket_path,
     deserialize_message,
     create_response,
     serialize_message
@@ -25,7 +27,6 @@ logger = logging.getLogger(__name__)
 log_format = '[Daemon] %(asctime)s - %(name)s - %(levelname)s - %(message)s'
 logging.basicConfig(level=logging.INFO, format=log_format)
 
-SOCKET_PATH = '/tmp/cyberpatriot-daemon.sock'
 MAX_WORKERS = 8
 SHUTDOWN_REQUESTED = threading.Event()
 
@@ -33,11 +34,68 @@ SHUTDOWN_REQUESTED = threading.Event()
 class PrivilegedDaemon:
     """Daemon server for executing privileged operations."""
     
-    def __init__(self, socket_path: str = SOCKET_PATH, max_workers: int = MAX_WORKERS):
-        self.socket_path = socket_path
+    def __init__(self, socket_path: Optional[str] = None, max_workers: int = MAX_WORKERS):
+        # Get original user's UID/GID from environment (set by sudo/pkexec)
+        self.allowed_uid = self._get_original_uid()
+        self.allowed_gid = self._get_original_gid()
+        
+        # Determine socket path based on user UID (more secure location)
+        if socket_path is None:
+            self.socket_path = get_socket_path(self.allowed_uid)
+        else:
+            self.socket_path = socket_path
+        
         self.server_socket: Optional[socket.socket] = None
         self.executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix='daemon-worker')
         self._lock = threading.Lock()
+    
+    def _get_original_uid(self) -> Optional[int]:
+        """Get the original user's UID from environment variables."""
+        # sudo sets SUDO_UID, pkexec sets PKEXEC_UID
+        uid_str = os.environ.get('SUDO_UID') or os.environ.get('PKEXEC_UID')
+        if uid_str:
+            try:
+                return int(uid_str)
+            except ValueError:
+                pass
+        return None
+    
+    def _get_original_gid(self) -> Optional[int]:
+        """Get the original user's GID from environment variables."""
+        # sudo sets SUDO_GID, pkexec sets PKEXEC_GID
+        gid_str = os.environ.get('SUDO_GID') or os.environ.get('PKEXEC_GID')
+        if gid_str:
+            try:
+                return int(gid_str)
+            except ValueError:
+                pass
+        return None
+    
+    def _verify_client_credentials(self, client_socket: socket.socket) -> bool:
+        """Verify that the connecting client belongs to the authorized user using SO_PEERCRED."""
+        try:
+            # SO_PEERCRED is Linux-specific and returns (pid, uid, gid) as a struct
+            # Format: '3i' means 3 integers (pid, uid, gid)
+            SOL_SOCKET = socket.SOL_SOCKET
+            SO_PEERCRED = 17  # Linux-specific constant
+            
+            creds = client_socket.getsockopt(SOL_SOCKET, SO_PEERCRED, struct.calcsize('3i'))
+            pid, uid, gid = struct.unpack('3i', creds)
+            
+            # Verify UID matches the original user
+            if self.allowed_uid is not None and uid != self.allowed_uid:
+                logger.warning(f"Connection rejected: UID {uid} does not match allowed UID {self.allowed_uid} (PID {pid})")
+                return False
+            
+            logger.debug(f"Client verified: PID {pid}, UID {uid}, GID {gid}")
+            return True
+            
+        except (OSError, struct.error, AttributeError) as e:
+            # SO_PEERCRED might not be available on all systems
+            # Fall back to less secure but still better than nothing
+            logger.warning(f"Could not verify client credentials: {e}. Falling back to socket ownership check.")
+            # If we can't verify, we'll rely on socket file permissions
+            return True
     
     def _cleanup_socket(self):
         """Remove existing socket file if it exists."""
@@ -138,6 +196,12 @@ class PrivilegedDaemon:
         """Handle a client connection."""
         logger.debug(f"Client connected: {addr}")
         
+        # Verify client credentials before processing requests
+        if not self._verify_client_credentials(client_socket):
+            logger.error(f"Unauthorized connection attempt from {addr}, closing connection")
+            client_socket.close()
+            return
+        
         try:
             while not SHUTDOWN_REQUESTED.is_set():
                 # Read request
@@ -170,12 +234,22 @@ class PrivilegedDaemon:
     
     def start(self):
         """Start the daemon server."""
+        # Log immediately to stderr so we can see what's happening
+        print("[Daemon] Starting privileged daemon...", file=sys.stderr, flush=True)
+        print(f"[Daemon] Current EUID: {os.geteuid()}, UID: {os.getuid()}", file=sys.stderr, flush=True)
+        
         # Verify we're running as root
         if os.geteuid() != 0:
-            logger.error("Daemon must run as root")
+            error_msg = f"Daemon must run as root (current EUID: {os.geteuid()})"
+            logger.error(error_msg)
+            print(f"[Daemon] ERROR: {error_msg}", file=sys.stderr, flush=True)
             sys.exit(1)
         
         logger.info("Starting privileged daemon")
+        logger.info(f"Socket path will be: {self.socket_path}")
+        logger.info(f"Allowed UID: {self.allowed_uid}, Allowed GID: {self.allowed_gid}")
+        print(f"[Daemon] Socket path: {self.socket_path}", file=sys.stderr, flush=True)
+        print(f"[Daemon] Allowed UID: {self.allowed_uid}, Allowed GID: {self.allowed_gid}", file=sys.stderr, flush=True)
         
         # Setup signal handlers
         self._setup_signal_handlers()
@@ -183,15 +257,46 @@ class PrivilegedDaemon:
         # Cleanup old socket
         self._cleanup_socket()
         
-        # Create socket
-        self.server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.server_socket.bind(self.socket_path)
-        self.server_socket.listen(5)
+        # Ensure socket directory exists
+        socket_dir = os.path.dirname(self.socket_path)
+        if socket_dir and not os.path.exists(socket_dir):
+            try:
+                os.makedirs(socket_dir, mode=0o700, exist_ok=True)
+                logger.info(f"Created socket directory: {socket_dir}")
+            except OSError as e:
+                logger.error(f"Failed to create socket directory {socket_dir}: {e}")
+                raise
         
-        # Set socket permissions so UI can connect
-        os.chmod(self.socket_path, 0o666)
+        # Create socket
+        try:
+            print(f"[Daemon] Creating socket at: {self.socket_path}", file=sys.stderr, flush=True)
+            self.server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.server_socket.bind(self.socket_path)
+            print(f"[Daemon] Socket bound successfully", file=sys.stderr, flush=True)
+            self.server_socket.listen(5)
+            logger.info(f"Socket created and bound successfully")
+            print(f"[Daemon] Socket created and bound successfully", file=sys.stderr, flush=True)
+        except OSError as e:
+            error_msg = f"Failed to create/bind socket at {self.socket_path}: {e}"
+            logger.error(error_msg)
+            print(f"[Daemon] ERROR: {error_msg}", file=sys.stderr, flush=True)
+            raise
+        
+        # Set socket ownership and permissions to only allow the original user
+        if self.allowed_uid is not None and self.allowed_gid is not None:
+            try:
+                os.chown(self.socket_path, self.allowed_uid, self.allowed_gid)
+                os.chmod(self.socket_path, 0o600)  # Only owner can read/write
+                logger.info(f"Socket restricted to UID {self.allowed_uid}, GID {self.allowed_gid}")
+            except OSError as e:
+                logger.warning(f"Could not set socket ownership: {e}. Using permissive permissions.")
+                os.chmod(self.socket_path, 0o666)  # Fallback to world-writable (less secure)
+        else:
+            logger.warning("Could not determine original user UID/GID. Using permissive socket permissions.")
+            os.chmod(self.socket_path, 0o666)  # Fallback to world-writable (less secure)
         
         logger.info(f"Daemon listening on {self.socket_path}")
+        print(f"[Daemon] Daemon is now listening on socket: {self.socket_path}", file=sys.stderr, flush=True)
         
         # Main accept loop
         while not SHUTDOWN_REQUESTED.is_set():
@@ -236,11 +341,69 @@ class PrivilegedDaemon:
         logger.info("Daemon stopped")
 
 
-def run_daemon() -> int:
-    """Run the daemon (entry point for --daemon mode)."""
+def run_daemon(argv: Optional[List[str]] = None) -> int:
+    """
+    Run the daemon (entry point for --daemon mode).
+    
+    Args:
+        argv: Command-line arguments (defaults to sys.argv)
+    """
+    # Ensure sys is available (imported at module level, but explicit access helps)
+    import sys
+    if argv is None:
+        argv = sys.argv
+    
+    # Parse UID/GID from command-line arguments (pkexec doesn't preserve env vars)
+    uid = None
+    gid = None
+    if '--uid' in argv:
+        idx = argv.index('--uid')
+        if idx + 1 < len(argv):
+            try:
+                uid = int(argv[idx + 1])
+                logger.info(f"Parsed UID from command line: {uid}")
+            except (ValueError, IndexError) as e:
+                logger.warning(f"Failed to parse UID from command line: {e}")
+    else:
+        logger.warning("--uid argument not found in daemon command line")
+    
+    if '--gid' in argv:
+        idx = argv.index('--gid')
+        if idx + 1 < len(argv):
+            try:
+                gid = int(argv[idx + 1])
+                logger.info(f"Parsed GID from command line: {gid}")
+            except (ValueError, IndexError) as e:
+                logger.warning(f"Failed to parse GID from command line: {e}")
+    
+    # Set environment variables from command-line if not already set
+    # (helps with socket path determination)
+    if uid is not None and 'PKEXEC_UID' not in os.environ and 'SUDO_UID' not in os.environ:
+        os.environ['PKEXEC_UID'] = str(uid)
+        os.environ['SUDO_UID'] = str(uid)
+    if gid is not None and 'PKEXEC_GID' not in os.environ and 'SUDO_GID' not in os.environ:
+        os.environ['PKEXEC_GID'] = str(gid)
+        os.environ['SUDO_GID'] = str(gid)
+    
     try:
+        print(f"[Daemon] Initializing daemon with UID: {uid}, GID: {gid}", file=sys.stderr, flush=True)
         daemon = PrivilegedDaemon()
+        # Override UID/GID if provided via command line
+        if uid is not None:
+            daemon.allowed_uid = uid
+            print(f"[Daemon] Set allowed_uid to {uid}", file=sys.stderr, flush=True)
+        if gid is not None:
+            daemon.allowed_gid = gid
+            print(f"[Daemon] Set allowed_gid to {gid}", file=sys.stderr, flush=True)
+        # Recalculate socket path with correct UID
+        if uid is not None:
+            from .protocol import get_socket_path
+            daemon.socket_path = get_socket_path(uid)
+            print(f"[Daemon] Set socket_path to {daemon.socket_path}", file=sys.stderr, flush=True)
+        
+        print("[Daemon] Calling daemon.start()...", file=sys.stderr, flush=True)
         daemon.start()
+        print("[Daemon] daemon.start() returned (should not happen)", file=sys.stderr, flush=True)
         return 0
     except KeyboardInterrupt:
         logger.info("Interrupted by user")

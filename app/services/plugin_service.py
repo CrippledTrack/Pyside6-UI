@@ -2,9 +2,13 @@
 Plugin discovery and registration service.
 
 This module provides functionality for discovering plugins from multiple sources
-(core plugins from platforms/core_plugins.py and GUI/plugins/core_plugins.py,
+(core plugins from app_plugins/core_plugins.py and GUI/plugins/core_plugins.py,
 entry point plugins, and local plugin files) and registering them with the
 plugin registry.
+
+Legacy support: This module maintains backwards compatibility with the old
+'platforms/' folder name (deprecated, 3.0.0 compatibility) but prefers the
+new 'app_plugins/' name.
 """
 
 from __future__ import annotations
@@ -39,7 +43,7 @@ def _load_core_plugins_from_source(source: str) -> List[Type[Any]]:
     """Load core plugins from a specific source.
     
     Args:
-        source: Either 'platforms' or 'gui'
+        source: Either 'platforms' (for app_plugins/, with legacy fallback) or 'gui'
         
     Returns:
         List of plugin classes, empty list on error
@@ -48,10 +52,19 @@ def _load_core_plugins_from_source(source: str) -> List[Type[Any]]:
         if source == "platforms":
             parent_dir = Path(__file__).parent.parent.parent
             with _with_sys_path(parent_dir):
-                from platforms.core_plugins import get_core_plugins  # type: ignore
-                plugins = get_core_plugins()
-            logger.info("Platforms core plugins retrieved: %d plugins", len(plugins))
-            return plugins
+                # Try new name first (app_plugins)
+                try:
+                    from app_plugins.core_plugins import get_core_plugins  # type: ignore
+                    plugins = get_core_plugins()
+                    logger.info("App plugins core plugins retrieved: %d plugins", len(plugins))
+                    return plugins
+                except ImportError:
+                    # LEGACY: Support for old 'platforms/' folder name (deprecated, 3.0.0 compatibility)
+                    from platforms.core_plugins import get_core_plugins  # type: ignore
+                    plugins = get_core_plugins()
+                    logger.warning("Using legacy 'platforms/' folder for core plugins (deprecated, 3.0.0 compatibility). Consider migrating to 'app_plugins/'")
+                    logger.info("Platforms core plugins retrieved: %d plugins", len(plugins))
+                    return plugins
         elif source == "gui":
             from ...plugins.core_plugins import get_core_plugins
             plugins = get_core_plugins()
