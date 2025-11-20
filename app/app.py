@@ -42,23 +42,7 @@ def run(argv: List[str]) -> int:
     if '--daemon' in argv and platform.system().lower() == 'linux':
         from .daemon.server import run_daemon
         return run_daemon(argv)
-    
-    # Check if this is a Qt probe subprocess (Python -c mode) - skip all initialization
-    if '-c' in argv:
-        # This is being run as a Python command line probe - just execute the code
-        # The code will be in argv[argv.index('-c') + 1]
-        try:
-            idx = argv.index('-c')
-            if idx + 1 < len(argv):
-                code = argv[idx + 1]
-                # Execute in clean namespace (like Python -c does)
-                exec(code, {'__name__': '__main__', '__builtins__': __builtins__})
-                return 0
-        except Exception as e:
-            # If exec fails, exit with error (Qt probe will handle this)
-            print(f"Error: {e}", file=sys.stderr)
-            return 1
-    
+
     # Prevent multiple instances on Linux (check BEFORE any initialization)
     lock_file = None
     lock_file_path = None

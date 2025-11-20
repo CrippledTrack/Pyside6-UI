@@ -16,7 +16,7 @@ from PySide6.QtWidgets import QTabWidget, QWidget
 if TYPE_CHECKING:
     from .settings_service import SettingsService
 
-from ...plugins import plugin_registry
+from ...plugin_system import plugin_registry
 from .plugin_service import discover_and_register_all_plugins
 
 logger = logging.getLogger(__name__)

@@ -16,7 +16,7 @@ from PySide6.QtWidgets import QTabWidget, QWidget
 
 if TYPE_CHECKING:
     from ...services.interfaces import IAdminService, IDaemonService
-    from ....plugins.base import BaseTabPlugin
+    from ....plugin_system.base import BaseTabPlugin
 
 from ..widgets.admin_required_placeholder import AdminRequiredPlaceholder
 from ..widgets.error_placeholder import ErrorPlaceholder

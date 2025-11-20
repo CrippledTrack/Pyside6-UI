@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal, Qt, QPoint
 from typing import Optional, List, Tuple, Any, Type
-from ....plugins.base import plugin_registry, BaseTabPlugin
+from ....plugin_system.base import plugin_registry, BaseTabPlugin
 
 
 class PluginManagementDialog(QDialog):

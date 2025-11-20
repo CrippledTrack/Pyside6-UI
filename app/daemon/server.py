@@ -153,7 +153,7 @@ class PrivilegedDaemon:
             raise ValueError("Command must be a list")
         
         # Execute command
-        logger.debug(f"Executing command: {' '.join(command)}")
+        logger.info(f"Executing command: {' '.join(command)}")
         
         try:
             # Handle timeout: None means no timeout
@@ -289,11 +289,11 @@ class PrivilegedDaemon:
                 os.chmod(self.socket_path, 0o600)  # Only owner can read/write
                 logger.info(f"Socket restricted to UID {self.allowed_uid}, GID {self.allowed_gid}")
             except OSError as e:
-                logger.warning(f"Could not set socket ownership: {e}. Using permissive permissions.")
-                os.chmod(self.socket_path, 0o666)  # Fallback to world-writable (less secure)
+                logger.error(f"Could not set socket ownership: {e}. Aborting to prevent insecure operation.")
+                raise
         else:
-            logger.warning("Could not determine original user UID/GID. Using permissive socket permissions.")
-            os.chmod(self.socket_path, 0o666)  # Fallback to world-writable (less secure)
+            logger.error("Could not determine original user UID/GID. Aborting to prevent insecure operation.")
+            raise ValueError("Could not determine original user UID/GID")
         
         logger.info(f"Daemon listening on {self.socket_path}")
         print(f"[Daemon] Daemon is now listening on socket: {self.socket_path}", file=sys.stderr, flush=True)

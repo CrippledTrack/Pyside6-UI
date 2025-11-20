@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...plugins import plugin_registry
+from ...plugin_system import plugin_registry
 from ...themes.theme_manager import ThemeManager
 from ..services.admin_service import AdminService
 from ..services.daemon_service import DaemonService

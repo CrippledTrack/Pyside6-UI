@@ -14,9 +14,9 @@ from PySide6.QtCore import QObject, Signal
 
 if TYPE_CHECKING:
     from ...services.interfaces import ISettingsService
-    from ....plugins.base import BaseTabPlugin
+    from ....plugin_system.base import BaseTabPlugin
 
-from ....plugins import plugin_registry
+from ....plugin_system import plugin_registry
 
 logger = logging.getLogger(__name__)
 

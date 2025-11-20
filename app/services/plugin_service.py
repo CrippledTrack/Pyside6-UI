@@ -20,7 +20,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Type
 
-from ...plugins import plugin_registry
+from ...plugin_system import plugin_registry
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ def _load_core_plugins_from_source(source: str) -> List[Type[Any]]:
                     logger.info("Platforms core plugins retrieved: %d plugins", len(plugins))
                     return plugins
         elif source == "gui":
-            from ...plugins.core_plugins import get_core_plugins
+            from ...plugin_system.core_plugins import get_core_plugins
             plugins = get_core_plugins()
             logger.info("GUI core plugins retrieved: %d plugins", len(plugins))
             return plugins
@@ -118,7 +118,7 @@ def discover_and_register_all_plugins() -> Tuple[List[Type[Any]], Dict[str, Any]
 
         # Discover plugins from both external and built-in locations
         try:
-            from ...plugins.discovery import discover_and_register_plugins as discover
+            from ...plugin_system.discovery import discover_and_register_plugins as discover
             from ..utils.paths import get_plugins_dir
 
             # Discover external plugins (in parent project's plugins directory)
