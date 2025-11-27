@@ -18,6 +18,24 @@ from .version_utils import check_version_compatibility, get_gui_version
 logger = logging.getLogger(__name__)
 
 
+def _is_show_all_platforms() -> bool:
+    """Check if show all platforms mode is enabled.
+    
+    Imported lazily to avoid circular imports.
+    """
+    try:
+        # Use relative import to ensure we access the same module instance
+        # that menu_bar_controller sets the flag on
+        from ..app.utils.admin import is_show_all_platforms
+        result = is_show_all_platforms()
+        if result:
+            logger.info("Show all platforms mode is ENABLED - bypassing platform filtering")
+        return result
+    except Exception as e:
+        logger.debug(f"Could not check show_all_platforms flag: {e}")
+        return False
+
+
 class PluginRegistry:
     """Registry for managing discovered plugins."""
 
@@ -46,9 +64,18 @@ class PluginRegistry:
         if errors:
             raise ValueError(f"Invalid plugin '{plugin_name}': {', '.join(errors)}")
 
-        # Check platform compatibility
-        if not plugin_class.is_compatible():
+        # Check platform compatibility (bypass if show_all_platforms is enabled)
+        show_all = _is_show_all_platforms()
+        is_compatible = plugin_class.is_compatible()
+        supported_platforms = getattr(plugin_class, 'supported_platforms', [])
+        
+        if not show_all and not is_compatible:
+            logger.debug(f"Skipping plugin '{plugin_name}' - not compatible with current platform. "
+                        f"Supported: {supported_platforms}, show_all_platforms: {show_all}")
             return  # Skip incompatible plugins
+        
+        if show_all and not is_compatible:
+            logger.info(f"Loading cross-platform plugin '{plugin_name}' (supported: {supported_platforms})")
         
         # Check version compatibility
         if not self._check_plugin_compatibility(plugin_class, plugin_name):

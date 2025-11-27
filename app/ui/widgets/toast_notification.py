@@ -239,6 +239,8 @@ class ToastNotification(QFrame):
     
     def show_toast(self, parent_widget: Optional[QWidget] = None):
         """Show the toast notification with animation."""
+        from PySide6.QtCore import QPoint
+        
         # Use stored parent_window if no parent_widget provided
         target_parent = parent_widget or self.parent_window
         
@@ -249,14 +251,20 @@ class ToastNotification(QFrame):
                 main_window = main_window.parent()
             
             if main_window:
-                parent_rect = main_window.geometry()
-                # Position in top-right corner, moved down to avoid blocking menu/toolbars
-                x = parent_rect.x() + parent_rect.width() - self.width() - 15
-                y = parent_rect.y() + 60  # Move down to clear menu bar area
+                # Get the main window's geometry in screen coordinates
+                # mapToGlobal converts a point from widget coordinates to screen coordinates
+                top_right = main_window.mapToGlobal(QPoint(main_window.width(), 0))
+                
+                # Position toast in top-right corner with some padding
+                x = top_right.x() - self.width() - 15
+                y = top_right.y() + 40  # Offset from top to clear menu bar
                 self.move(x, y)
             else:
-                # Fallback positioning
-                self.move(100, 100)
+                # Fallback - use target_parent's global position
+                top_right = target_parent.mapToGlobal(QPoint(target_parent.width(), 0))
+                x = top_right.x() - self.width() - 15
+                y = top_right.y() + 40
+                self.move(x, y)
         else:
             # No parent available, use screen positioning
             from PySide6.QtWidgets import QApplication

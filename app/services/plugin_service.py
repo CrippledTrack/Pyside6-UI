@@ -116,6 +116,20 @@ def discover_and_register_all_plugins() -> Tuple[List[Type[Any]], Dict[str, Any]
         logger.info("Total core plugins to register: %d plugins", len(all_core_plugins))
         registered_core = _register_core_plugins(all_core_plugins)
 
+        # In dev mode with show_all_platforms, also load cross-platform plugins
+        try:
+            from ..utils.admin import is_show_all_platforms
+            if is_show_all_platforms():
+                logger.info("Dev mode: Loading cross-platform plugins...")
+                from ..utils.dev_mode_utils.cross_platform_plugins import load_cross_platform_plugins
+                cross_platform = load_cross_platform_plugins()
+                if cross_platform:
+                    registered_cross = _register_core_plugins(cross_platform)
+                    logger.info("Registered %d cross-platform plugins", len(registered_cross))
+                    registered_core.extend(registered_cross)
+        except ImportError as e:
+            logger.debug(f"Cross-platform plugins not available: {e}")
+
         # Discover plugins from both external and built-in locations
         try:
             from ...plugin_system.discovery import discover_and_register_plugins as discover

@@ -82,6 +82,7 @@ class ThemeManager:
     def load_builtin_themes(self) -> None:
         """Load built-in themes"""
         builtin_themes = {
+            "default": get_default_theme(),
             "dark": get_dark_theme(), 
             "light": get_light_theme(),
             "blue": get_blue_theme(),
@@ -206,16 +207,25 @@ class ThemeManager:
         self.settings_service = settings_service
     
     def _apply_stylesheet(self, stylesheet: str):
-        """Apply stylesheet to the application"""
-        if stylesheet:
-            QApplication.instance().setStyleSheet(stylesheet)
+        """Apply stylesheet to the application.
+        
+        If stylesheet is empty, clears any existing stylesheet to reset to system defaults.
+        """
+        # Always set the stylesheet (empty string clears previous styles)
+        QApplication.instance().setStyleSheet(stylesheet if stylesheet else "")
     
     def _apply_palette(self, palette_data: Dict[str, Any]):
-        """Apply color palette to the application"""
+        """Apply color palette to the application.
+        
+        If palette_data is empty, resets to the default system palette.
+        """
+        app = QApplication.instance()
+        
         if not palette_data:
+            # Reset to default system palette
+            app.setPalette(app.style().standardPalette())
             return
         
-        app = QApplication.instance()
         palette = QPalette()
         
         # Map color roles to their string representations
