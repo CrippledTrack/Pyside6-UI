@@ -202,6 +202,9 @@ class MainWindow(QMainWindow):
             on_restart_admin=self.restart_as_admin
         )
     
+        # Connect dev menu signals
+        self.menu_controller.cross_platform_toggled.connect(self._on_cross_platform_toggled)
+    
     def _start_tab_loader(self) -> None:
         """Configure and start the tab loading thread."""
         self.tab_loader = TabLoaderThread(settings_service=self.settings_service)
@@ -332,6 +335,72 @@ class MainWindow(QMainWindow):
             if current_index >= 0:
                 # Trigger tab change to reload if needed
                 self.tab_controller.on_tab_changed(current_index)
+    
+    def _on_cross_platform_toggled(self, enabled: bool) -> None:
+        """Handle cross-platform tabs toggle from dev menu.
+        
+        Args:
+            enabled: True if cross-platform tabs should be shown
+        """
+        other_platform = "Windows" if CURRENT_PLATFORM == "linux" else "Linux"
+        
+        if enabled:
+            # Install mock modules for cross-platform dependencies
+            if CURRENT_PLATFORM == "linux":
+                try:
+                    from ..utils.dev_mode_utils.win32_mocks import install_win32_mocks
+                    install_win32_mocks()
+                except Exception as e:
+                    logger.warning(f"Could not install win32 mocks: {e}")
+            
+            # Clear the cross-platform plugin cache so they get re-imported with mocks
+            try:
+                from ..utils.dev_mode_utils.cross_platform_plugins import clear_cross_platform_cache
+                clear_cross_platform_cache()
+            except ImportError:
+                logger.warning("Could not clear cross-platform plugin cache")
+            
+            # Clear existing plugins and reload with cross-platform enabled
+            self._reload_all_plugins()
+            self.toast_manager.show_info(
+                f"Loading {other_platform} tabs... Some features may not work on this platform."
+            )
+        else:
+            # Clear the cross-platform plugin cache
+            try:
+                from ..utils.dev_mode_utils.cross_platform_plugins import clear_cross_platform_cache
+                clear_cross_platform_cache()
+            except ImportError:
+                pass
+            
+            # Reload without cross-platform tabs
+            self._reload_all_plugins()
+            self.toast_manager.show_info(f"Removed {other_platform} tabs")
+    
+    def _reload_all_plugins(self) -> None:
+        """Reload all plugins and tabs.
+        
+        This clears the plugin registry and re-discovers all plugins,
+        then reloads the tabs. Used when toggling cross-platform tabs.
+        """
+        logger.info("Reloading all plugins...")
+        
+        # Clear existing tabs
+        while self.tab_widget.count() > 0:
+            self.tab_widget.removeTab(0)
+        
+        # Clear tab controller state
+        self.tab_controller.clear_loaded_tabs()
+        
+        # Clear plugin registry
+        plugin_registry.clear()
+        
+        # Show loading state
+        self.tab_widget.hide()
+        self.loading_widget.show()
+        
+        # Re-run tab loader
+        self._start_tab_loader()
     
     def setup_toast_manager(self) -> None:
         """Setup the toast notification manager."""

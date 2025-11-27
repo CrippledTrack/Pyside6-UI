@@ -164,6 +164,7 @@ class PluginController(QObject):
         """Load plugin states from settings.
         
         This method loads user-disabled plugins from settings and applies them.
+        Also cleans up any disabled_by_default plugins that were incorrectly saved.
         """
         if not self.settings_service:
             return
@@ -172,10 +173,26 @@ class PluginController(QObject):
             saved_disabled = self.settings_service.get_disabled_plugins()
             if saved_disabled:
                 logger.info(f"Loading saved user-disabled plugins: {saved_disabled}")
+                
+                # Filter out plugins that are disabled_by_default (they shouldn't be in settings)
+                cleaned_disabled = []
                 for plugin_name in saved_disabled:
-                    if plugin_registry.get_plugin(plugin_name):
-                        plugin_registry.disable_plugin(plugin_name)
-                        logger.debug(f"Applied user preference: {plugin_name} disabled")
+                    plugin_class = plugin_registry.get_plugin(plugin_name)
+                    if plugin_class:
+                        if getattr(plugin_class, 'disabled_by_default', False):
+                            logger.debug(f"Removing disabled_by_default plugin from settings: {plugin_name}")
+                        else:
+                            plugin_registry.disable_plugin(plugin_name)
+                            cleaned_disabled.append(plugin_name)
+                            logger.debug(f"Applied user preference: {plugin_name} disabled")
+                    else:
+                        # Plugin no longer exists, don't include in cleaned list
+                        logger.debug(f"Skipping non-existent plugin: {plugin_name}")
+                
+                # Re-save if we cleaned up any entries
+                if len(cleaned_disabled) != len(saved_disabled):
+                    logger.info(f"Cleaning up settings: removed {len(saved_disabled) - len(cleaned_disabled)} disabled_by_default plugins")
+                    self.settings_service.save_disabled_plugins(cleaned_disabled)
         except Exception as e:
             logger.warning(f"Failed to load plugin states: {e}")
 

@@ -11,6 +11,69 @@ import platform
 
 logger = logging.getLogger(__name__)
 
+# Dev mode flag - when True, admin requirements are bypassed for tab loading
+_dev_mode: bool = False
+
+# Cross-platform tabs flag - when True, tabs from all platforms are shown (dev mode only)
+_show_all_platforms: bool = False
+
+
+def set_dev_mode(enabled: bool) -> None:
+    """Set the dev mode flag.
+    
+    When dev mode is enabled, admin requirements for tab loading are bypassed.
+    This allows testing the UI without elevated privileges.
+    
+    Args:
+        enabled: True to enable dev mode, False to disable
+    """
+    global _dev_mode
+    _dev_mode = enabled
+    if enabled:
+        logger.warning("Dev mode enabled - admin requirements bypassed for tab loading")
+
+
+def is_dev_mode() -> bool:
+    """Check if dev mode is enabled.
+    
+    Returns:
+        True if dev mode is enabled, False otherwise
+    """
+    return _dev_mode
+
+
+def set_show_all_platforms(enabled: bool) -> None:
+    """Set the show all platforms flag (only effective in dev mode).
+    
+    When enabled, tabs from all platforms (Windows and Linux) are shown
+    regardless of the current platform. This is useful for UI testing.
+    
+    Args:
+        enabled: True to show all platform tabs, False to filter by current platform
+    """
+    global _show_all_platforms
+    _show_all_platforms = enabled
+    
+    logger.warning(f"set_show_all_platforms({enabled}) called - dev_mode={_dev_mode}, module_id={id(__import__('sys').modules.get(__name__, 'unknown'))}")
+    
+    if enabled:
+        logger.warning("Show all platforms enabled - Windows and Linux tabs will be shown")
+    else:
+        logger.info("Show all platforms disabled - filtering by current platform")
+
+
+def is_show_all_platforms() -> bool:
+    """Check if show all platforms is enabled.
+    
+    Note: This only returns True if both dev mode AND show_all_platforms are enabled.
+    
+    Returns:
+        True if showing all platform tabs, False otherwise
+    """
+    result = _dev_mode and _show_all_platforms
+    logger.debug(f"is_show_all_platforms() called: dev_mode={_dev_mode}, show_all={_show_all_platforms}, result={result}")
+    return result
+
 
 def needs_admin_for_plugin(is_windows: bool, requires_admin: bool, is_admin: bool) -> bool:
     """Determine whether admin privileges are required for a plugin tab creation.
@@ -26,7 +89,12 @@ def needs_admin_for_plugin(is_windows: bool, requires_admin: bool, is_admin: boo
     Note:
         On Windows: admin is required if plugin requires it and app is not running as admin.
         On Linux: admin is required if plugin requires it and daemon is not available.
+        In dev mode: admin requirements are always bypassed.
     """
+    # Dev mode bypasses all admin requirements for tab loading
+    if _dev_mode:
+        return False
+    
     if not requires_admin:
         return False
     
@@ -45,6 +113,6 @@ def needs_admin_for_plugin(is_windows: bool, requires_admin: bool, is_admin: boo
     return False
 
 
-__all__ = ['needs_admin_for_plugin']
+__all__ = ['needs_admin_for_plugin', 'set_dev_mode', 'is_dev_mode', 'set_show_all_platforms', 'is_show_all_platforms']
 
 

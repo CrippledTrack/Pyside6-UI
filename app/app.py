@@ -42,6 +42,11 @@ def run(argv: List[str]) -> int:
     if '--daemon' in argv and platform.system().lower() == 'linux':
         from .daemon.server import run_daemon
         return run_daemon(argv)
+    
+    # Check for dev mode flag - bypasses admin requirements for tab loading
+    if '-dev' in argv or '--dev' in argv:
+        from .utils.admin import set_dev_mode
+        set_dev_mode(True)
 
     # Prevent multiple instances on Linux (check BEFORE any initialization)
     lock_file = None
@@ -65,6 +70,10 @@ def run(argv: List[str]) -> int:
     logger = setup_logging()
     logger.info(f"Starting {VERSION_NAME} v{VERSION} on {platform.system().lower()}")
     logger.info(f"GUI API Version: v{GUI_API_VERSION}")
+
+    # Log dev mode status now that logging is configured
+    if '-dev' in argv or '--dev' in argv:
+        logger.warning("DEV MODE ENABLED - admin requirements bypassed, Dev menu available")
 
     # Initialize service container
     container = ServiceContainer()

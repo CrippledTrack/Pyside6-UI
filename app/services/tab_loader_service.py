@@ -75,12 +75,31 @@ class TabLoaderThread(QThread):
             logger.warning(f"Failed to load saved plugin states: {e}")
 
     def _apply_user_disabled_plugins(self, disabled_plugins: List[str]) -> None:
-        """Apply user-disabled plugins from settings."""
+        """Apply user-disabled plugins from settings.
+        
+        Also cleans up any disabled_by_default plugins that were incorrectly saved.
+        """
         logger.info(f"Loading saved user-disabled plugins: {disabled_plugins}")
+        
+        # Filter out plugins that are disabled_by_default (they shouldn't be in settings)
+        cleaned_disabled = []
         for plugin_name in disabled_plugins:
-            if plugin_registry.get_plugin(plugin_name):
-                plugin_registry.disable_plugin(plugin_name)
-                logger.debug(f"Applied user preference: {plugin_name} disabled")
+            plugin_class = plugin_registry.get_plugin(plugin_name)
+            if plugin_class:
+                if getattr(plugin_class, 'disabled_by_default', False):
+                    logger.debug(f"Removing disabled_by_default plugin from settings: {plugin_name}")
+                else:
+                    plugin_registry.disable_plugin(plugin_name)
+                    cleaned_disabled.append(plugin_name)
+                    logger.debug(f"Applied user preference: {plugin_name} disabled")
+            else:
+                # Plugin no longer exists, don't include in cleaned list
+                logger.debug(f"Skipping non-existent plugin: {plugin_name}")
+        
+        # Re-save if we cleaned up any entries
+        if len(cleaned_disabled) != len(disabled_plugins) and self.settings_service:
+            logger.info(f"Cleaning up settings: removed {len(disabled_plugins) - len(cleaned_disabled)} disabled_by_default plugins")
+            self.settings_service.save_disabled_plugins(cleaned_disabled)
 
     def _handle_first_run(self) -> None:
         """Handle first run scenario - log defaults and initialize empty disabled list."""

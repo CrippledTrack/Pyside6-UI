@@ -306,6 +306,27 @@ class TabController(QObject):
         """
         return self.tab_widget.count()
     
+    def clear_loaded_tabs(self) -> None:
+        """Clear all loaded tab state.
+        
+        This is used when reloading all plugins. It clears the internal
+        tracking of loaded tabs without removing the actual tab widgets
+        (which should be removed separately).
+        """
+        # Call deactivation hooks for all tabs with instances
+        for tab_name, tab_info in self.loaded_tabs.items():
+            if tab_info.get("instance"):
+                plugin_class = tab_info["plugin_class"]
+                if hasattr(plugin_class, 'on_tab_deactivated'):
+                    try:
+                        plugin_class.on_tab_deactivated(tab_info["instance"])
+                    except Exception as e:
+                        logger.debug(f"Error calling deactivation hook for {tab_name}: {e}")
+        
+        self.loaded_tabs.clear()
+        self._previous_tab_index = -1
+        logger.info("Cleared all loaded tab state")
+    
     def set_restart_admin_callback(self, callback: Callable[[], None]) -> None:
         """Set callback for restart as admin action.
         

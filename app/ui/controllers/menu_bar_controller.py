@@ -11,7 +11,7 @@ import logging
 import platform
 from typing import Optional, Callable, TYPE_CHECKING, Any
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenuBar, QMenu, QWidget
 
@@ -25,6 +25,9 @@ CURRENT_PLATFORM = platform.system().lower()
 
 class MenuBarController(QObject):
     """Controller for managing menu bar and menu items."""
+    
+    # Signal emitted when cross-platform tabs toggle changes
+    cross_platform_toggled = Signal(bool)
     
     def __init__(
         self,
@@ -54,6 +57,7 @@ class MenuBarController(QObject):
         self.manage_plugins_action: Optional[QAction] = None
         self.select_theme_action: Optional[QAction] = None
         self.restart_admin_action: Optional[QAction] = None
+        self.show_all_platforms_action: Optional[QAction] = None
     
     def setup(
         self,
@@ -70,6 +74,7 @@ class MenuBarController(QObject):
         """
         self._create_settings_menu(on_manage_plugins, on_select_theme)
         self._create_admin_menu(on_restart_admin)
+        self._create_dev_menu()
         self._setup_tooltips()
         logger.debug("Menu bar setup complete")
     
@@ -144,6 +149,53 @@ class MenuBarController(QObject):
             self.restart_admin_action.triggered.connect(on_restart_admin)
             admin_menu.addAction(self.restart_admin_action)
             logger.debug(f"Admin menu created (platform: {CURRENT_PLATFORM})")
+    
+    def _create_dev_menu(self) -> None:
+        """Create the Dev menu if in dev mode.
+        
+        This menu provides developer-only options for testing and debugging.
+        Only shown when the application is started with -dev or --dev flag.
+        """
+        try:
+            from ...utils.admin import is_dev_mode, set_show_all_platforms, is_show_all_platforms
+        except ImportError:
+            logger.debug("Dev mode utilities not available, skipping dev menu")
+            return
+        
+        if not is_dev_mode():
+            return
+        
+        dev_menu = QMenu("Dev", self.parent_widget)
+        self.menu_bar.addMenu(dev_menu)
+        
+        # Platform name for menu item
+        other_platform = "Windows" if CURRENT_PLATFORM == "linux" else "Linux"
+        
+        self.show_all_platforms_action = QAction(f"Show {other_platform} Tabs", self.parent_widget)
+        self.show_all_platforms_action.setCheckable(True)
+        self.show_all_platforms_action.setChecked(is_show_all_platforms())
+        self.show_all_platforms_action.setToolTip(
+            f"Show tabs from {other_platform} for testing purposes. "
+            "Requires application restart to take effect."
+        )
+        self.show_all_platforms_action.triggered.connect(self._on_show_all_platforms_toggled)
+        dev_menu.addAction(self.show_all_platforms_action)
+        
+        logger.debug("Dev menu created")
+    
+    def _on_show_all_platforms_toggled(self, checked: bool) -> None:
+        """Handle show all platforms toggle.
+        
+        Args:
+            checked: True if the action is checked, False otherwise
+        """
+        try:
+            from ...utils.admin import set_show_all_platforms
+            set_show_all_platforms(checked)
+            self.cross_platform_toggled.emit(checked)
+            logger.info(f"Show all platforms set to: {checked}")
+        except ImportError:
+            logger.warning("Could not import set_show_all_platforms")
     
     def _setup_tooltips(self) -> None:
         """Setup tooltips for menu actions."""

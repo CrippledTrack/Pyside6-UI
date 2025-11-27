@@ -146,8 +146,9 @@ def ensure_qt_xcb_dependencies_installed() -> bool:
     if distro in ('debian', 'ubuntu', 'linuxmint'):
         installed = _install_qt_xcb_dependencies_debian()
     else:
-        logger.error(f"Automatic installation not implemented for distribution '{distro}'. Please install Qt xcb dependencies manually.")
-        return False
+        # Skip dependency check on non-Debian distros for now - assume Qt deps are available
+        logger.warning(f"Qt dependency check skipped for distribution '{distro}'. If the app fails to start, please install Qt xcb dependencies manually.")
+        return True
 
     if not installed:
         return False
