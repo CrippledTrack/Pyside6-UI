@@ -43,6 +43,7 @@ def get_theme() -> Dict[str, Any]:
                 border-radius: 3px;
                 padding: 6px 12px;
                 font-weight: normal;
+                text-transform: none;
             }
             QPushButton:hover {
                 border-color: #0078d4;
@@ -61,6 +62,12 @@ def get_theme() -> Dict[str, Any]:
                 border-top-left-radius: 3px;
                 border-top-right-radius: 3px;
                 padding: 6px 12px;
+                text-transform: none;
+                font-weight: normal;
+            }
+            QTabBar::tab:selected {
+                border-top: 1px solid #d0d0d0; /* Remove the accent color top border */
+                border-bottom: 1px solid #ffffff; /* Blend with pane */
             }
             
             /* Basic input fields */
@@ -141,11 +148,26 @@ def get_theme() -> Dict[str, Any]:
             QMenu::item {
                 padding: 4px 16px 4px 8px;
             }
+            QMenuBar {
+                border-bottom: 1px solid #d0d0d0;
+            }
+            QMenuBar::item {
+                padding: 4px 8px;
+            }
             
             /* No card styling - keep frames simple */
             QFrame#card, QFrame[card="true"], QFrame#cardElevated {
                 border: none;
                 background-color: transparent;
+            }
+            
+            /* Classic header styling */
+            QHeaderView::section {
+                text-transform: none;
+                font-weight: normal;
+                padding: 4px;
+                background-color: #f0f0f0;
+                border: 1px solid #d0d0d0;
             }
         """,
         "palette": {

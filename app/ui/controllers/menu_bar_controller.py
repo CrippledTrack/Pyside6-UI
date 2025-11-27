@@ -58,12 +58,16 @@ class MenuBarController(QObject):
         self.select_theme_action: Optional[QAction] = None
         self.restart_admin_action: Optional[QAction] = None
         self.show_all_platforms_action: Optional[QAction] = None
+        self.view_logs_action: Optional[QAction] = None
+        self.about_action: Optional[QAction] = None
     
     def setup(
         self,
         on_manage_plugins: Callable[[], None],
         on_select_theme: Callable[[], None],
-        on_restart_admin: Callable[[], None]
+        on_restart_admin: Callable[[], None],
+        on_view_logs: Optional[Callable[[], None]] = None,
+        on_about: Optional[Callable[[], None]] = None
     ) -> None:
         """Setup the menu bar with all menus and actions.
         
@@ -71,10 +75,13 @@ class MenuBarController(QObject):
             on_manage_plugins: Callback for manage plugins action
             on_select_theme: Callback for select theme action
             on_restart_admin: Callback for restart admin action
+            on_view_logs: Optional callback for view logs action
+            on_about: Optional callback for about action
         """
         self._create_settings_menu(on_manage_plugins, on_select_theme)
         self._create_admin_menu(on_restart_admin)
         self._create_dev_menu()
+        self._create_help_menu(on_view_logs, on_about)
         self._setup_tooltips()
         logger.debug("Menu bar setup complete")
     
@@ -196,6 +203,38 @@ class MenuBarController(QObject):
             logger.info(f"Show all platforms set to: {checked}")
         except ImportError:
             logger.warning("Could not import set_show_all_platforms")
+    
+    def _create_help_menu(
+        self,
+        on_view_logs: Optional[Callable[[], None]] = None,
+        on_about: Optional[Callable[[], None]] = None
+    ) -> None:
+        """Create the Help menu.
+        
+        Args:
+            on_view_logs: Optional callback for view logs action
+            on_about: Optional callback for about action
+        """
+        help_menu = QMenu("Help", self.parent_widget)
+        self.menu_bar.addMenu(help_menu)
+        
+        # View Logs action
+        self.view_logs_action = QAction("View Logs...", self.parent_widget)
+        self.view_logs_action.setToolTip("Open the log viewer to see application logs")
+        if on_view_logs:
+            self.view_logs_action.triggered.connect(on_view_logs)
+        help_menu.addAction(self.view_logs_action)
+        
+        help_menu.addSeparator()
+        
+        # About action
+        self.about_action = QAction("About...", self.parent_widget)
+        self.about_action.setToolTip("Show information about this application")
+        if on_about:
+            self.about_action.triggered.connect(on_about)
+        help_menu.addAction(self.about_action)
+        
+        logger.debug("Help menu created")
     
     def _setup_tooltips(self) -> None:
         """Setup tooltips for menu actions."""

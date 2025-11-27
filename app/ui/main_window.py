@@ -43,6 +43,7 @@ from .controllers.shortcut_manager import ShortcutManager
 from .controllers.toast_manager import ToastManager
 from .dialogs.plugin_dialog import PluginManagementDialog
 from .dialogs.theme_dialog import ThemeDialog
+from .dialogs.log_viewer_dialog import LogViewerDialog
 from .widgets.loading_placeholder import LoadingPlaceholder
 from ..utils.display_utils import build_version_details
 from ..utils.imports import get_platforms_constants
@@ -184,6 +185,14 @@ class MainWindow(QMainWindow):
     def _setup_menu_bar(self) -> None:
         """Create menu bar and all menu items."""
         menu_bar = QMenuBar(self)
+        menu_bar.setStyleSheet("""
+            QMenuBar {
+                padding: 2px 0px;
+            }
+            QMenuBar::item {
+                padding: 4px 8px;
+            }
+        """)
         self.setMenuBar(menu_bar)
         
         # Create menu bar controller
@@ -199,7 +208,9 @@ class MainWindow(QMainWindow):
         self.menu_controller.setup(
             on_manage_plugins=self.open_plugin_management_dialog,
             on_select_theme=self.open_theme_dialog,
-            on_restart_admin=self.restart_as_admin
+            on_restart_admin=self.restart_as_admin,
+            on_view_logs=self.open_log_viewer_dialog,
+            on_about=self.show_about_dialog
         )
     
         # Connect dev menu signals
@@ -222,6 +233,37 @@ class MainWindow(QMainWindow):
         """Handle tab loading completion."""
         self.loading_widget.hide()
         self.tab_widget.show()
+        
+        # Fix for table header resizing issues
+        from PySide6.QtWidgets import QTableView, QHeaderView, QTreeWidget
+        for i in range(self.tab_widget.count()):
+            widget = self.tab_widget.widget(i)
+            # Recursively find all QTableViews and QTreeWidgets
+            for table in widget.findChildren(QTableView):
+                try:
+                    header = table.horizontalHeader()
+                    # Check if sections are visible before resizing
+                    if header.count() > 0:
+                        # Set resize mode to Interactive but resize to contents initially
+                        # This allows users to resize but starts with good width
+                        for col in range(header.count()):
+                            # Don't override if specifically set to something else by the plugin
+                            # Only apply if using default behavior
+                            if header.sectionResizeMode(col) == QHeaderView.ResizeMode.Interactive:
+                                header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+                except Exception:
+                    pass
+            
+            for tree in widget.findChildren(QTreeWidget):
+                try:
+                    header = tree.header()
+                    if header.count() > 0:
+                        for col in range(header.count()):
+                            if header.sectionResizeMode(col) == QHeaderView.ResizeMode.Interactive:
+                                header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+                except Exception:
+                    pass
+
         logger.info("All tabs loaded successfully")
         self._update_window_title()
     
@@ -275,6 +317,34 @@ class MainWindow(QMainWindow):
         dialog = ThemeDialog(self.theme_manager, self)
         dialog.themeSelected.connect(self.on_theme_selected)
         dialog.exec()
+    
+    def open_log_viewer_dialog(self) -> None:
+        """Open the log viewer dialog (non-modal)."""
+        # Keep reference to prevent garbage collection
+        # WA_DeleteOnClose will clean it up when closed
+        self._log_viewer_dialog = LogViewerDialog(self)
+        self._log_viewer_dialog.show()
+        self._log_viewer_dialog.raise_()
+        self._log_viewer_dialog.activateWindow()
+    
+    def show_about_dialog(self) -> None:
+        """Show the About dialog with application information."""
+        from ..constants import VERSION as GUI_VERSION, VERSION_NAME as DEFAULT_VERSION_NAME
+        
+        # Only show external version if external constants were loaded
+        # (detected by VERSION_NAME differing from the default "Basic UI Application")
+        has_external_constants = VERSION_NAME != DEFAULT_VERSION_NAME
+        
+        if has_external_constants:
+            version_line = f"<p><b>Version:</b> {VERSION}</p>"
+        else:
+            version_line = ""
+        
+        about_text = f"""<h2>{VERSION_NAME}</h2>
+{version_line}<p><b>GUI API Version:</b> {GUI_VERSION}</p>
+<p><b>Platform:</b> {CURRENT_PLATFORM.title()}</p>"""
+
+        QMessageBox.about(self, f"About {VERSION_NAME}", about_text)
     
     def on_theme_selected(self, theme_name: str) -> None:
         """Handle theme selection.
