@@ -106,6 +106,10 @@ def run(argv: List[str]) -> int:
 
     app = QApplication(argv)
 
+    # Set the style to Fusion on Windows by default
+    if platform.system().lower() == "windows":
+        app.setStyle("Fusion")
+
     app.setFont(QFont("Segoe UI", 10))
 
     # On Linux, start privileged daemon (optional - app can run without it)
