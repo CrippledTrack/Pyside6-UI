@@ -139,11 +139,11 @@ def generate_stylesheet(
             color: {text_secondary};
             border: 1px solid {border_color};
             border-bottom: 1px solid {border_color};
-            padding: 8px 16px;
+            padding: 8px 12px; /* Reduced from 16px to fit more tabs */
             margin-right: 2px;
             border-top-left-radius: {border_radius};
             border-top-right-radius: {border_radius};
-            min-width: 80px;
+            min-width: 60px; /* Reduced from 80px */
             font-weight: 500;
         }}
         QTabBar::tab:selected {{
@@ -167,10 +167,10 @@ def generate_stylesheet(
             background-color: {button_bg};
             color: {button_text};
             border: none;
-            padding: 8px 16px;
+            padding: 6px 12px; /* Reduced from 8px 16px */
             border-radius: {border_radius};
             font-weight: 600;
-            text-transform: uppercase;
+            min-height: 0px; /* Explicitly reset to prevent legacy leak */
         }}
         QPushButton:hover {{
             background-color: {button_hover};
@@ -198,7 +198,7 @@ def generate_stylesheet(
         QLineEdit, QTextEdit, QPlainTextEdit {{
             border: 1px solid {border_color};
             border-radius: {border_radius};
-            padding: 8px 12px;
+            padding: 6px 8px; /* Reduced from 8px 12px */
             background-color: {base_bg};
             color: {text_color};
             selection-background-color: {accent_color};
@@ -206,7 +206,7 @@ def generate_stylesheet(
         }}
         QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {{
             border: 2px solid {accent_color};
-            padding: 7px 11px; /* Compensate for thicker border */
+            padding: 5px 7px; /* Compensate for thicker border */
             background-color: {base_bg};
         }}
         QLineEdit:hover:!focus, QTextEdit:hover:!focus {{
@@ -334,6 +334,9 @@ def generate_stylesheet(
         QLabel {{
             color: {text_color};
             background-color: transparent;
+            border: none;
+            padding: 0;
+            border-radius: 0;
         }}
         
         /* ===== Group Box ===== */
@@ -442,7 +445,6 @@ def generate_stylesheet(
             border: none;
             border-bottom: 2px solid {border_color};
             font-weight: bold;
-            text-transform: uppercase;
         }}
         QTableCornerButton::section {{
             background-color: {base_bg};

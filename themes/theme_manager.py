@@ -76,6 +76,8 @@ class ThemeManager:
         # Built-in aliases that should not be shown in UI theme pickers
         self._hidden_theme_names: set = {"ocean_blue"}
         self.settings_service = settings_service
+        # Capture initial system palette before any theme is applied
+        self._initial_palette = QApplication.style().standardPalette()
         self.load_builtin_themes()
         self.load_custom_themes()
     
@@ -222,8 +224,9 @@ class ThemeManager:
         app = QApplication.instance()
         
         if not palette_data:
-            # Reset to default system palette
-            app.setPalette(app.style().standardPalette())
+            # Reset to initial system palette if captured, otherwise standard palette
+            palette = getattr(self, '_initial_palette', app.style().standardPalette())
+            app.setPalette(palette)
             return
         
         palette = QPalette()

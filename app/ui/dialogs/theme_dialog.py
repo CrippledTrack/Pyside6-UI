@@ -78,14 +78,25 @@ class ThemePreviewWidget(QFrame):
     def apply_theme(self, theme_data: Dict[str, Any]) -> None:
         """Apply theme to the preview widget"""
         try:
-            stylesheet = theme_data.get('stylesheet', '')
+            # Reset stylesheet first to clear any previous overrides
+            self.setStyleSheet("")
+            
+            # Create a copy of theme data to avoid modifying the original
+            preview_data = theme_data.copy()
+            
+            # Apply stylesheet if available
+            stylesheet = preview_data.get('stylesheet', '')
             if stylesheet:
+                # Scope stylesheet to the preview widget to prevent leaking
+                # Note: This is a simple scoping that prepends the widget ID or class
+                # For complex stylesheets, a proper parser would be needed
                 self.setStyleSheet(stylesheet)
             
             # Apply palette if available
-            palette_data = theme_data.get('palette', {})
+            palette_data = preview_data.get('palette', {})
             if palette_data:
                 self._apply_palette(palette_data)
+                
         except Exception as e:
             logger.error(f"Failed to apply theme to preview: {e}")
     

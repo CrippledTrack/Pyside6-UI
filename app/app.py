@@ -106,8 +106,6 @@ def run(argv: List[str]) -> int:
 
     app = QApplication(argv)
 
-    # Global style and font retained
-    app.setStyle("Fusion")
     app.setFont(QFont("Segoe UI", 10))
 
     # On Linux, start privileged daemon (optional - app can run without it)
