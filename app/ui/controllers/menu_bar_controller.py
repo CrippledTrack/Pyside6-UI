@@ -56,6 +56,7 @@ class MenuBarController(QObject):
         # Menu actions (stored for state management)
         self.manage_plugins_action: Optional[QAction] = None
         self.select_theme_action: Optional[QAction] = None
+        self.toggle_new_ui_action: Optional[QAction] = None
         self.restart_admin_action: Optional[QAction] = None
         self.show_all_platforms_action: Optional[QAction] = None
         self.view_logs_action: Optional[QAction] = None
@@ -67,7 +68,8 @@ class MenuBarController(QObject):
         on_select_theme: Callable[[], None],
         on_restart_admin: Callable[[], None],
         on_view_logs: Optional[Callable[[], None]] = None,
-        on_about: Optional[Callable[[], None]] = None
+        on_about: Optional[Callable[[], None]] = None,
+        on_toggle_new_ui: Optional[Callable[[], None]] = None
     ) -> None:
         """Setup the menu bar with all menus and actions.
         
@@ -77,8 +79,9 @@ class MenuBarController(QObject):
             on_restart_admin: Callback for restart admin action
             on_view_logs: Optional callback for view logs action
             on_about: Optional callback for about action
+            on_toggle_new_ui: Optional callback for toggle new UI action
         """
-        self._create_settings_menu(on_manage_plugins, on_select_theme)
+        self._create_settings_menu(on_manage_plugins, on_select_theme, on_toggle_new_ui)
         self._create_admin_menu(on_restart_admin)
         self._create_dev_menu()
         self._create_help_menu(on_view_logs, on_about)
@@ -88,13 +91,15 @@ class MenuBarController(QObject):
     def _create_settings_menu(
         self,
         on_manage_plugins: Callable[[], None],
-        on_select_theme: Callable[[], None]
+        on_select_theme: Callable[[], None],
+        on_toggle_new_ui: Optional[Callable[[], None]] = None
     ) -> None:
         """Create the Settings menu with plugin and theme options.
         
         Args:
             on_manage_plugins: Callback for manage plugins action
             on_select_theme: Callback for select theme action
+            on_toggle_new_ui: Optional callback for toggle new UI action
         """
         settings_menu = QMenu("Settings", self.parent_widget)
         self.menu_bar.addMenu(settings_menu)
@@ -107,8 +112,28 @@ class MenuBarController(QObject):
         settings_menu.addAction(self.select_theme_action)
         self.select_theme_action.triggered.connect(on_select_theme)
         
-        settings_menu.addSeparator()
+        # Note: UI toggle has been moved to the theme dialog
+        # Keeping the action reference for backward compatibility but not adding to menu
+        
         logger.debug("Settings menu created")
+    
+    def _update_new_ui_action_text(self) -> None:
+        """Update the new UI toggle action text based on current state."""
+        if self.toggle_new_ui_action and self.settings_service:
+            is_enabled = self.settings_service.get_new_ui_enabled()
+            self.toggle_new_ui_action.setText("Enable New UI" if not is_enabled else "Disable New UI")
+            self.toggle_new_ui_action.setToolTip(
+                "Toggle the new UI overhaul features. Requires application restart to take full effect."
+            )
+    
+    def update_new_ui_action(self) -> None:
+        """Update the new UI toggle action state."""
+        if self.toggle_new_ui_action and self.settings_service:
+            # Block signals temporarily to avoid triggering the callback
+            self.toggle_new_ui_action.blockSignals(True)
+            self.toggle_new_ui_action.setChecked(self.settings_service.get_new_ui_enabled())
+            self._update_new_ui_action_text()
+            self.toggle_new_ui_action.blockSignals(False)
     
     def _create_admin_menu(self, on_restart_admin: Callable[[], None]) -> None:
         """Create the Admin menu if needed.

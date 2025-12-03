@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, TYPE_CHECKING
 
 from PySide6.QtCore import Qt, Signal, QPoint
 from PySide6.QtGui import QAction, QColor, QFont, QPalette
+
+if TYPE_CHECKING:
+    from ...services.interfaces import ISettingsService
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -140,10 +143,17 @@ class ThemeDialog(QDialog):
     """Dialog for selecting and managing themes"""
     
     themeSelected = Signal(str)  # Signal emitted when a theme is selected
+    uiToggleChanged = Signal(bool)  # Signal emitted when UI toggle changes
     
-    def __init__(self, theme_manager: ThemeManager, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self, 
+        theme_manager: ThemeManager, 
+        settings_service: Optional[Any] = None,
+        parent: Optional[QWidget] = None
+    ) -> None:
         super().__init__(parent)
         self.theme_manager = theme_manager
+        self.settings_service = settings_service
         self.current_theme = theme_manager.get_current_theme()
         self.favorite_themes = set()  # Set of favorite theme names
         self.setup_ui()
@@ -214,16 +224,52 @@ class ThemeDialog(QDialog):
         self.export_button.clicked.connect(self.export_theme)
         self.export_button.setEnabled(False)
         
+        # UI Mode Toggle Checkbox (next to Export Theme button)
+        # Initialize checkbox with current state
+        if self.settings_service:
+            try:
+                is_enabled = self.settings_service.get_new_ui_enabled()
+                checkbox_text = "Disable New UI" if is_enabled else "Enable New UI"
+                self.ui_toggle_checkbox = QCheckBox(checkbox_text)
+                self.ui_toggle_checkbox.setChecked(is_enabled)
+            except Exception:
+                self.ui_toggle_checkbox = QCheckBox("Enable New UI")
+                self.ui_toggle_checkbox.setChecked(True)
+        else:
+            self.ui_toggle_checkbox = QCheckBox("Enable New UI")
+            self.ui_toggle_checkbox.setChecked(True)
+        
+        self.ui_toggle_checkbox.setToolTip(
+            "Toggle between the new UI overhaul and legacy UI. "
+            "Some changes may require application restart to take full effect."
+        )
+        self.ui_toggle_checkbox.toggled.connect(self._on_ui_toggle_changed)
+        
         self.close_button = QPushButton("Close")
         self.close_button.clicked.connect(self.close)
         
         button_layout.addWidget(self.apply_button)
         button_layout.addWidget(self.import_button)
         button_layout.addWidget(self.export_button)
+        button_layout.addWidget(self.ui_toggle_checkbox)
         button_layout.addStretch()
         button_layout.addWidget(self.close_button)
         
         layout.addLayout(button_layout)
+    
+    def _on_ui_toggle_changed(self, checked: bool) -> None:
+        """Handle UI toggle checkbox change"""
+        if self.settings_service:
+            try:
+                self.settings_service.save_new_ui_enabled(checked)
+                # Update checkbox text to reflect current state
+                # When checked=True, it means "New UI is enabled", so show "Disable New UI"
+                # When checked=False, it means "New UI is disabled", so show "Enable New UI"
+                self.ui_toggle_checkbox.setText("Disable New UI" if checked else "Enable New UI")
+                # Emit signal to notify main window
+                self.uiToggleChanged.emit(checked)
+            except Exception as e:
+                logger.error(f"Failed to save UI toggle setting: {e}")
     
     def load_themes(self) -> None:
         """Load available themes into the list"""

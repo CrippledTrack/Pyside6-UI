@@ -15,6 +15,16 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 from ..utils.paths import get_base_path
+from ..utils.imports import get_platforms_constants
+
+# Try to get NEW_UI_ENABLED_BY_DEFAULT from platform constants first, fallback to GUI constants
+try:
+    platform_constants = get_platforms_constants()
+    NEW_UI_ENABLED_BY_DEFAULT = getattr(platform_constants, 'NEW_UI_ENABLED_BY_DEFAULT', None)
+    if NEW_UI_ENABLED_BY_DEFAULT is None:
+        from ..constants import NEW_UI_ENABLED_BY_DEFAULT
+except (ImportError, AttributeError):
+    from ..constants import NEW_UI_ENABLED_BY_DEFAULT
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +55,9 @@ class AppSettings:
     # Toast notifications
     toast_notifications_enabled: bool = True
     toast_duration: int = 3000
+    # UI overhaul flag (enable new UI features)
+    # Default value comes from constants.py (NEW_UI_ENABLED_BY_DEFAULT)
+    new_ui_enabled: bool = NEW_UI_ENABLED_BY_DEFAULT
     # GUI version (for future migration detection)
     gui_version: str = ""
     # Plugin settings
@@ -123,6 +136,10 @@ class SettingsService:
             if 'toast_duration' in data:
                 self._settings.toast_duration = int(data['toast_duration'])
             
+            # Load UI overhaul flag
+            if 'new_ui_enabled' in data:
+                self._settings.new_ui_enabled = bool(data['new_ui_enabled'])
+            
             # Load GUI version
             if 'gui_version' in data:
                 self._settings.gui_version = str(data['gui_version'])
@@ -157,6 +174,7 @@ class SettingsService:
                 'shortcuts_enabled': self._settings.shortcuts_enabled,
                 'toast_notifications_enabled': self._settings.toast_notifications_enabled,
                 'toast_duration': self._settings.toast_duration,
+                'new_ui_enabled': self._settings.new_ui_enabled,
                 'gui_version': self._settings.gui_version,
                 'plugin_settings': self._settings.plugin_settings.copy()
             }
@@ -250,6 +268,17 @@ class SettingsService:
     def get_toast_duration(self) -> int:
         """Get toast duration setting"""
         return self._settings.toast_duration
+    
+    # UI overhaul flag methods
+    def save_new_ui_enabled(self, enabled: bool) -> None:
+        """Save new UI enabled setting"""
+        self._settings.new_ui_enabled = enabled
+        self._save_settings()
+        logger.debug(f"New UI enabled saved: {enabled}")
+    
+    def get_new_ui_enabled(self) -> bool:
+        """Get new UI enabled setting"""
+        return self._settings.new_ui_enabled
     
     def save_gui_version(self, version: str) -> None:
         """Save GUI version to settings"""

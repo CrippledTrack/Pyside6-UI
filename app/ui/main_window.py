@@ -185,14 +185,18 @@ class MainWindow(QMainWindow):
     def _setup_menu_bar(self) -> None:
         """Create menu bar and all menu items."""
         menu_bar = QMenuBar(self)
-        menu_bar.setStyleSheet("""
-            QMenuBar {
-                padding: 2px 0px;
-            }
-            QMenuBar::item {
-                padding: 4px 8px;
-            }
-        """)
+        
+        # Apply menu bar styling only if new UI is enabled
+        if self.settings_service and self.settings_service.get_new_ui_enabled():
+            menu_bar.setStyleSheet("""
+                QMenuBar {
+                    padding: 2px 0px;
+                }
+                QMenuBar::item {
+                    padding: 4px 8px;
+                }
+            """)
+        
         self.setMenuBar(menu_bar)
         
         # Create menu bar controller
@@ -204,13 +208,14 @@ class MainWindow(QMainWindow):
             self
         )
         
-        # Setup menu bar
+        # Setup menu bar (UI toggle removed - now in theme dialog)
         self.menu_controller.setup(
             on_manage_plugins=self.open_plugin_management_dialog,
             on_select_theme=self.open_theme_dialog,
             on_restart_admin=self.restart_as_admin,
             on_view_logs=self.open_log_viewer_dialog,
-            on_about=self.show_about_dialog
+            on_about=self.show_about_dialog,
+            on_toggle_new_ui=None  # Moved to theme dialog
         )
     
         # Connect dev menu signals
@@ -234,35 +239,36 @@ class MainWindow(QMainWindow):
         self.loading_widget.hide()
         self.tab_widget.show()
         
-        # Fix for table header resizing issues
-        from PySide6.QtWidgets import QTableView, QHeaderView, QTreeWidget
-        for i in range(self.tab_widget.count()):
-            widget = self.tab_widget.widget(i)
-            # Recursively find all QTableViews and QTreeWidgets
-            for table in widget.findChildren(QTableView):
-                try:
-                    header = table.horizontalHeader()
-                    # Check if sections are visible before resizing
-                    if header.count() > 0:
-                        # Set resize mode to Interactive but resize to contents initially
-                        # This allows users to resize but starts with good width
-                        for col in range(header.count()):
-                            # Don't override if specifically set to something else by the plugin
-                            # Only apply if using default behavior
-                            if header.sectionResizeMode(col) == QHeaderView.ResizeMode.Interactive:
-                                header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
-                except Exception:
-                    pass
-            
-            for tree in widget.findChildren(QTreeWidget):
-                try:
-                    header = tree.header()
-                    if header.count() > 0:
-                        for col in range(header.count()):
-                            if header.sectionResizeMode(col) == QHeaderView.ResizeMode.Interactive:
-                                header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
-                except Exception:
-                    pass
+        # Fix for table header resizing issues (only in new UI)
+        if self.settings_service and self.settings_service.get_new_ui_enabled():
+            from PySide6.QtWidgets import QTableView, QHeaderView, QTreeWidget
+            for i in range(self.tab_widget.count()):
+                widget = self.tab_widget.widget(i)
+                # Recursively find all QTableViews and QTreeWidgets
+                for table in widget.findChildren(QTableView):
+                    try:
+                        header = table.horizontalHeader()
+                        # Check if sections are visible before resizing
+                        if header.count() > 0:
+                            # Set resize mode to Interactive but resize to contents initially
+                            # This allows users to resize but starts with good width
+                            for col in range(header.count()):
+                                # Don't override if specifically set to something else by the plugin
+                                # Only apply if using default behavior
+                                if header.sectionResizeMode(col) == QHeaderView.ResizeMode.Interactive:
+                                    header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+                    except Exception:
+                        pass
+                
+                for tree in widget.findChildren(QTreeWidget):
+                    try:
+                        header = tree.header()
+                        if header.count() > 0:
+                            for col in range(header.count()):
+                                if header.sectionResizeMode(col) == QHeaderView.ResizeMode.Interactive:
+                                    header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+                    except Exception:
+                        pass
 
         logger.info("All tabs loaded successfully")
         self._update_window_title()
@@ -314,9 +320,30 @@ class MainWindow(QMainWindow):
     
     def open_theme_dialog(self) -> None:
         """Open the theme selection dialog."""
-        dialog = ThemeDialog(self.theme_manager, self)
+        dialog = ThemeDialog(self.theme_manager, self.settings_service, self)
         dialog.themeSelected.connect(self.on_theme_selected)
+        dialog.uiToggleChanged.connect(self._on_ui_toggle_from_dialog)
         dialog.exec()
+    
+    def _on_ui_toggle_from_dialog(self, enabled: bool) -> None:
+        """Handle UI toggle change from theme dialog."""
+        # Update menu action if it exists (for consistency)
+        if self.menu_controller:
+            self.menu_controller.update_new_ui_action()
+        
+        # Reapply current theme with new UI flag setting
+        if self.theme_manager:
+            current_theme = self.theme_manager.get_current_theme()
+            if current_theme:
+                self.theme_manager.apply_theme(current_theme, new_ui_enabled=enabled)
+        
+        # Show notification
+        state_text = "enabled" if enabled else "disabled"
+        self.toast_manager.show_info(
+            f"New UI {state_text}. Some changes may require restart to take full effect."
+        )
+        
+        logger.info(f"New UI toggled from theme dialog: {enabled}")
     
     def open_log_viewer_dialog(self) -> None:
         """Open the log viewer dialog (non-modal)."""
@@ -353,6 +380,12 @@ class MainWindow(QMainWindow):
             theme_name: Name of the selected theme
         """
         logger.info(f"Theme selected: {theme_name}")
+        # Reapply theme with current UI flag setting
+        if self.settings_service:
+            new_ui_enabled = self.settings_service.get_new_ui_enabled()
+            self.theme_manager.apply_theme(theme_name, new_ui_enabled=new_ui_enabled)
+        else:
+            self.theme_manager.apply_theme(theme_name)
         # Refresh toast notifications with new theme
         if hasattr(self, 'toast_manager'):
             self.toast_manager.update_theme_manager(self.theme_manager)
@@ -422,6 +455,12 @@ class MainWindow(QMainWindow):
                     install_win32_mocks()
                 except Exception as e:
                     logger.warning(f"Could not install win32 mocks: {e}")
+            elif CURRENT_PLATFORM == "windows":
+                try:
+                    from ..utils.dev_mode_utils.linux_mocks import install_linux_mocks
+                    install_linux_mocks()
+                except Exception as e:
+                    logger.warning(f"Could not install linux mocks: {e}")
             
             # Clear the cross-platform plugin cache so they get re-imported with mocks
             try:
@@ -644,6 +683,66 @@ Compatible: {'Yes' if plugin_info.get('compatible', False) else 'No'}"""
         """Clear the status bar message."""
         if self.status_bar_manager:
             self.status_bar_manager.clear_status()
+    
+    def toggle_new_ui(self) -> None:
+        """Toggle the new UI overhaul flag.
+        
+        This allows users to switch between the new UI overhaul and the old UI.
+        Some changes may require an application restart to take full effect.
+        """
+        if not self.settings_service or not self.menu_controller:
+            return
+        
+        # Get the new state from the action (Qt already toggled it)
+        toggle_action = self.menu_controller.toggle_new_ui_action
+        if not toggle_action:
+            return
+        
+        new_state = toggle_action.isChecked()
+        
+        # Save the new state
+        self.settings_service.save_new_ui_enabled(new_state)
+        
+        # Update menu action text
+        self.menu_controller._update_new_ui_action_text()
+        
+        # Update menu bar styling immediately
+        menu_bar = self.menuBar()
+        if menu_bar:
+            if new_state:
+                menu_bar.setStyleSheet("""
+                    QMenuBar {
+                        padding: 2px 0px;
+                    }
+                    QMenuBar::item {
+                        padding: 4px 8px;
+                    }
+                """)
+            else:
+                # Old UI: no custom styling
+                menu_bar.setStyleSheet("")
+        
+        # Reapply current theme with new UI flag setting
+        # This will automatically switch between legacy and new theme managers
+        if self.theme_manager:
+            current_theme = self.theme_manager.get_current_theme()
+            if current_theme:
+                # Force reapply with new flag - this will switch theme managers if needed
+                self.theme_manager.apply_theme(current_theme, new_ui_enabled=new_state)
+            else:
+                # If no theme is set, apply auto theme with new flag
+                self.theme_manager.apply_auto_theme()
+        
+        # Note: Table header resizing changes will apply on next tab load
+        # Margins stay the same (20, 20, 20, 20) in both versions
+        
+        # Show notification
+        state_text = "enabled" if new_state else "disabled"
+        self.toast_manager.show_info(
+            f"New UI {state_text}. Some changes may require restart to take full effect."
+        )
+        
+        logger.info(f"New UI toggled: {new_state}")
 
 
 __all__ = ['MainWindow']
