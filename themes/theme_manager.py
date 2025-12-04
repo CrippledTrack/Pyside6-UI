@@ -103,34 +103,9 @@ class ThemeManager:
                 # If method doesn't exist, default to new UI
                 self._use_legacy = False
         
-        # Initialize legacy theme manager if needed (for styling only)
-        self._legacy_manager = None
-        
         # Always load themes in main manager (single source of truth)
         self.load_builtin_themes()
         self.load_custom_themes()
-        
-        # Initialize legacy manager after themes are loaded, pass themes to it
-        if self._use_legacy:
-            self._legacy_manager = self._init_legacy_manager(themes_dir, settings_service)
-            if self._legacy_manager:
-                self._legacy_manager.load_themes(self._themes)
-    
-    def _init_legacy_manager(self, themes_dir: str, settings_service: Optional["SettingsService"]) -> Optional[Any]:
-        """Initialize the legacy theme manager adapter.
-        
-        Returns:
-            ClassicThemeManager instance if successful, None otherwise
-        """
-        try:
-            from .classic_theme_manager import ClassicThemeManager
-            manager = ClassicThemeManager(themes_dir=themes_dir, settings_service=settings_service)
-            logger.info("Using classic theme manager for old UI mode")
-            return manager
-        except Exception as e:
-            logger.warning(f"Failed to load legacy theme manager: {e}, falling back to new theme manager")
-            self._use_legacy = False
-            return None
     
     def load_builtin_themes(self) -> None:
         """Load built-in themes"""
@@ -226,8 +201,6 @@ class ThemeManager:
     
     def get_current_theme(self) -> str:
         """Get current theme name"""
-        if self._use_legacy and self._legacy_manager:
-            return getattr(self._legacy_manager, 'current_theme', '')
         return getattr(self, 'current_theme', '')
     
     def apply_theme(self, theme_name: str, new_ui_enabled: Optional[bool] = None) -> bool:
@@ -235,7 +208,7 @@ class ThemeManager:
         
         Args:
             theme_name: Name of the theme to apply
-            new_ui_enabled: If False, uses legacy theme manager.
+            new_ui_enabled: If False, uses classic stylesheet generator.
                           If None, checks settings_service for the flag.
         """
         # Check settings service for flag if not explicitly provided
@@ -248,32 +221,48 @@ class ThemeManager:
         elif new_ui_enabled is None:
             new_ui_enabled = NEW_UI_ENABLED_BY_DEFAULT
         
-        # Use legacy theme manager if old UI is enabled
+        # Use classic stylesheet if old UI is enabled
         if not new_ui_enabled:
-            # If we were using new UI, we need to switch to legacy
-            if not self._use_legacy or not self._legacy_manager:
-                self._legacy_manager = self._init_legacy_manager(str(self.themes_dir), self.settings_service)
-                if not self._legacy_manager:
-                    logger.error("Failed to initialize legacy theme manager")
-                    return False
-                logger.info("Switched to legacy theme manager")
-            
-            # Update our internal state to match legacy
             self._use_legacy = True
             
-            # Ensure themes are loaded from main manager
+            # Ensure themes are loaded
             if not self._themes:
                 self.load_builtin_themes()
                 self.load_custom_themes()
             
-            # Check if theme exists in main manager
+            # Check if theme exists
             if theme_name not in self._themes:
                 logger.error(f"Theme '{theme_name}' not found")
                 return False
             
-            # Delegate to legacy manager to convert and apply the modern theme
-            theme_data = self._themes[theme_name]
-            return self._legacy_manager.apply_modern_theme(theme_name, theme_data)
+            try:
+                theme_data = self._themes[theme_name]
+                
+                # Default theme = system styling
+                if theme_name == "default" and not theme_data.get('stylesheet', '').strip():
+                    self._apply_stylesheet('')
+                    self._apply_palette({})
+                else:
+                    # Generate classic stylesheet from theme data
+                    from .classic_theme_manager import get_classic_stylesheet
+                    classic_stylesheet = get_classic_stylesheet(theme_data)
+                    self._apply_stylesheet(classic_stylesheet)
+                    self._apply_palette(theme_data.get('palette', {}))
+                
+                self.current_theme = theme_name
+                logger.info(f"Applied theme: {theme_name} (classic_ui=True)")
+                
+                # Save theme preference
+                if self.settings_service:
+                    try:
+                        self.settings_service.save_theme_preference(theme_name)
+                    except Exception as e:
+                        logger.warning(f"Failed to save theme preference: {e}")
+                
+                return True
+            except Exception as e:
+                logger.error(f"Failed to apply theme {theme_name}: {e}")
+                return False
         
         # Use new theme manager
         # If we were using legacy, we need to switch back to new
