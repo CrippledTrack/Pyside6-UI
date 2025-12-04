@@ -103,20 +103,30 @@ class ThemeManager:
                 # If method doesn't exist, default to new UI
                 self._use_legacy = False
         
-        # Initialize legacy theme manager if needed
+        # Initialize legacy theme manager if needed (for styling only)
         self._legacy_manager = None
         if self._use_legacy:
-            try:
-                from .legacy_themes import LegacyThemeManager
-                self._legacy_manager = LegacyThemeManager(themes_dir=themes_dir, settings_service=settings_service)
-                logger.info("Using legacy theme manager for old UI mode")
-            except Exception as e:
-                logger.warning(f"Failed to load legacy theme manager: {e}, falling back to new theme manager")
-                self._use_legacy = False
+            self._legacy_manager = self._init_legacy_manager(themes_dir, settings_service)
         
-        if not self._use_legacy:
-            self.load_builtin_themes()
-            self.load_custom_themes()
+        # Always load themes in main manager (single source of truth)
+        self.load_builtin_themes()
+        self.load_custom_themes()
+    
+    def _init_legacy_manager(self, themes_dir: str, settings_service: Optional["SettingsService"]) -> Optional[Any]:
+        """Initialize the legacy theme manager adapter.
+        
+        Returns:
+            LegacyThemeManager instance if successful, None otherwise
+        """
+        try:
+            from .legacy_theme_manager import LegacyThemeManager
+            manager = LegacyThemeManager(themes_dir=themes_dir, settings_service=settings_service)
+            logger.info("Using legacy theme manager for old UI mode")
+            return manager
+        except Exception as e:
+            logger.warning(f"Failed to load legacy theme manager: {e}, falling back to new theme manager")
+            self._use_legacy = False
+            return None
     
     def load_builtin_themes(self) -> None:
         """Load built-in themes"""
@@ -138,17 +148,19 @@ class ThemeManager:
         self._themes.update(builtin_themes)
     
     def is_builtin_theme(self, theme_name: str) -> bool:
-        """Check if a theme is a built-in theme"""
-        if self._use_legacy and self._legacy_manager:
-            return self._legacy_manager.is_builtin_theme(theme_name)
+        """Check if a theme is a built-in theme.
+        
+        Since there's only one set of themes, we check the main manager's
+        built-in theme names.
+        """
+        # Ensure themes are loaded
+        if not self.builtin_theme_names:
+            self.load_builtin_themes()
         return theme_name in self.builtin_theme_names
     
     def load_custom_themes(self) -> None:
-        """Load custom themes from the themes directory"""
-        if self._use_legacy and self._legacy_manager:
-            # Legacy manager handles its own custom themes
-            return
-        
+        """Load custom themes from the themes directory.
+        """
         if not self.themes_dir.exists():
             return
         
@@ -164,24 +176,23 @@ class ThemeManager:
     
     @property
     def themes(self) -> Dict[str, Any]:
-        """Get themes dictionary (for compatibility with theme dialog)"""
-        if self._use_legacy and self._legacy_manager:
-            return self._legacy_manager.themes
-        return self._themes
+        """Get themes dictionary (for compatibility with theme dialog)
+        
+        """
+        # Ensure themes are loaded
+        if not self._themes:
+            self.load_builtin_themes()
+            self.load_custom_themes()
+        return dict(self._themes)
     
     @themes.setter
     def themes(self, value: Dict[str, Any]) -> None:
         """Set themes dictionary"""
-        if self._use_legacy and self._legacy_manager:
-            self._legacy_manager.themes = value
-        else:
-            self._themes = value
+        self._themes = value
     
     def save_custom_theme(self, theme_name: str, theme_data: Dict[str, Any]) -> bool:
-        """Save a custom theme to file"""
-        if self._use_legacy and self._legacy_manager:
-            return self._legacy_manager.save_custom_theme(theme_name, theme_data)
-        
+        """Save a custom theme to file.
+        """
         self.themes_dir.mkdir(parents=True, exist_ok=True)
         
         theme_path = self.themes_dir / f"{theme_name}.json"
@@ -196,11 +207,18 @@ class ThemeManager:
             return False
     
     def get_theme_names(self) -> List[str]:
-        """Get list of available theme names"""
-        if self._use_legacy and self._legacy_manager:
-            return self._legacy_manager.get_theme_names()
-        # Hide compatibility aliases from UI
-        return [name for name in self._themes.keys() if name not in self._hidden_theme_names]
+        """Get list of available theme names.
+        
+        Returns themes from the main manager since there's only one set of themes
+        (modern themes that get adapted for legacy UI).
+        """
+        # Ensure themes are loaded
+        if not self._themes:
+            self.load_builtin_themes()
+            self.load_custom_themes()
+        
+        theme_names = [name for name in self._themes.keys() if name not in self._hidden_theme_names]
+        return sorted(theme_names)
     
     def get_current_theme(self) -> str:
         """Get current theme name"""
@@ -230,20 +248,28 @@ class ThemeManager:
         if not new_ui_enabled:
             # If we were using new UI, we need to switch to legacy
             if not self._use_legacy or not self._legacy_manager:
-                try:
-                    from .legacy_themes import LegacyThemeManager
-                    self._legacy_manager = LegacyThemeManager(
-                        themes_dir=str(self.themes_dir),
-                        settings_service=self.settings_service
-                    )
-                    logger.info("Switched to legacy theme manager")
-                except Exception as e:
-                    logger.error(f"Failed to initialize legacy theme manager: {e}")
+                self._legacy_manager = self._init_legacy_manager(str(self.themes_dir), self.settings_service)
+                if not self._legacy_manager:
+                    logger.error("Failed to initialize legacy theme manager")
                     return False
+                logger.info("Switched to legacy theme manager")
             
             # Update our internal state to match legacy
             self._use_legacy = True
-            return self._legacy_manager.apply_theme(theme_name)
+            
+            # Ensure themes are loaded from main manager
+            if not self._themes:
+                self.load_builtin_themes()
+                self.load_custom_themes()
+            
+            # Check if theme exists in main manager
+            if theme_name not in self._themes:
+                logger.error(f"Theme '{theme_name}' not found")
+                return False
+            
+            # Delegate to legacy manager to convert and apply the modern theme
+            theme_data = self._themes[theme_name]
+            return self._legacy_manager.apply_modern_theme(theme_name, theme_data)
         
         # Use new theme manager
         # If we were using legacy, we need to switch back to new
@@ -255,6 +281,13 @@ class ThemeManager:
             logger.info("Switched to new theme manager")
         
         self._use_legacy = False
+        
+        # Ensure themes are loaded
+        if not self._themes:
+            self.load_builtin_themes()
+            self.load_custom_themes()
+        
+        # Check if theme exists
         if theme_name not in self._themes:
             logger.error(f"Theme '{theme_name}' not found")
             return False
@@ -280,106 +313,6 @@ class ThemeManager:
             logger.error(f"Failed to apply theme {theme_name}: {e}")
             return False
     
-    def _filter_old_ui_styles(self, stylesheet: str) -> str:
-        """Filter out new UI-specific styles for old UI mode.
-        
-        Removes or simplifies styles for:
-        - QMenuBar::item (removes padding, border-radius, margin)
-        - QMenuBar::item:selected and :pressed states
-        - QPushButton (removes border-radius, font-weight, border enhancements)
-        
-        Args:
-            stylesheet: Original stylesheet
-            
-        Returns:
-            Filtered stylesheet with new UI styles removed
-        """
-        import re
-        
-        # Remove QMenuBar::item styling - remove padding, border-radius, margin
-        # Keep only basic transparent background
-        def simplify_menubar_item(match):
-            content = match.group(1)
-            # Remove padding, border-radius, margin properties
-            lines = content.split(';')
-            filtered_lines = []
-            for line in lines:
-                line = line.strip()
-                if line and not any(prop in line.lower() for prop in ['padding', 'border-radius', 'margin']):
-                    filtered_lines.append(line)
-            result = 'QMenuBar::item {'
-            if filtered_lines:
-                result += ' ' + '; '.join(filtered_lines) + ';'
-            result += ' }'
-            return result
-        
-        stylesheet = re.sub(
-            r'QMenuBar::item\s*\{([^}]*)\}',
-            simplify_menubar_item,
-            stylesheet,
-            flags=re.DOTALL
-        )
-        
-        # Remove QMenuBar::item:selected and :pressed states entirely
-        stylesheet = re.sub(
-            r'QMenuBar::item:selected\s*\{[^}]*\}',
-            '',
-            stylesheet,
-            flags=re.DOTALL
-        )
-        stylesheet = re.sub(
-            r'QMenuBar::item:pressed\s*\{[^}]*\}',
-            '',
-            stylesheet,
-            flags=re.DOTALL
-        )
-        
-        # Simplify QPushButton - remove border-radius, font-weight, min-height
-        def simplify_button(match):
-            content = match.group(1)
-            lines = content.split(';')
-            filtered_lines = []
-            for line in lines:
-                line = line.strip()
-                if line and not any(prop in line.lower() for prop in ['border-radius', 'font-weight', 'min-height']):
-                    filtered_lines.append(line)
-            result = 'QPushButton {'
-            if filtered_lines:
-                result += ' ' + '; '.join(filtered_lines) + ';'
-            result += ' }'
-            return result
-        
-        stylesheet = re.sub(
-            r'QPushButton\s*\{([^}]*)\}',
-            simplify_button,
-            stylesheet,
-            flags=re.DOTALL
-        )
-        
-        # Remove border from QPushButton:hover
-        def remove_hover_border(match):
-            content = match.group(1)
-            lines = content.split(';')
-            filtered_lines = []
-            for line in lines:
-                line = line.strip()
-                if line and 'border:' not in line.lower():
-                    filtered_lines.append(line)
-            result = 'QPushButton:hover {'
-            if filtered_lines:
-                result += ' ' + '; '.join(filtered_lines) + ';'
-            result += ' }'
-            return result
-        
-        stylesheet = re.sub(
-            r'QPushButton:hover\s*\{([^}]*)\}',
-            remove_hover_border,
-            stylesheet,
-            flags=re.DOTALL
-        )
-        
-        return stylesheet
-
     def detect_system_dark_mode(self) -> bool:
         """Detect whether the system prefers dark mode.
 
@@ -403,33 +336,11 @@ class ThemeManager:
 
         Returns the applied theme name.
         """
-        # Check if we should use legacy theme manager
-        use_legacy = False
-        if self.settings_service:
-            try:
-                use_legacy = not self.settings_service.get_new_ui_enabled()
-            except Exception:
-                pass
+        # Ensure themes are loaded
+        if not self._themes:
+            self.load_builtin_themes()
+            self.load_custom_themes()
         
-        if use_legacy:
-            # Initialize legacy manager if not already done
-            if not self._legacy_manager:
-                try:
-                    from .legacy_themes import LegacyThemeManager
-                    self._legacy_manager = LegacyThemeManager(
-                        themes_dir=str(self.themes_dir),
-                        settings_service=self.settings_service
-                    )
-                    self._use_legacy = True
-                except Exception as e:
-                    logger.error(f"Failed to initialize legacy theme manager: {e}")
-                    use_legacy = False
-            
-            if use_legacy and self._legacy_manager:
-                return self._legacy_manager.apply_auto_theme(saved_theme)
-        
-        # Use new theme manager
-        self._use_legacy = False
         # Use saved theme preference if available
         if saved_theme and saved_theme in self._themes:
             theme_name = saved_theme
