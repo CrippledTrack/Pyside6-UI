@@ -60,6 +60,7 @@ def get_theme() -> Dict[str, Any]:
                 font-weight: bold;
             }
         """,
+        "legacy_stylesheet": _CLASSIC_STYLESHEET,
         "palette": {
             "window": "#ffffff",
             "window_text": "#333333",
@@ -76,4 +77,46 @@ def get_theme() -> Dict[str, Any]:
             "highlighted_text": "#ffffff"
         }
     }
+
+
+# =============================================================================
+# Classic Stylesheet Overrides
+# =============================================================================
+
+_CLASSIC_STYLESHEET = """
+/* Minimal overrides - 2px radius, 8px scrollbar, bordered buttons */
+QTabWidget::pane {
+    border-radius: 2px;
+}
+QTabBar::tab {
+    margin-right: 1px;
+    border-top-left-radius: 2px;
+    border-top-right-radius: 2px;
+}
+QPushButton {
+    background-color: #f8f9fa;
+    color: #333333;
+    border: 1px solid #dee2e6;
+    border-radius: 2px;
+}
+QPushButton:hover {
+    background-color: #e9ecef;
+    border-color: #adb5bd;
+}
+QPushButton:pressed {
+    background-color: #dee2e6;
+}
+QLineEdit, QTextEdit, QComboBox {
+    border-radius: 2px;
+}
+QScrollBar:vertical {
+    width: 8px;
+}
+QScrollBar:horizontal {
+    height: 8px;
+}
+QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
+    border-radius: 4px;
+}
+"""
 

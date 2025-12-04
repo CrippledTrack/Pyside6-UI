@@ -105,23 +105,27 @@ class ThemeManager:
         
         # Initialize legacy theme manager if needed (for styling only)
         self._legacy_manager = None
-        if self._use_legacy:
-            self._legacy_manager = self._init_legacy_manager(themes_dir, settings_service)
         
         # Always load themes in main manager (single source of truth)
         self.load_builtin_themes()
         self.load_custom_themes()
+        
+        # Initialize legacy manager after themes are loaded, pass themes to it
+        if self._use_legacy:
+            self._legacy_manager = self._init_legacy_manager(themes_dir, settings_service)
+            if self._legacy_manager:
+                self._legacy_manager.load_themes(self._themes)
     
     def _init_legacy_manager(self, themes_dir: str, settings_service: Optional["SettingsService"]) -> Optional[Any]:
         """Initialize the legacy theme manager adapter.
         
         Returns:
-            LegacyThemeManager instance if successful, None otherwise
+            ClassicThemeManager instance if successful, None otherwise
         """
         try:
-            from .legacy_theme_manager import LegacyThemeManager
-            manager = LegacyThemeManager(themes_dir=themes_dir, settings_service=settings_service)
-            logger.info("Using legacy theme manager for old UI mode")
+            from .classic_theme_manager import ClassicThemeManager
+            manager = ClassicThemeManager(themes_dir=themes_dir, settings_service=settings_service)
+            logger.info("Using classic theme manager for old UI mode")
             return manager
         except Exception as e:
             logger.warning(f"Failed to load legacy theme manager: {e}, falling back to new theme manager")

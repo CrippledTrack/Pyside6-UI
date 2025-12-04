@@ -317,6 +317,7 @@ def get_theme() -> Dict[str, Any]:
                 border: 1px solid #d0d0d0;
             }
         """,
+        "legacy_stylesheet": _CLASSIC_STYLESHEET,
         "palette": {
             "window": "#f3f3f3",
             "window_text": "#000000",
@@ -333,3 +334,70 @@ def get_theme() -> Dict[str, Any]:
             "highlighted_text": "#ffffff"
         }
     }
+
+
+# =============================================================================
+# Classic Stylesheet Overrides
+# =============================================================================
+
+_CLASSIC_STYLESHEET = """
+/* Legacy theme overrides - Windows classic styling, 3px radius, 12px scrollbar */
+QTabWidget::pane {
+    border-radius: 4px;
+}
+QTabBar::tab {
+    background-color: #f0f0f0;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    font-weight: normal;
+}
+QTabBar::tab:selected {
+    background-color: #ffffff;
+    border-bottom-color: #ffffff;
+    font-weight: bold;
+}
+QTabBar::tab:hover {
+    background-color: #e8e8e8;
+}
+/* Bordered labels - WinForms/PowerShell style quirk */
+QLabel {
+    color: #000000;
+    border: 1px solid #d9d9d9;
+    padding: 4px 8px;
+    background-color: #ffffff;
+    border-radius: 2px;
+}
+/* Unframed labels inside groups/splitters */
+QGroupBox > QLabel, QSplitter > QLabel {
+    border: none;
+    background-color: transparent;
+    padding: 0;
+}
+QPushButton {
+    background-color: #ffffff;
+    color: #000000;
+    border: 1px solid #d0d0d0;
+    border-radius: 3px;
+    padding: 6px 12px;
+}
+QPushButton:hover {
+    background-color: #f8f8f8;
+    border-color: #a0a0a0;
+}
+QPushButton:pressed {
+    background-color: #e0e0e0;
+    border-color: #808080;
+}
+QLineEdit, QTextEdit, QComboBox {
+    border-radius: 3px;
+}
+QScrollBar:vertical {
+    width: 12px;
+}
+QScrollBar:horizontal {
+    height: 12px;
+}
+QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
+    border-radius: 6px;
+}
+"""

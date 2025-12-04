@@ -52,6 +52,7 @@ def get_theme() -> Dict[str, Any]:
                 border-radius: 0px;
             }
         """,
+        "legacy_stylesheet": _CLASSIC_STYLESHEET,
         "palette": {
             "window": "#0a0a0a",
             "window_text": "#00ff41",
@@ -69,3 +70,39 @@ def get_theme() -> Dict[str, Any]:
         }
     }
 
+
+# =============================================================================
+# Classic Stylesheet Overrides
+# =============================================================================
+
+_CLASSIC_STYLESHEET = """
+/* Cyberpunk overrides - sharp corners, 2px borders, inverted selected tab */
+QTabWidget::pane {
+    border: 2px solid #00ff41;
+    border-radius: 0px;
+}
+QTabBar::tab {
+    border: 2px solid #00ff41;
+    border-top-left-radius: 0px;
+    border-top-right-radius: 0px;
+}
+QTabBar::tab:selected {
+    background-color: #00ff41;
+    color: #0a0a0a;
+}
+QTabBar::tab:hover {
+    background-color: #00cc33;
+    color: #0a0a0a;
+}
+QPushButton {
+    border: 2px solid #ff006e;
+    border-radius: 0px;
+}
+QLineEdit, QTextEdit, QComboBox {
+    border: 2px solid #00ff41;
+    border-radius: 0px;
+}
+QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
+    border-radius: 0px;
+}
+"""
