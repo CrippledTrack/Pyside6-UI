@@ -93,6 +93,10 @@ class MainWindow(QMainWindow):
         self.settings_service = settings_service
         self.theme_manager = theme_manager
         self.container = container
+        self._theme_dialog: Optional[ThemeDialog] = None
+        self._plugin_dialog: Optional[PluginManagementDialog] = None
+        self._log_viewer_dialog: Optional[LogViewerDialog] = None
+        self._about_dialog: Optional[QMessageBox] = None
         
         # Get services from container
         self.admin_service = container.get(AdminService)
@@ -296,11 +300,23 @@ class MainWindow(QMainWindow):
         return self.admin_service.prompt_for_admin_operation(operation_description, self)
     
     def open_plugin_management_dialog(self) -> None:
-        """Open the plugin management dialog."""
+        """Open the plugin management dialog (non-modal)."""
+        if self._plugin_dialog and self._plugin_dialog.isVisible():
+            self._plugin_dialog.raise_()
+            self._plugin_dialog.activateWindow()
+            return
+
         dlg = PluginManagementDialog(self, self.settings_service)
+        dlg.setWindowModality(Qt.WindowModality.NonModal)
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dlg.pluginToggled.connect(self.plugin_controller.toggle_plugin)
+        dlg.destroyed.connect(lambda: setattr(self, "_plugin_dialog", None))
         dlg.resize(900, 560)
-        dlg.exec()
+
+        self._plugin_dialog = dlg
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
     
     def _on_plugin_toggled(self, plugin_name: str, enabled: bool) -> None:
         """Handle plugin toggle event.
@@ -319,11 +335,23 @@ class MainWindow(QMainWindow):
         self._update_window_title()
     
     def open_theme_dialog(self) -> None:
-        """Open the theme selection dialog."""
+        """Open the theme selection dialog (non-modal)."""
+        if self._theme_dialog and self._theme_dialog.isVisible():
+            self._theme_dialog.raise_()
+            self._theme_dialog.activateWindow()
+            return
+
         dialog = ThemeDialog(self.theme_manager, self.settings_service, self)
+        dialog.setWindowModality(Qt.WindowModality.NonModal)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.themeSelected.connect(self.on_theme_selected)
         dialog.uiToggleChanged.connect(self._on_ui_toggle_from_dialog)
-        dialog.exec()
+        dialog.destroyed.connect(lambda: setattr(self, "_theme_dialog", None))
+
+        self._theme_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
     
     def _on_ui_toggle_from_dialog(self, enabled: bool) -> None:
         """Handle UI toggle change from theme dialog."""
@@ -347,31 +375,52 @@ class MainWindow(QMainWindow):
     
     def open_log_viewer_dialog(self) -> None:
         """Open the log viewer dialog (non-modal)."""
-        # Keep reference to prevent garbage collection
-        # WA_DeleteOnClose will clean it up when closed
-        self._log_viewer_dialog = LogViewerDialog(self)
-        self._log_viewer_dialog.show()
-        self._log_viewer_dialog.raise_()
-        self._log_viewer_dialog.activateWindow()
+        if self._log_viewer_dialog and self._log_viewer_dialog.isVisible():
+            self._log_viewer_dialog.raise_()
+            self._log_viewer_dialog.activateWindow()
+            return
+
+        dialog = LogViewerDialog(self)
+        dialog.setWindowModality(Qt.WindowModality.NonModal)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.destroyed.connect(lambda: setattr(self, "_log_viewer_dialog", None))
+
+        self._log_viewer_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
     
     def show_about_dialog(self) -> None:
-        """Show the About dialog with application information."""
+        """Show the About dialog without blocking the main window."""
         from ..constants import VERSION as GUI_VERSION, VERSION_NAME as DEFAULT_VERSION_NAME
         
-        # Only show external version if external constants were loaded
-        # (detected by VERSION_NAME differing from the default "Basic UI Application")
-        has_external_constants = VERSION_NAME != DEFAULT_VERSION_NAME
-        
-        if has_external_constants:
-            version_line = f"<p><b>Version:</b> {VERSION}</p>"
-        else:
-            version_line = ""
-        
-        about_text = f"""<h2>{VERSION_NAME}</h2>
-{version_line}<p><b>GUI API Version:</b> {GUI_VERSION}</p>
-<p><b>Platform:</b> {CURRENT_PLATFORM.title()}</p>"""
+        if self._about_dialog and self._about_dialog.isVisible():
+            self._about_dialog.raise_()
+            self._about_dialog.activateWindow()
+            return
 
-        QMessageBox.about(self, f"About {VERSION_NAME}", about_text)
+        has_external_constants = VERSION_NAME != DEFAULT_VERSION_NAME
+        version_line = f"<p><b>Version:</b> {VERSION}</p>" if has_external_constants else ""
+        about_text = (
+            f"<h2>{VERSION_NAME}</h2>"
+            f"{version_line}"
+            f"<p><b>GUI API Version:</b> {GUI_VERSION}</p>"
+            f"<p><b>Platform:</b> {CURRENT_PLATFORM.title()}</p>"
+        )
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle(f"About {VERSION_NAME}")
+        msg.setText(about_text)
+        msg.setTextFormat(Qt.TextFormat.RichText)
+        msg.setStandardButtons(QMessageBox.StandardButton.Close)
+        msg.setWindowModality(Qt.WindowModality.NonModal)
+        msg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        msg.destroyed.connect(lambda: setattr(self, "_about_dialog", None))
+
+        self._about_dialog = msg
+        msg.show()
+        msg.raise_()
+        msg.activateWindow()
     
     def on_theme_selected(self, theme_name: str) -> None:
         """Handle theme selection.

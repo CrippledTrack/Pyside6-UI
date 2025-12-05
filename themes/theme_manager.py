@@ -87,8 +87,6 @@ class ThemeManager:
         self.themes_dir = Path(themes_dir)
         self._themes: Dict[str, Any] = {}
         self.builtin_theme_names: set = set()  # Track built-in theme names
-        # Built-in aliases that should not be shown in UI theme pickers
-        self._hidden_theme_names: set = {"ocean_blue"}
         self.settings_service = settings_service
         self.current_theme = ""  # Initialize current theme
         # Capture initial system palette before any theme is applied
@@ -196,8 +194,7 @@ class ThemeManager:
             self.load_builtin_themes()
             self.load_custom_themes()
         
-        theme_names = [name for name in self._themes.keys() if name not in self._hidden_theme_names]
-        return sorted(theme_names)
+        return sorted(self._themes.keys())
     
     def get_current_theme(self) -> str:
         """Get current theme name"""
