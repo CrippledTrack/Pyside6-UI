@@ -166,15 +166,14 @@ def generate_stylesheet(
         QPushButton {{
             background-color: {button_bg};
             color: {button_text};
-            border: none;
-            padding: 6px 12px; /* Reduced from 8px 16px */
+            border: 1px solid transparent;
+            padding: 6px 14px;
             border-radius: {border_radius};
             font-weight: 600;
-            min-height: 0px; /* Explicitly reset to prevent legacy leak */
         }}
         QPushButton:hover {{
             background-color: {button_hover};
-            border: 1px solid {accent_color}; /* Subtle highlight */
+            border-color: {accent_color};
         }}
         QPushButton:pressed {{
             background-color: {button_pressed};
