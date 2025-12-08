@@ -16,11 +16,12 @@ from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 
 from .constants import VERSION as GUI_API_VERSION
-from .services.logging_service import setup_logging
+from .services.logging_service import setup_logging, set_dev_logging_override
 from .services.container import ServiceContainer
 from .services.settings_service import SettingsService
 from .ui.main_window import MainWindow
 from .utils.console import apply_console_setting
+from .utils.admin import set_dev_mode
 from .utils.imports import get_platforms_constants
 from ..themes.theme_manager import ThemeManager
 
@@ -43,10 +44,13 @@ def run(argv: List[str]) -> int:
         from .daemon.server import run_daemon
         return run_daemon(argv)
     
-    # Check for dev mode flag - bypasses admin requirements for tab loading
-    if '-dev' in argv or '--dev' in argv:
-        from .utils.admin import set_dev_mode
+    # Check for dev mode flag or dev version - bypasses admin requirements for tab loading and enables dev logging
+    dev_flag = ('-dev' in argv or '--dev' in argv)
+    dev_version = ('-dev' in str(VERSION)) or ('-dev' in str(GUI_API_VERSION))
+    is_dev = dev_flag or dev_version
+    if is_dev:
         set_dev_mode(True)
+        set_dev_logging_override(True)
 
     # Prevent multiple instances on Linux (check BEFORE any initialization)
     lock_file = None

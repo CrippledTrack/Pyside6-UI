@@ -8,9 +8,11 @@ import traceback
 import warnings
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 from logging.handlers import RotatingFileHandler
 
 from ..utils.imports import get_platforms_constants
+from ..utils.admin import is_dev_mode
 
 # Import platform constants using the utility function
 constants = get_platforms_constants()
@@ -41,6 +43,8 @@ DAEMON_LOGGER_PREFIXES = [
     "GUI.app.daemon",
     "daemon",
 ]
+
+_dev_logging_override: Optional[bool] = None
 
 
 class CustomFormatter(logging.Formatter):
@@ -160,7 +164,13 @@ class ColorFormatter(CustomFormatter):
         return formatted
 
 
-def _configure_handlers(root_logger: logging.Logger) -> None:
+def set_dev_logging_override(enabled: bool) -> None:
+    """Force dev logging behavior (DEBUG level) when True. Call before setup_logging."""
+    global _dev_logging_override
+    _dev_logging_override = enabled
+
+
+def _configure_handlers(root_logger: logging.Logger, level: int) -> None:
     # Remove any existing handlers
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
@@ -175,13 +185,13 @@ def _configure_handlers(root_logger: logging.Logger) -> None:
         file_handler = RotatingFileHandler(
             log_file, maxBytes=MAX_LOG_SIZE, backupCount=MAX_LOG_FILES, encoding="utf-8"
         )
-        file_handler.setLevel(logging.INFO)
+        file_handler.setLevel(level)
         file_handler.setFormatter(base_formatter)
         root_logger.addHandler(file_handler)
         _prune_old_logs(log_dir, MAX_LOG_FILES)
 
     console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
+    console_handler.setLevel(level)
     stream = console_handler.stream
     if _supports_color(stream):
         _enable_windows_ansi_support()
@@ -205,9 +215,13 @@ def setup_logging() -> logging.Logger:
             logger.disabled = True
             return logger
         root_logger = logging.getLogger()
-        root_logger.setLevel(logging.INFO)
+        # Auto-enable DEBUG logging for dev builds:
+        # - dev mode flag enabled (set via CLI -dev or version detection in app.py)
+        is_dev = (_dev_logging_override is True) or is_dev_mode()
+        base_level = logging.DEBUG if is_dev else logging.INFO
+        root_logger.setLevel(base_level)
 
-        _configure_handlers(root_logger)
+        _configure_handlers(root_logger, base_level)
 
         # Configure Python's built-in warnings
         logging.captureWarnings(True)
