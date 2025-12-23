@@ -13,10 +13,8 @@ from typing import Any, Dict, Optional, Callable, TYPE_CHECKING
 from PySide6.QtCore import QObject, Signal
 
 if TYPE_CHECKING:
-    from ...services.interfaces import ISettingsService
+    from ...services.container import ServiceContainer
     from ....plugin_system.base import BaseTabPlugin
-
-from ....plugin_system import plugin_registry
 
 logger = logging.getLogger(__name__)
 
@@ -30,17 +28,24 @@ class PluginController(QObject):
     
     def __init__(
         self,
-        settings_service: Optional["ISettingsService"] = None,
+        container: "ServiceContainer",
         parent: Optional[QObject] = None
     ) -> None:
         """Initialize the plugin controller.
         
         Args:
-            settings_service: Optional settings service for persisting plugin states
+            container: Service container for dependency injection
             parent: Optional parent object
         """
         super().__init__(parent)
-        self.settings_service = settings_service
+        self.container = container
+        
+        # Retrieve services from container
+        from ...services.settings_service import SettingsService
+        from ...services.plugin_service import PluginService
+        
+        self.settings_service = container.get(SettingsService)
+        self.plugin_service = container.get(PluginService)
     
     def toggle_plugin(self, plugin_name: str, enabled: bool) -> bool:
         """Toggle a plugin on or off.
@@ -52,18 +57,18 @@ class PluginController(QObject):
         Returns:
             True if toggle was successful, False otherwise
         """
-        plugin_class = plugin_registry.get_plugin(plugin_name)
+        plugin_class = self.plugin_service.get_plugin(plugin_name)
         if not plugin_class:
             logger.warning(f"Plugin '{plugin_name}' not found")
             return False
         
         if enabled:
-            if not plugin_registry.is_enabled(plugin_name):
-                plugin_registry.enable_plugin(plugin_name)
+            if not self.plugin_service.is_enabled(plugin_name):
+                self.plugin_service.enable_plugin(plugin_name)
                 logger.info(f"Enabled plugin: {plugin_name}")
         else:
-            if plugin_registry.is_enabled(plugin_name):
-                plugin_registry.disable_plugin(plugin_name)
+            if self.plugin_service.is_enabled(plugin_name):
+                self.plugin_service.disable_plugin(plugin_name)
                 logger.info(f"Disabled plugin: {plugin_name}")
         
         self._save_plugin_states()
@@ -81,7 +86,7 @@ class PluginController(QObject):
         Returns:
             True if enabled, False otherwise
         """
-        return plugin_registry.is_enabled(plugin_name)
+        return self.plugin_service.is_enabled(plugin_name)
     
     def get_plugin(self, plugin_name: str) -> Optional[Any]:
         """Get a plugin class by name.
@@ -92,7 +97,7 @@ class PluginController(QObject):
         Returns:
             Plugin class or None if not found
         """
-        return plugin_registry.get_plugin(plugin_name)
+        return self.plugin_service.get_plugin(plugin_name)
     
     def get_enabled_plugins(self) -> Dict[str, Any]:
         """Get all enabled plugins.
@@ -100,7 +105,7 @@ class PluginController(QObject):
         Returns:
             Dictionary mapping plugin names to plugin classes
         """
-        return plugin_registry.get_enabled_plugins()
+        return self.plugin_service.get_enabled_plugins()
     
     def get_all_plugins(self) -> Dict[str, Any]:
         """Get all registered plugins.
@@ -108,7 +113,7 @@ class PluginController(QObject):
         Returns:
             Dictionary mapping plugin names to plugin classes
         """
-        return plugin_registry.get_all_plugins()
+        return self.plugin_service.get_all_plugins()
     
     def list_plugin_names(self) -> list[str]:
         """List all registered plugin names.
@@ -116,7 +121,7 @@ class PluginController(QObject):
         Returns:
             List of plugin names
         """
-        return plugin_registry.list_plugin_names()
+        return self.plugin_service.list_plugin_names()
     
     def get_plugin_info(self, plugin_name: str) -> Optional[Dict[str, Any]]:
         """Get information about a plugin.
@@ -127,7 +132,7 @@ class PluginController(QObject):
         Returns:
             Plugin info dictionary or None if not found
         """
-        plugin_class = plugin_registry.get_plugin(plugin_name)
+        plugin_class = self.plugin_service.get_plugin(plugin_name)
         if not plugin_class:
             return None
         
@@ -144,14 +149,14 @@ class PluginController(QObject):
         try:
             # Determine which plugins are disabled by the user (not by default)
             all_disabled = [
-                name for name in plugin_registry.list_plugin_names()
-                if not plugin_registry.is_enabled(name)
+                name for name in self.plugin_service.list_plugin_names()
+                if not self.plugin_service.is_enabled(name)
             ]
             
             # Filter out plugins that are disabled_by_default
             user_disabled = []
             for plugin_name in all_disabled:
-                plugin_class = plugin_registry.get_plugin(plugin_name)
+                plugin_class = self.plugin_service.get_plugin(plugin_name)
                 if plugin_class and not getattr(plugin_class, 'disabled_by_default', False):
                     user_disabled.append(plugin_name)
             
@@ -177,12 +182,12 @@ class PluginController(QObject):
                 # Filter out plugins that are disabled_by_default (they shouldn't be in settings)
                 cleaned_disabled = []
                 for plugin_name in saved_disabled:
-                    plugin_class = plugin_registry.get_plugin(plugin_name)
+                    plugin_class = self.plugin_service.get_plugin(plugin_name)
                     if plugin_class:
                         if getattr(plugin_class, 'disabled_by_default', False):
                             logger.debug(f"Removing disabled_by_default plugin from settings: {plugin_name}")
                         else:
-                            plugin_registry.disable_plugin(plugin_name)
+                            self.plugin_service.disable_plugin(plugin_name)
                             cleaned_disabled.append(plugin_name)
                             logger.debug(f"Applied user preference: {plugin_name} disabled")
                     else:
@@ -198,4 +203,3 @@ class PluginController(QObject):
 
 
 __all__ = ['PluginController']
-

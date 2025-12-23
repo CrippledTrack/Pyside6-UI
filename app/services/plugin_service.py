@@ -238,6 +238,76 @@ class PluginService:
                 logger.error("Failed to register core plugin %s: %s", plugin_class.__name__, e)
         return registered
     
+    # =========================================================================
+    # Plugin State Management Methods
+    # =========================================================================
+    
+    def load_saved_plugin_states(self) -> None:
+        """Load and apply saved plugin states from settings.
+        
+        This is the main entry point for loading plugin states after discovery.
+        It handles both first-run scenarios and loading saved user preferences.
+        """
+        if not self.settings_service:
+            logger.debug("No settings service, skipping plugin state loading")
+            return
+
+        try:
+            saved_disabled = self.settings_service.get_disabled_plugins()
+            if saved_disabled:
+                self._apply_user_disabled_plugins(saved_disabled)
+            else:
+                self._handle_first_run()
+        except Exception as e:
+            logger.warning(f"Failed to load saved plugin states: {e}")
+    
+    def _apply_user_disabled_plugins(self, disabled_plugins: List[str]) -> None:
+        """Apply user-disabled plugins from settings.
+        
+        Also cleans up any disabled_by_default plugins that were incorrectly saved.
+        
+        Args:
+            disabled_plugins: List of plugin names that user has disabled
+        """
+        logger.info(f"Loading saved user-disabled plugins: {disabled_plugins}")
+        
+        # Filter out plugins that are disabled_by_default (they shouldn't be in settings)
+        cleaned_disabled = []
+        for plugin_name in disabled_plugins:
+            plugin_class = self.get_plugin(plugin_name)
+            if plugin_class:
+                if getattr(plugin_class, 'disabled_by_default', False):
+                    logger.debug(f"Removing disabled_by_default plugin from settings: {plugin_name}")
+                else:
+                    self.disable_plugin(plugin_name)
+                    cleaned_disabled.append(plugin_name)
+                    logger.debug(f"Applied user preference: {plugin_name} disabled")
+            else:
+                # Plugin no longer exists, don't include in cleaned list
+                logger.debug(f"Skipping non-existent plugin: {plugin_name}")
+        
+        # Re-save if we cleaned up any entries
+        if len(cleaned_disabled) != len(disabled_plugins) and self.settings_service:
+            logger.info(f"Cleaning up settings: removed {len(disabled_plugins) - len(cleaned_disabled)} disabled_by_default plugins")
+            self.settings_service.save_disabled_plugins(cleaned_disabled)
+    
+    def _handle_first_run(self) -> None:
+        """Handle first run scenario - log defaults and initialize empty disabled list."""
+        logger.info("First run detected, applying default plugin states (disabled_by_default flags)")
+        # Log default states for information
+        enabled_by_default = [name for name in self.list_plugin_names() 
+                            if self.is_enabled(name)]
+        disabled_by_default = [name for name in self.list_plugin_names() 
+                              if not self.is_enabled(name)]
+        logger.info(f"Default plugin states: {len(enabled_by_default)} enabled, "
+                   f"{len(disabled_by_default)} disabled by default")
+        if disabled_by_default:
+            logger.info(f"Disabled by default: {', '.join(disabled_by_default)}")
+        
+        # Initialize empty disabled list (user hasn't disabled anything yet)
+        if self.settings_service:
+            self.settings_service.save_disabled_plugins([])
+    
     @property
     def is_discovery_complete(self) -> bool:
         """Check if plugin discovery has been completed."""
@@ -258,3 +328,4 @@ def discover_and_register_all_plugins() -> Tuple[List[Type[Any]], Dict[str, Any]
 
 
 __all__ = ['PluginService', 'discover_and_register_all_plugins']
+

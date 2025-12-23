@@ -156,20 +156,19 @@ class MainWindow(QMainWindow):
     
     def _setup_controllers(self) -> None:
         """Setup controllers for tab and plugin management."""
-        # Create tab controller
+        # Create tab controller - now accepts container directly
         self.tab_controller = TabController(
             self.tab_widget,
-            self.admin_service,
-            self.daemon_service if CURRENT_PLATFORM == "linux" else None,
+            self.container,
             self
         )
         # Connect tab controller signals
         self.tab_controller.title_update_requested.connect(self._update_window_title)
         self.tab_controller.set_restart_admin_callback(self.restart_as_admin)
         
-        # Create plugin controller
+        # Create plugin controller - now accepts container directly
         self.plugin_controller = PluginController(
-            self.settings_service,
+            self.container,
             self
         )
         # Connect plugin controller signals
@@ -209,12 +208,10 @@ class MainWindow(QMainWindow):
         
         self.setMenuBar(menu_bar)
         
-        # Create menu bar controller
+        # Create menu bar controller - now accepts container directly
         self.menu_controller = MenuBarController(
             menu_bar,
-            self.admin_service,
-            self.daemon_service if CURRENT_PLATFORM == "linux" else None,
-            self.settings_service,
+            self.container,
             self
         )
         
@@ -235,7 +232,6 @@ class MainWindow(QMainWindow):
         """Configure and start the tab loading thread."""
         plugin_service = self.container.get(PluginService)
         self.tab_loader = TabLoaderThread(
-            settings_service=self.settings_service,
             plugin_service=plugin_service
         )
         self.tab_loader.finished.connect(self.on_tabs_loaded)
