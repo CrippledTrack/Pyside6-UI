@@ -74,6 +74,8 @@ class ServiceContainer:
         """Initialize all services with their dependencies.
         
         This method sets up service dependencies in the correct order.
+        Note: ThemeManager is NOT initialized here because it requires QApplication
+        to exist first. Register it manually after QApplication is created.
         """
         if self._initialized:
             return

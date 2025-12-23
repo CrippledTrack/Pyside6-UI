@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from ..services.container import ServiceContainer
     from ..services.settings_service import SettingsService
+    from ...themes.theme_manager import ThemeManager
 
 from PySide6.QtCore import QPoint, Qt, Slot
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
@@ -30,7 +31,6 @@ from PySide6.QtWidgets import (
 )
 
 from ...plugin_system import plugin_registry
-from ...themes.theme_manager import ThemeManager
 from ..services.admin_service import AdminService
 from ..services.daemon_service import DaemonService
 from ..services.tab_loader_service import TabLoaderThread
@@ -70,14 +70,14 @@ class MainWindow(QMainWindow):
     
     def __init__(
         self,
-        theme_manager: Optional[ThemeManager] = None,
+        theme_manager: Optional["ThemeManager"] = None,
         settings_service: Optional["SettingsService"] = None,
         container: "ServiceContainer" = None  # type: ignore[assignment]
     ) -> None:
         """Initialize the main window.
         
         Args:
-            theme_manager: Optional theme manager instance
+            theme_manager: Optional theme manager instance (retrieved from container if not provided)
             settings_service: Optional settings service instance
             container: Service container for dependency injection (required)
             
@@ -90,9 +90,15 @@ class MainWindow(QMainWindow):
         if container is None:
             raise ValueError("ServiceContainer is required for MainWindow initialization")
         
-        self.settings_service = settings_service
-        self.theme_manager = theme_manager
         self.container = container
+        self.settings_service = settings_service
+        
+        # Get ThemeManager from container if not explicitly provided
+        if theme_manager is None:
+            from ...themes.theme_manager import ThemeManager
+            theme_manager = container.get(ThemeManager)
+        self.theme_manager = theme_manager
+        
         self._theme_dialog: Optional[ThemeDialog] = None
         self._plugin_dialog: Optional[PluginManagementDialog] = None
         self._log_viewer_dialog: Optional[LogViewerDialog] = None
