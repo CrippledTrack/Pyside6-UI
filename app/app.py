@@ -23,7 +23,6 @@ from .ui.main_window import MainWindow
 from .utils.console import apply_console_setting
 from .utils.admin import set_dev_mode
 from .utils.imports import get_platforms_constants
-from ..themes.theme_manager import ThemeManager
 
 # Import platform constants using the utility function
 constants = get_platforms_constants()
@@ -76,7 +75,7 @@ def run(argv: List[str]) -> int:
     logger.info(f"GUI API Version: v{GUI_API_VERSION}")
 
     # Log dev mode status now that logging is configured
-    if '-dev' in argv or '--dev' in argv:
+    if is_dev:
         logger.warning("DEV MODE ENABLED - admin requirements bypassed, Dev menu available")
 
     # Initialize service container
@@ -116,6 +115,13 @@ def run(argv: List[str]) -> int:
 
     app.setFont(QFont("Segoe UI", 10))
 
+    # Now that QApplication exists, register ThemeManager in the container
+    # (ThemeManager requires QApplication for palette detection)
+    from ..themes.theme_manager import ThemeManager
+    theme_manager = ThemeManager(settings_service=settings_service)
+    container.register_singleton(ThemeManager, theme_manager)
+    logger.info("ThemeManager registered in container")
+
     # On Linux, start privileged daemon (optional - app can run without it)
     daemon_client = None
     if platform.system().lower() == "linux":
@@ -132,13 +138,12 @@ def run(argv: List[str]) -> int:
             set_daemon_client(daemon_client)
             logger.info("Privileged daemon started successfully")
 
-    # Apply theme using ThemeManager with saved preference
-    theme_manager = ThemeManager(settings_service=settings_service)
+    # Apply theme using saved preference
     saved_theme = settings_service.get_theme_preference()
     theme_manager.apply_auto_theme(saved_theme=saved_theme)
 
     # Create MainWindow with service container
-    window = MainWindow(theme_manager, settings_service=settings_service, container=container)
+    window = MainWindow(settings_service=settings_service, container=container)
     window.show()
 
     exit_code = app.exec()
