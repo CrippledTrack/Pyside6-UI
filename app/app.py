@@ -125,10 +125,17 @@ def run(argv: List[str]) -> int:
     # On Linux, start privileged daemon (optional - app can run without it)
     daemon_client = None
     if platform.system().lower() == "linux":
+        from .constants import REQUIRE_ADMIN_BY_DEFAULT
         from .services.daemon_service import DaemonService
         daemon_service = container.get(DaemonService)
-        logger.info("Starting privileged daemon...")
-        daemon_client = start_daemon()
+        
+        # Only start daemon if admin is required by default
+        # This avoids prompting for password when REQUIRE_ADMIN_BY_DEFAULT is False
+        if not REQUIRE_ADMIN_BY_DEFAULT:
+            logger.info("REQUIRE_ADMIN_BY_DEFAULT is False - skipping privileged daemon startup")
+        else:
+            logger.info("Starting privileged daemon...")
+            daemon_client = start_daemon()
         if not daemon_client or not daemon_client.is_connected():
             logger.warning("Failed to start privileged daemon. Some features requiring admin privileges will be disabled.")
             logger.warning("The application will continue in limited mode. Tabs requiring admin privileges will be disabled.")

@@ -383,6 +383,31 @@ class PluginRegistry:
         if enabled_only:
             return {k: v for k, v in self._event_subscriber_plugins.items() if self.is_enabled(k)}
         return self._event_subscriber_plugins.copy()
+    
+    # =========================================================================
+    # Event Bus (v3.4.0)
+    # =========================================================================
+    
+    def publish_event(self, event_name: str, event_data: Dict[str, Any] = None) -> None:
+        """Publish an event to all subscribed plugins.
+        
+        Args:
+            event_name: Name of the event (e.g., 'plugin_enabled', 'theme_changed')
+            event_data: Optional data associated with the event
+        """
+        if event_data is None:
+            event_data = {}
+        
+        subscribers = self.get_event_subscriber_extensions(enabled_only=True)
+        
+        for plugin_name, plugin_class in subscribers.items():
+            try:
+                subscriptions = plugin_class.get_event_subscriptions()
+                if event_name in subscriptions:
+                    callback = subscriptions[event_name]
+                    callback(event_data)
+            except Exception as e:
+                logger.error(f"Error delivering event '{event_name}' to '{plugin_name}': {e}")
 
 
 # Global plugin registry instance

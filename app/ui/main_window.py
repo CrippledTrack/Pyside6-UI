@@ -171,6 +171,8 @@ class MainWindow(QMainWindow):
             self.container,
             self
         )
+        # Set main_window reference for dynamic extension integration
+        self.plugin_controller._main_window = self
         # Connect plugin controller signals
         self.plugin_controller.plugin_toggled.connect(self._on_plugin_toggled)
     
@@ -282,6 +284,9 @@ class MainWindow(QMainWindow):
 
         logger.info("All tabs loaded successfully")
         self._update_window_title()
+        
+        # Integrate v3.4.0 extension plugins (Menu, Status, Toolbar, Service)
+        self.plugin_controller.integrate_extensions(self)
     
     def on_tab_load_error(self, error_msg: str) -> None:
         """Handle tab loading error."""
@@ -434,6 +439,8 @@ class MainWindow(QMainWindow):
         Args:
             theme_name: Name of the selected theme
         """
+        from ...plugin_system.registry import plugin_registry
+        
         logger.info(f"Theme selected: {theme_name}")
         # Reapply theme with current UI flag setting
         if self.settings_service:
@@ -445,6 +452,9 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'toast_manager'):
             self.toast_manager.update_theme_manager(self.theme_manager)
             self.toast_manager.refresh_theme()
+        
+        # Publish event for subscribers
+        plugin_registry.publish_event("theme_changed", {"theme": theme_name})
     
     def restart_as_admin(self) -> None:
         """Restart the application with administrator/root privileges.
@@ -630,6 +640,9 @@ class MainWindow(QMainWindow):
                 self.settings_service._settings.window_geometry.maximized = False
                 self.settings_service._settings.window_geometry.fullscreen = False
             self.settings_service._save_settings()
+        
+        # Shutdown ServiceExtension plugins
+        self.plugin_controller.shutdown_service_extensions()
         
         event.accept()
     

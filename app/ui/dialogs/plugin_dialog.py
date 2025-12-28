@@ -107,10 +107,12 @@ class PluginManagementDialog(QDialog):
         self.details_module = QLabel("-")
         self.details_min_gui_version = QLabel("-")
         self.details_required_gui_version = QLabel("-")
+        self.details_extensions = QLabel("-")  # Show extension types
         form.addRow("Name:", self.details_name)
         form.addRow("Version:", self.details_version)
         form.addRow("Authors:", self.details_author)
         form.addRow("Type:", self.details_type)
+        form.addRow("Extensions:", self.details_extensions)  # New row for extensions
         form.addRow("Requires Admin:", self.details_requires_admin)
         form.addRow("Platforms:", self.details_platforms)
         form.addRow("Module:", self.details_module)
@@ -163,6 +165,36 @@ class PluginManagementDialog(QDialog):
         bottom_layout.addWidget(self.close_btn)
         layout.addLayout(bottom_layout)
 
+    def _get_extension_types(self, plugin_class: type) -> str:
+        """Get a string describing which extension interfaces the plugin implements."""
+        from ....plugin_system.interfaces import (
+            TabExtension,
+            MenuExtension,
+            StatusExtension,
+            ToolbarExtension,
+            ServiceExtension,
+            EventSubscriberExtension,
+            SettingsExtension,
+        )
+        
+        extensions = []
+        if issubclass(plugin_class, TabExtension):
+            extensions.append("Tab")
+        if issubclass(plugin_class, MenuExtension):
+            extensions.append("Menu")
+        if issubclass(plugin_class, StatusExtension):
+            extensions.append("Status")
+        if issubclass(plugin_class, ToolbarExtension):
+            extensions.append("Toolbar")
+        if issubclass(plugin_class, ServiceExtension):
+            extensions.append("Service")
+        if issubclass(plugin_class, EventSubscriberExtension):
+            extensions.append("Events")
+        if issubclass(plugin_class, SettingsExtension):
+            extensions.append("Settings")
+        
+        return ", ".join(extensions) if extensions else ""
+
     def load_plugins(self) -> None:
         """Load all plugins from the registry, including rejected ones."""
         plugins = plugin_registry.get_all_plugins()
@@ -172,11 +204,14 @@ class PluginManagementDialog(QDialog):
         self.apply_filters()
 
     def toggle_plugin(self, name: str, state: int) -> None:
-        """Toggle plugin enabled/disabled state."""
-        if state:
-            plugin_registry.enable_plugin(name)
-        else:
-            plugin_registry.disable_plugin(name)
+        """Toggle plugin enabled/disabled state.
+        
+        Only emits the signal - the actual enable/disable is handled by
+        PluginController.toggle_plugin() which also handles dynamic
+        extension integration.
+        """
+        # Don't call registry directly - let the controller handle it
+        # This ensures dynamic extension integration runs for new plugins
         self.pluginToggled.emit(name, bool(state))
     
     def _force_enable_plugin(self, name: str, state: int) -> None:
@@ -392,6 +427,10 @@ class PluginManagementDialog(QDialog):
         self.details_min_gui_version.setText(info.get('min_gui_version') or "-")
         self.details_required_gui_version.setText(info.get('required_gui_version') or "-")
         self.details_description.setPlainText(info.get('description', ''))
+        
+        # Detect extension types
+        extensions = self._get_extension_types(plugin_class)
+        self.details_extensions.setText(extensions if extensions else "Tab only")
 
         # Configure button availability
         has_config = any([
@@ -407,6 +446,8 @@ class PluginManagementDialog(QDialog):
         self.details_version.setText("-")
         self.details_author.setText("-")
         self.details_type.setText("-")
+        self.details_extensions.setText("-")
+        self.details_requires_admin.setText("-")
         self.details_platforms.setText("-")
         self.details_module.setText("-")
         self.details_min_gui_version.setText("-")
