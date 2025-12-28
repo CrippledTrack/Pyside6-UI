@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, Qt, QPoint
 from typing import Optional, List, Tuple, Any, Type
 from ....plugin_system.base import plugin_registry, BaseTabPlugin
+from ...utils.admin import is_dev_mode
 
 
 class PluginManagementDialog(QDialog):
@@ -31,6 +32,7 @@ class PluginManagementDialog(QDialog):
         self.setWindowTitle("Plugin Management")
         self.resize(900, 560)
         self._all_plugins = []  # List of (name, plugin_class)
+        self._rejected_plugins = {}  # Dict of name -> (plugin_class, reason)
         self.settings_service = settings_service
         self.setup_ui()
         self.load_plugins()
@@ -50,7 +52,7 @@ class PluginManagementDialog(QDialog):
         self.type_filter.currentIndexChanged.connect(self.apply_filters)
 
         self.status_filter = QComboBox()
-        self.status_filter.addItems(["All Status", "Enabled", "Disabled"])
+        self.status_filter.addItems(["All Status", "Enabled", "Disabled", "Incompatible"])
         self.status_filter.currentIndexChanged.connect(self.apply_filters)
 
         self.perm_filter = QComboBox()
@@ -162,9 +164,11 @@ class PluginManagementDialog(QDialog):
         layout.addLayout(bottom_layout)
 
     def load_plugins(self) -> None:
-        """Load all plugins from the registry."""
+        """Load all plugins from the registry, including rejected ones."""
         plugins = plugin_registry.get_all_plugins()
         self._all_plugins = list(plugins.items())
+        # Also load rejected (version-incompatible) plugins
+        self._rejected_plugins = plugin_registry.get_rejected_plugins()
         self.apply_filters()
 
     def toggle_plugin(self, name: str, state: int) -> None:
@@ -174,6 +178,44 @@ class PluginManagementDialog(QDialog):
         else:
             plugin_registry.disable_plugin(name)
         self.pluginToggled.emit(name, bool(state))
+    
+    def _force_enable_plugin(self, name: str, state: int) -> None:
+        """Force-enable a version-incompatible plugin (dev mode only)."""
+        if not state:
+            # Being disabled - just treat as normal disable
+            plugin_registry.disable_plugin(name)
+            self.pluginToggled.emit(name, False)
+            return
+        
+        # Show warning before force-enabling
+        result = QMessageBox.warning(
+            self,
+            "Force Enable Incompatible Plugin",
+            f"Plugin '{name}' is marked as incompatible:\n\n"
+            f"{self._rejected_plugins.get(name, ('', 'Unknown reason'))[1]}\n\n"
+            "Force-enabling may cause crashes or unexpected behavior.\n"
+            "Do you want to continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if result != QMessageBox.StandardButton.Yes:
+            # User cancelled - uncheck the checkbox
+            self.apply_filters()
+            return
+        
+        # Force-register the plugin
+        if name in self._rejected_plugins:
+            plugin_class, reason = self._rejected_plugins[name]
+            # Add to main registry (bypass version check)
+            plugin_registry._plugins[name] = plugin_class
+            plugin_registry._external_plugins[name] = plugin_class
+            plugin_registry._categorize_plugin_by_interface(name, plugin_class)
+            # Enable it
+            plugin_registry.enable_plugin(name)
+            self.pluginToggled.emit(name, True)
+            # Reload to update UI
+            self.load_plugins()
 
     def reload_plugins(self) -> None:
         """Reload all plugins from the registry."""
@@ -196,8 +238,16 @@ class PluginManagementDialog(QDialog):
 
         filtered = []
         core_names = set(plugin_registry.get_core_plugins().keys())
-        for name, plugin_class in self._all_plugins:
+        
+        # Combine registered plugins with rejected plugins
+        all_plugins_combined = list(self._all_plugins)
+        for name, (plugin_class, reason) in self._rejected_plugins.items():
+            if name not in dict(all_plugins_combined):
+                all_plugins_combined.append((name, plugin_class))
+        
+        for name, plugin_class in all_plugins_combined:
             info = plugin_class.get_plugin_info()
+            is_rejected = name in self._rejected_plugins
 
             # Text search
             haystack = f"{info['name']} {info['author']} {info['description']} {plugin_class.__module__}".lower()
@@ -213,9 +263,11 @@ class PluginManagementDialog(QDialog):
 
             # Status filter
             is_enabled = plugin_registry.is_enabled(name)
-            if status_sel == "Enabled" and not is_enabled:
+            if status_sel == "Enabled" and (not is_enabled or is_rejected):
                 continue
-            if status_sel == "Disabled" and is_enabled:
+            if status_sel == "Disabled" and (is_enabled or is_rejected):
+                continue
+            if status_sel == "Incompatible" and not is_rejected:
                 continue
 
             # Permissions filter
@@ -249,15 +301,57 @@ class PluginManagementDialog(QDialog):
             info = plugin_class.get_plugin_info()
             is_enabled = plugin_registry.is_enabled(name)
             is_core = name in core_names
+            is_rejected = name in self._rejected_plugins
 
-            # Enabled checkbox
-            cb = QCheckBox()
-            cb.setChecked(is_enabled)
-            cb.stateChanged.connect(lambda state, n=name: self.toggle_plugin(n, state))
-            self.table.setCellWidget(row, 0, cb)
+            # Enabled checkbox (with incompatibility indicator for rejected plugins)
+            if is_rejected:
+                # Create container widget with checkbox + warning label
+                container = QWidget()
+                container_layout = QHBoxLayout(container)
+                container_layout.setContentsMargins(4, 0, 4, 0)
+                container_layout.setSpacing(4)
+                
+                cb = QCheckBox()
+                rejection_reason = self._rejected_plugins[name][1]
+                
+                # In dev mode, allow force-enabling incompatible plugins
+                dev_mode = is_dev_mode()
+                if dev_mode:
+                    cb.setChecked(False)  # Not enabled by default
+                    cb.setEnabled(True)   # But can be enabled
+                    cb.setToolTip(f"⚠ DEV MODE: {rejection_reason}\nClick to force-enable anyway")
+                    cb.stateChanged.connect(lambda state, n=name: self._force_enable_plugin(n, state))
+                else:
+                    cb.setChecked(False)
+                    cb.setEnabled(False)
+                    cb.setToolTip(f"Cannot enable: {rejection_reason}")
+                container_layout.addWidget(cb)
+                
+                # Add warning label
+                warn_label = QLabel("⚠")
+                warn_label.setToolTip(f"Incompatible: {rejection_reason}")
+                if dev_mode:
+                    warn_label.setStyleSheet("color: #FFFF00; font-weight: bold;")  # Yellow in dev mode
+                else:
+                    warn_label.setStyleSheet("color: #FFA500; font-weight: bold;")  # Orange warning
+                container_layout.addWidget(warn_label)
+                container_layout.addStretch()
+                
+                self.table.setCellWidget(row, 0, container)
+            else:
+                cb = QCheckBox()
+                cb.setChecked(is_enabled)
+                cb.stateChanged.connect(lambda state, n=name: self.toggle_plugin(n, state))
+                self.table.setCellWidget(row, 0, cb)
 
-            # Name
-            self.table.setItem(row, 1, QTableWidgetItem(info['name']))
+            # Name - show in italic/gray if rejected
+            name_item = QTableWidgetItem(info['name'])
+            if is_rejected:
+                name_item.setToolTip(f"Incompatible: {self._rejected_plugins[name][1]}")
+                font = name_item.font()
+                font.setItalic(True)
+                name_item.setFont(font)
+            self.table.setItem(row, 1, name_item)
             # Version
             self.table.setItem(row, 2, QTableWidgetItem(str(info['version'])))
             # Authors
@@ -272,10 +366,19 @@ class PluginManagementDialog(QDialog):
         if not name:
             self.clear_details()
             return
+        
+        # Try to get plugin from registry first, then from rejected plugins
         plugin_class = plugin_registry.get_plugin(name)
+        is_rejected = False
         if not plugin_class:
-            self.clear_details()
-            return
+            # Check if it's a rejected plugin
+            if name in self._rejected_plugins:
+                plugin_class, rejection_reason = self._rejected_plugins[name]
+                is_rejected = True
+            else:
+                self.clear_details()
+                return
+        
         info = plugin_class.get_plugin_info()
         self.details_name.setText(info['name'])
         self.details_version.setText(str(info['version']))
