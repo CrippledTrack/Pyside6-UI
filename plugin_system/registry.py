@@ -9,7 +9,7 @@ manages version compatibility checks.
 from __future__ import annotations
 
 import logging
-from typing import Optional, List, Dict, Type
+from typing import Optional, List, Dict, Tuple, Type
 
 # Import after BaseTabPlugin is defined to avoid circular import issues
 from .base import BaseTabPlugin  # type: ignore
@@ -48,6 +48,8 @@ class PluginRegistry:
         self._seen_plugins: set = set()
         # Track version incompatibility reasons for plugins
         self._version_incompatibilities: Dict[str, str] = {}
+        # Track rejected plugins for display in Plugin Manager (stores plugin_class, reason)
+        self._rejected_plugins: Dict[str, Tuple[Type[BaseTabPlugin], str]] = {}
 
     def register_plugin(self, plugin_class: Type[BaseTabPlugin], is_core: bool = False) -> None:
         """
@@ -115,6 +117,8 @@ class PluginRegistry:
         
         if not is_compatible:
             self._version_incompatibilities[plugin_name] = error_msg or "Version incompatible"
+            # Store rejected plugin for display in Plugin Manager
+            self._rejected_plugins[plugin_name] = (plugin_class, error_msg or "Version incompatible")
             logger.warning(
                 f"Plugin '{plugin_name}' version requirement not met: "
                 f"{error_msg}. Skipping registration."
@@ -214,6 +218,7 @@ class PluginRegistry:
         self._disabled_plugins.clear()
         self._version_incompatibilities.clear()
         self._seen_plugins.clear()
+        self._rejected_plugins.clear()
 
     def get_version_incompatibility(self, name: str) -> Optional[str]:
         """
@@ -226,6 +231,15 @@ class PluginRegistry:
             Incompatibility message if plugin was rejected due to version, None otherwise
         """
         return self._version_incompatibilities.get(name)
+    
+    def get_rejected_plugins(self) -> Dict[str, Tuple[Type[BaseTabPlugin], str]]:
+        """
+        Get plugins that were rejected during registration (e.g., version incompatible).
+        
+        Returns:
+            Dict mapping plugin name to (plugin_class, rejection_reason)
+        """
+        return self._rejected_plugins.copy()
 
     def disable_plugin(self, name: str) -> None:
         """Disable a plugin by name."""
