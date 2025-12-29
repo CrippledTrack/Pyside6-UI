@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, Qt, QPoint
 from typing import Optional, List, Tuple, Any, Type
 from ....plugin_system.base import plugin_registry, BaseTabPlugin
-from ...utils.admin import is_dev_mode
 
 
 class PluginManagementDialog(QDialog):
@@ -215,10 +214,9 @@ class PluginManagementDialog(QDialog):
         self.pluginToggled.emit(name, bool(state))
     
     def _force_enable_plugin(self, name: str, state: int) -> None:
-        """Force-enable a version-incompatible plugin (dev mode only)."""
+        """Force-enable a version-incompatible plugin."""
         if not state:
-            # Being disabled - just treat as normal disable
-            plugin_registry.disable_plugin(name)
+            # Being disabled - let the controller handle it via signal
             self.pluginToggled.emit(name, False)
             return
         
@@ -245,7 +243,6 @@ class PluginManagementDialog(QDialog):
             # Add to main registry (bypass version check)
             plugin_registry._plugins[name] = plugin_class
             plugin_registry._external_plugins[name] = plugin_class
-            plugin_registry._categorize_plugin_by_interface(name, plugin_class)
             # Enable it
             plugin_registry.enable_plugin(name)
             self.pluginToggled.emit(name, True)
@@ -349,26 +346,18 @@ class PluginManagementDialog(QDialog):
                 cb = QCheckBox()
                 rejection_reason = self._rejected_plugins[name][1]
                 
-                # In dev mode, allow force-enabling incompatible plugins
-                dev_mode = is_dev_mode()
-                if dev_mode:
-                    cb.setChecked(False)  # Not enabled by default
-                    cb.setEnabled(True)   # But can be enabled
-                    cb.setToolTip(f"⚠ DEV MODE: {rejection_reason}\nClick to force-enable anyway")
-                    cb.stateChanged.connect(lambda state, n=name: self._force_enable_plugin(n, state))
-                else:
-                    cb.setChecked(False)
-                    cb.setEnabled(False)
-                    cb.setToolTip(f"Cannot enable: {rejection_reason}")
+                # Allow force-enabling incompatible plugins
+                is_loaded = name in dict(self._all_plugins)
+                cb.setChecked(is_enabled and is_loaded)  # Only check if actually loaded
+                cb.setEnabled(True)   # But can be enabled
+                cb.setToolTip(f"⚠ Incompatible: {rejection_reason}\nClick to force-enable anyway")
+                cb.stateChanged.connect(lambda state, n=name: self._force_enable_plugin(n, state))
                 container_layout.addWidget(cb)
                 
                 # Add warning label
                 warn_label = QLabel("⚠")
                 warn_label.setToolTip(f"Incompatible: {rejection_reason}")
-                if dev_mode:
-                    warn_label.setStyleSheet("color: #FFFF00; font-weight: bold;")  # Yellow in dev mode
-                else:
-                    warn_label.setStyleSheet("color: #FFA500; font-weight: bold;")  # Orange warning
+                warn_label.setStyleSheet("color: #FFA500; font-weight: bold;")  # Orange warning
                 container_layout.addWidget(warn_label)
                 container_layout.addStretch()
                 
