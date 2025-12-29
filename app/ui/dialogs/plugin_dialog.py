@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, Qt, QPoint
 from typing import Optional, List, Tuple, Any, Type
 from ....plugin_system.base import plugin_registry, BaseTabPlugin
-from ...utils.admin import is_dev_mode
 
 
 class PluginManagementDialog(QDialog):
@@ -313,26 +312,17 @@ class PluginManagementDialog(QDialog):
                 cb = QCheckBox()
                 rejection_reason = self._rejected_plugins[name][1]
                 
-                # In dev mode, allow force-enabling incompatible plugins
-                dev_mode = is_dev_mode()
-                if dev_mode:
-                    cb.setChecked(False)  # Not enabled by default
-                    cb.setEnabled(True)   # But can be enabled
-                    cb.setToolTip(f"⚠ DEV MODE: {rejection_reason}\nClick to force-enable anyway")
-                    cb.stateChanged.connect(lambda state, n=name: self._force_enable_plugin(n, state))
-                else:
-                    cb.setChecked(False)
-                    cb.setEnabled(False)
-                    cb.setToolTip(f"Cannot enable: {rejection_reason}")
+                # Allow force-enabling incompatible plugins with warning
+                cb.setChecked(False)  # Not enabled by default
+                cb.setEnabled(True)   # But can be enabled
+                cb.setToolTip(f"⚠ Incompatible: {rejection_reason}\nClick to force-enable anyway")
+                cb.stateChanged.connect(lambda state, n=name: self._force_enable_plugin(n, state))
                 container_layout.addWidget(cb)
                 
                 # Add warning label
                 warn_label = QLabel("⚠")
                 warn_label.setToolTip(f"Incompatible: {rejection_reason}")
-                if dev_mode:
-                    warn_label.setStyleSheet("color: #FFFF00; font-weight: bold;")  # Yellow in dev mode
-                else:
-                    warn_label.setStyleSheet("color: #FFA500; font-weight: bold;")  # Orange warning
+                warn_label.setStyleSheet("color: #FFA500; font-weight: bold;")  # Orange warning
                 container_layout.addWidget(warn_label)
                 container_layout.addStretch()
                 
