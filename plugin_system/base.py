@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import platform
 import re
-from abc import ABC, abstractmethod
+from abc import ABC, ABCMeta, abstractmethod
 from typing import Optional, List, Dict, Any, Type
 
 # Import new extension interfaces
@@ -27,7 +27,27 @@ from .interfaces import (
 )
 
 
-class BaseTabPlugin(Plugin, TabExtension, ABC):
+class PluginMeta(ABCMeta):
+    """Metaclass for BaseTabPlugin to handle plugin_name/plugin_description aliasing.
+    
+    This provides backward compatibility by aliasing plugin_name to tab_name
+    and plugin_description to tab_description at the class level.
+    
+    Combines ABCMeta functionality with attribute aliasing.
+    """
+    
+    def __getattr__(cls, name: str) -> Any:
+        """Handle attribute access for aliased attributes."""
+        if name == 'plugin_name':
+            # Alias plugin_name to tab_name
+            return getattr(cls, 'tab_name', None)
+        elif name == 'plugin_description':
+            # Alias plugin_description to tab_description
+            return getattr(cls, 'tab_description', None)
+        raise AttributeError(f"'{cls.__name__}' has no attribute '{name}'")
+
+
+class BaseTabPlugin(Plugin, TabExtension, ABC, metaclass=PluginMeta):
     """
     Base class for all tab plugins in the Basic GUI Application.
     
@@ -61,18 +81,10 @@ class BaseTabPlugin(Plugin, TabExtension, ABC):
     # Takes precedence over min_gui_version if both are specified
     required_gui_version: Optional[str] = None
     
-    # Alias plugin_name to tab_name for backward compatibility
-    @classmethod
-    @property
-    def plugin_name(cls) -> str:
-        """Return the plugin name (aliases tab_name for compatibility)."""
-        return cls.tab_name
-    
-    @classmethod
-    @property
-    def plugin_description(cls) -> str:
-        """Return the plugin description (aliases tab_description for compatibility)."""
-        return cls.tab_description
+    # plugin_name and plugin_description are aliased to tab_name and tab_description
+    # via the PluginMeta metaclass for backward compatibility.
+    # Accessing SomePlugin.plugin_name will return SomePlugin.tab_name
+    # Accessing SomePlugin.plugin_description will return SomePlugin.tab_description
     
     @classmethod
     @abstractmethod
@@ -181,8 +193,9 @@ class BaseTabPlugin(Plugin, TabExtension, ABC):
         if hasattr(cls, 'required_gui_version') and cls.required_gui_version:
             # Basic format check for range specifications
             # Should contain operators like >=, <, etc. and version numbers
+            # Note: hyphen (-) is NOT an operator - it's part of version strings like "3.4.0-dev"
             req_str = str(cls.required_gui_version)
-            if not re.search(r'[><=-]+', req_str):
+            if not re.search(r'[><=]+', req_str):
                 errors.append(f"Invalid required_gui_version format (must include operators): {cls.required_gui_version}")
         
         return errors

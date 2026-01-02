@@ -93,14 +93,27 @@ class PluginRegistry:
         # Get plugin name - prefer tab_name for backward compat, fallback to plugin_name
         plugin_name = getattr(plugin_class, 'tab_name', None) or getattr(plugin_class, 'plugin_name', plugin_class.__name__)
 
-        # Validate plugin
-        errors = plugin_class.validate_plugin()
-        if errors:
-            raise ValueError(f"Invalid plugin '{plugin_name}': {', '.join(errors)}")
+        # Validate plugin (only if validate_plugin method exists)
+        # BaseTabPlugin has this method, but extension-only plugins may not
+        if hasattr(plugin_class, 'validate_plugin'):
+            errors = plugin_class.validate_plugin()
+            if errors:
+                raise ValueError(f"Invalid plugin '{plugin_name}': {', '.join(errors)}")
+        else:
+            # For extension-only plugins, do basic validation
+            errors = self._validate_extension_plugin(plugin_class, plugin_name)
+            if errors:
+                raise ValueError(f"Invalid plugin '{plugin_name}': {', '.join(errors)}")
 
         # Check platform compatibility (bypass if show_all_platforms is enabled)
         show_all = _is_show_all_platforms()
-        is_compatible = plugin_class.is_compatible()
+        # is_compatible() is only defined in BaseTabPlugin, provide fallback for extension-only plugins
+        if hasattr(plugin_class, 'is_compatible'):
+            is_compatible = plugin_class.is_compatible()
+        else:
+            # Default compatibility check for extension-only plugins
+            is_compatible = self._check_extension_plugin_compatibility(plugin_class)
+        
         supported_platforms = getattr(plugin_class, 'supported_platforms', [])
         
         if not show_all and not is_compatible:
@@ -124,7 +137,63 @@ class PluginRegistry:
         self._apply_default_disabled_state(plugin_class, plugin_name)
         self._seen_plugins.add(plugin_name)
 
-    def _check_plugin_compatibility(self, plugin_class: Type[BaseTabPlugin], plugin_name: str) -> bool:
+    def _validate_extension_plugin(self, plugin_class: Type[Any], plugin_name: str) -> List[str]:
+        """Validate an extension-only plugin (not inheriting from BaseTabPlugin).
+        
+        Args:
+            plugin_class: The plugin class to validate
+            plugin_name: Name of the plugin
+            
+        Returns:
+            List of validation error messages (empty if valid)
+        """
+        errors = []
+        
+        # Check that plugin has a name
+        if not getattr(plugin_class, 'plugin_name', None) and not getattr(plugin_class, 'tab_name', None):
+            errors.append("Plugin must define plugin_name or tab_name")
+        
+        # Check that plugin has at least one extension interface
+        has_interface = (
+            issubclass(plugin_class, TabExtension) or
+            issubclass(plugin_class, MenuExtension) or
+            issubclass(plugin_class, StatusExtension) or
+            issubclass(plugin_class, ToolbarExtension) or
+            issubclass(plugin_class, ServiceExtension) or
+            issubclass(plugin_class, EventSubscriberExtension) or
+            issubclass(plugin_class, SettingsExtension)
+        )
+        
+        if not has_interface:
+            errors.append("Plugin must implement at least one extension interface")
+        
+        return errors
+    
+    def _check_extension_plugin_compatibility(self, plugin_class: Type[Any]) -> bool:
+        """Check platform compatibility for extension-only plugins.
+        
+        Args:
+            plugin_class: The plugin class to check
+            
+        Returns:
+            True if compatible with current platform, False otherwise
+        """
+        import platform
+        current_platform = platform.system()
+        supported_platforms = getattr(plugin_class, 'supported_platforms', [])
+        
+        # If no supported_platforms specified, assume compatible
+        if not supported_platforms:
+            return True
+        
+        # Check if current platform is in supported list
+        # Normalize platform names (Windows, Linux)
+        normalized_current = current_platform.capitalize()
+        normalized_supported = [p.capitalize() for p in supported_platforms]
+        
+        return normalized_current in normalized_supported
+    
+    def _check_plugin_compatibility(self, plugin_class: Type[Any], plugin_name: str) -> bool:
         """Check if plugin version is compatible with GUI version.
         
         Args:

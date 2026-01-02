@@ -189,7 +189,16 @@ class PluginController(QObject):
             
             # Remove toolbar actions (from Plugins menu)
             if plugin_name in self._plugin_toolbar_actions:
-                plugins_menu = self._get_or_create_plugins_menu() if hasattr(self, '_plugins_menu') else None
+                # Only retrieve existing Plugins menu, don't create one
+                plugins_menu = getattr(self, '_plugins_menu', None)
+                if plugins_menu is None and self._main_window:
+                    # Try to find existing Plugins menu without creating it
+                    menu_bar = self._main_window.menuBar()
+                    for action in menu_bar.actions():
+                        if action.text().replace("&", "") == "Plugins":
+                            plugins_menu = action.menu()
+                            break
+                
                 for action in self._plugin_toolbar_actions[plugin_name]:
                     try:
                         if plugins_menu:
@@ -350,6 +359,103 @@ class PluginController(QObject):
     # v3.4.0 Extension Integration
     # =========================================================================
     
+    def cleanup_all_extensions(self) -> None:
+        """Clean up all previously integrated extensions.
+        
+        This removes all menu actions, toolbar actions, status widgets,
+        and shuts down all ServiceExtension plugins. Used before reloading
+        plugins to prevent duplicates.
+        """
+        if not self._main_window:
+            # Nothing to clean up if main window isn't set
+            return
+        
+        logger.info("Cleaning up all plugin extensions...")
+        
+        try:
+            # Shutdown all ServiceExtension plugins first
+            self.shutdown_service_extensions()
+            
+            # Remove all menu actions
+            for plugin_name in list(self._plugin_menu_actions.keys()):
+                for action, target_menu in self._plugin_menu_actions[plugin_name]:
+                    try:
+                        if target_menu:
+                            target_menu.removeAction(action)
+                    except Exception as e:
+                        logger.debug(f"Error removing menu action: {e}")
+                del self._plugin_menu_actions[plugin_name]
+            
+            # Remove all menus created by plugins
+            menu_bar = self._main_window.menuBar()
+            for plugin_name in list(self._plugin_created_menus.keys()):
+                for menu in self._plugin_created_menus[plugin_name]:
+                    try:
+                        # Find and remove the menu's action from the menu bar
+                        for action in menu_bar.actions():
+                            if action.menu() == menu:
+                                menu_bar.removeAction(action)
+                                logger.debug(f"Removed created menu '{menu.title()}' for '{plugin_name}'")
+                                break
+                    except Exception as e:
+                        logger.debug(f"Error removing created menu: {e}")
+                del self._plugin_created_menus[plugin_name]
+            
+            # Remove all toolbar actions
+            # Only get the Plugins menu if it already exists (don't create it)
+            plugins_menu = None
+            if hasattr(self, '_plugins_menu') and self._plugins_menu is not None:
+                plugins_menu = self._plugins_menu
+            elif self._main_window:
+                # Try to find existing Plugins menu without creating it
+                menu_bar = self._main_window.menuBar()
+                for action in menu_bar.actions():
+                    if action.text().replace("&", "") == "Plugins":
+                        plugins_menu = action.menu()
+                        break
+            for plugin_name in list(self._plugin_toolbar_actions.keys()):
+                for action in self._plugin_toolbar_actions[plugin_name]:
+                    try:
+                        if plugins_menu:
+                            plugins_menu.removeAction(action)
+                    except Exception as e:
+                        logger.debug(f"Error removing toolbar action: {e}")
+                del self._plugin_toolbar_actions[plugin_name]
+            
+            # Remove all status widgets
+            status_bar = self._main_window.statusBar()
+            for plugin_name in list(self._plugin_status_widgets.keys()):
+                for widget in self._plugin_status_widgets[plugin_name]:
+                    try:
+                        status_bar.removeWidget(widget)
+                        widget.hide()  # Hide instead of delete to avoid corruption
+                    except Exception as e:
+                        logger.debug(f"Error removing status widget: {e}")
+                del self._plugin_status_widgets[plugin_name]
+            
+            # Clear the Plugins menu cache and remove menu if it's empty
+            if plugins_menu:
+                try:
+                    # Check if menu is empty (no actions left)
+                    if not plugins_menu.actions():
+                        # Menu is empty, remove it from menu bar
+                        menu_bar = self._main_window.menuBar()
+                        for action in menu_bar.actions():
+                            if action.menu() == plugins_menu:
+                                menu_bar.removeAction(action)
+                                logger.debug("Removed empty Plugins menu")
+                                break
+                except Exception as e:
+                    logger.debug(f"Error checking/removing Plugins menu: {e}")
+            
+            # Clear the cache
+            if hasattr(self, '_plugins_menu'):
+                self._plugins_menu = None
+            
+            logger.info("Cleaned up all plugin extensions")
+        except Exception as e:
+            logger.error(f"Error cleaning up extensions: {e}")
+    
     def integrate_extensions(self, main_window: Any) -> None:
         """Integrate all v3.4.0 plugin extensions into the main window.
         
@@ -358,6 +464,9 @@ class PluginController(QObject):
         """
         
         self._main_window = main_window
+        
+        # Clean up any previously integrated extensions to prevent duplicates
+        self.cleanup_all_extensions()
         
         try:
             # Integrate Menu Extensions

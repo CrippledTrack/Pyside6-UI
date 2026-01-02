@@ -464,17 +464,19 @@ class PluginManagementDialog(QDialog):
         name = self.get_selected_plugin_name()
         if not name:
             return
-        plugin_registry.enable_plugin(name)
-        # Call lifecycle hook
-        plugin_class = plugin_registry.get_plugin(name)
-        if plugin_class and hasattr(plugin_class, 'on_plugin_enabled'):
-            try:
-                plugin_class.on_plugin_enabled()
-            except Exception as e:
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.debug(f"Error calling on_plugin_enabled hook for {name}: {e}")
-        self.pluginToggled.emit(name, True)
+        # Only enable if not already enabled to avoid duplicates
+        if not plugin_registry.is_enabled(name):
+            plugin_registry.enable_plugin(name)
+            # Call lifecycle hook
+            plugin_class = plugin_registry.get_plugin(name)
+            if plugin_class and hasattr(plugin_class, 'on_plugin_enabled'):
+                try:
+                    plugin_class.on_plugin_enabled()
+                except Exception as e:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.debug(f"Error calling on_plugin_enabled hook for {name}: {e}")
+            self.pluginToggled.emit(name, True)
         self.apply_filters()
 
     def disable_selected(self) -> None:
@@ -498,17 +500,19 @@ class PluginManagementDialog(QDialog):
     def enable_all(self) -> None:
         """Enable all plugins and call lifecycle hooks."""
         for name, _ in self._all_plugins:
-            plugin_registry.enable_plugin(name)
-            # Call lifecycle hook
-            plugin_class = plugin_registry.get_plugin(name)
-            if plugin_class and hasattr(plugin_class, 'on_plugin_enabled'):
-                try:
-                    plugin_class.on_plugin_enabled()
-                except Exception as e:
-                    import logging
-                    logger = logging.getLogger(__name__)
-                    logger.debug(f"Error calling on_plugin_enabled hook for {name}: {e}")
-            self.pluginToggled.emit(name, True)
+            # Only enable if not already enabled to avoid duplicates
+            if not plugin_registry.is_enabled(name):
+                plugin_registry.enable_plugin(name)
+                # Call lifecycle hook
+                plugin_class = plugin_registry.get_plugin(name)
+                if plugin_class and hasattr(plugin_class, 'on_plugin_enabled'):
+                    try:
+                        plugin_class.on_plugin_enabled()
+                    except Exception as e:
+                        import logging
+                        logger = logging.getLogger(__name__)
+                        logger.debug(f"Error calling on_plugin_enabled hook for {name}: {e}")
+                self.pluginToggled.emit(name, True)
         self.apply_filters()
 
     def disable_all(self) -> None:

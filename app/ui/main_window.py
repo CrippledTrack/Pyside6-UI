@@ -560,6 +560,11 @@ class MainWindow(QMainWindow):
         """
         logger.info("Reloading all plugins...")
         
+        # Clean up all previously integrated extensions before clearing registry
+        # This prevents duplicate menu items, toolbar actions, and status widgets
+        # and ensures ServiceExtension plugins are properly shut down
+        self.plugin_controller.cleanup_all_extensions()
+        
         # Clear existing tabs
         while self.tab_widget.count() > 0:
             self.tab_widget.removeTab(0)

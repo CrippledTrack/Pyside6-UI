@@ -136,14 +136,14 @@ def run(argv: List[str]) -> int:
         else:
             logger.info("Starting privileged daemon...")
             daemon_client = start_daemon()
-        if not daemon_client or not daemon_client.is_connected():
-            logger.warning("Failed to start privileged daemon. Some features requiring admin privileges will be disabled.")
-            logger.warning("The application will continue in limited mode. Tabs requiring admin privileges will be disabled.")
-            daemon_client = None
-        else:
-            # Store daemon client globally for utils to use
-            set_daemon_client(daemon_client)
-            logger.info("Privileged daemon started successfully")
+            if not daemon_client or not daemon_client.is_connected():
+                logger.warning("Failed to start privileged daemon. Some features requiring admin privileges will be disabled.")
+                logger.warning("The application will continue in limited mode. Tabs requiring admin privileges will be disabled.")
+                daemon_client = None
+            else:
+                # Store daemon client globally for utils to use
+                set_daemon_client(daemon_client)
+                logger.info("Privileged daemon started successfully")
 
     # Apply theme using saved preference
     saved_theme = settings_service.get_theme_preference()
