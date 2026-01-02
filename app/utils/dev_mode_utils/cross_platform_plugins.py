@@ -12,14 +12,13 @@ import importlib
 import importlib.util
 import inspect
 import logging
-import platform
 import sys
 from pathlib import Path
 from typing import List, Type, Any, Optional
 
-logger = logging.getLogger(__name__)
+from ...constants import CURRENT_PLATFORM
 
-CURRENT_PLATFORM = platform.system().lower()
+logger = logging.getLogger(__name__)
 
 # Cache for loaded cross-platform plugins
 _cross_platform_plugins: List[Type[Any]] = []

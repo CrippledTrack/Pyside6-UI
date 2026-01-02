@@ -74,6 +74,8 @@ class ServiceContainer:
         """Initialize all services with their dependencies.
         
         This method sets up service dependencies in the correct order.
+        Note: ThemeManager is NOT initialized here because it requires QApplication
+        to exist first. Register it manually after QApplication is created.
         """
         if self._initialized:
             return
@@ -84,6 +86,7 @@ class ServiceContainer:
         from .settings_service import SettingsService
         from .daemon_service import DaemonService
         from .admin_service import AdminService
+        from .plugin_service import PluginService
         
         # 1. Settings service (no dependencies)
         if SettingsService not in self._services:
@@ -100,6 +103,12 @@ class ServiceContainer:
             daemon_service = self.get(DaemonService)
             admin_service = AdminService(daemon_service)
             self.register_singleton(AdminService, admin_service)
+        
+        # 4. Plugin service (depends on settings service, wraps plugin_registry)
+        if PluginService not in self._services:
+            settings_service = self.get(SettingsService)
+            plugin_service = PluginService(settings_service=settings_service)
+            self.register_singleton(PluginService, plugin_service)
         
         self._initialized = True
         logger.info("Services initialized successfully")

@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from ..services.container import ServiceContainer
     from ..services.settings_service import SettingsService
+    from ...themes.theme_manager import ThemeManager
 
 from PySide6.QtCore import QPoint, Qt, Slot
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
@@ -29,8 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...plugin_system import plugin_registry
-from ...themes.theme_manager import ThemeManager
+from ..services.plugin_service import PluginService
 from ..services.admin_service import AdminService
 from ..services.daemon_service import DaemonService
 from ..services.tab_loader_service import TabLoaderThread
@@ -54,7 +54,8 @@ VERSION = constants.VERSION
 VERSION_INFO = constants.VERSION_INFO
 VERSION_NAME = constants.VERSION_NAME
 
-CURRENT_PLATFORM = platform.system().lower()
+# Import centralized platform constant
+from ..constants import CURRENT_PLATFORM
 
 # Platform-specific elevation imports (for restart_as_admin)
 if CURRENT_PLATFORM == "windows":
@@ -70,14 +71,14 @@ class MainWindow(QMainWindow):
     
     def __init__(
         self,
-        theme_manager: Optional[ThemeManager] = None,
+        theme_manager: Optional["ThemeManager"] = None,
         settings_service: Optional["SettingsService"] = None,
         container: "ServiceContainer" = None  # type: ignore[assignment]
     ) -> None:
         """Initialize the main window.
         
         Args:
-            theme_manager: Optional theme manager instance
+            theme_manager: Optional theme manager instance (retrieved from container if not provided)
             settings_service: Optional settings service instance
             container: Service container for dependency injection (required)
             
@@ -90,9 +91,15 @@ class MainWindow(QMainWindow):
         if container is None:
             raise ValueError("ServiceContainer is required for MainWindow initialization")
         
-        self.settings_service = settings_service
-        self.theme_manager = theme_manager
         self.container = container
+        self.settings_service = settings_service
+        
+        # Get ThemeManager from container if not explicitly provided
+        if theme_manager is None:
+            from ...themes.theme_manager import ThemeManager
+            theme_manager = container.get(ThemeManager)
+        self.theme_manager = theme_manager
+        
         self._theme_dialog: Optional[ThemeDialog] = None
         self._plugin_dialog: Optional[PluginManagementDialog] = None
         self._log_viewer_dialog: Optional[LogViewerDialog] = None
@@ -150,22 +157,23 @@ class MainWindow(QMainWindow):
     
     def _setup_controllers(self) -> None:
         """Setup controllers for tab and plugin management."""
-        # Create tab controller
+        # Create tab controller - now accepts container directly
         self.tab_controller = TabController(
             self.tab_widget,
-            self.admin_service,
-            self.daemon_service if CURRENT_PLATFORM == "linux" else None,
+            self.container,
             self
         )
         # Connect tab controller signals
         self.tab_controller.title_update_requested.connect(self._update_window_title)
         self.tab_controller.set_restart_admin_callback(self.restart_as_admin)
         
-        # Create plugin controller
+        # Create plugin controller - now accepts container directly
         self.plugin_controller = PluginController(
-            self.settings_service,
+            self.container,
             self
         )
+        # Set main_window reference for dynamic extension integration
+        self.plugin_controller._main_window = self
         # Connect plugin controller signals
         self.plugin_controller.plugin_toggled.connect(self._on_plugin_toggled)
     
@@ -203,12 +211,10 @@ class MainWindow(QMainWindow):
         
         self.setMenuBar(menu_bar)
         
-        # Create menu bar controller
+        # Create menu bar controller - now accepts container directly
         self.menu_controller = MenuBarController(
             menu_bar,
-            self.admin_service,
-            self.daemon_service if CURRENT_PLATFORM == "linux" else None,
-            self.settings_service,
+            self.container,
             self
         )
         
@@ -227,7 +233,10 @@ class MainWindow(QMainWindow):
     
     def _start_tab_loader(self) -> None:
         """Configure and start the tab loading thread."""
-        self.tab_loader = TabLoaderThread(settings_service=self.settings_service)
+        plugin_service = self.container.get(PluginService)
+        self.tab_loader = TabLoaderThread(
+            plugin_service=plugin_service
+        )
         self.tab_loader.finished.connect(self.on_tabs_loaded)
         self.tab_loader.error.connect(self.on_tab_load_error)
         self.tab_loader.add_tab.connect(self.tab_controller.add_tab)
@@ -276,6 +285,9 @@ class MainWindow(QMainWindow):
 
         logger.info("All tabs loaded successfully")
         self._update_window_title()
+        
+        # Integrate v3.4.0 extension plugins (Menu, Status, Toolbar, Service)
+        self.plugin_controller.integrate_extensions(self)
     
     def on_tab_load_error(self, error_msg: str) -> None:
         """Handle tab loading error."""
@@ -428,6 +440,8 @@ class MainWindow(QMainWindow):
         Args:
             theme_name: Name of the selected theme
         """
+        from ...plugin_system.registry import plugin_registry
+        
         logger.info(f"Theme selected: {theme_name}")
         # Reapply theme with current UI flag setting
         if self.settings_service:
@@ -439,6 +453,9 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'toast_manager'):
             self.toast_manager.update_theme_manager(self.theme_manager)
             self.toast_manager.refresh_theme()
+        
+        # Publish event for subscribers
+        plugin_registry.publish_event("theme_changed", {"theme": theme_name})
     
     def restart_as_admin(self) -> None:
         """Restart the application with administrator/root privileges.
@@ -543,6 +560,11 @@ class MainWindow(QMainWindow):
         """
         logger.info("Reloading all plugins...")
         
+        # Clean up all previously integrated extensions before clearing registry
+        # This prevents duplicate menu items, toolbar actions, and status widgets
+        # and ensures ServiceExtension plugins are properly shut down
+        self.plugin_controller.cleanup_all_extensions()
+        
         # Clear existing tabs
         while self.tab_widget.count() > 0:
             self.tab_widget.removeTab(0)
@@ -551,7 +573,7 @@ class MainWindow(QMainWindow):
         self.tab_controller.clear_loaded_tabs()
         
         # Clear plugin registry
-        plugin_registry.clear()
+        self.container.get(PluginService).clear()
         
         # Show loading state
         self.tab_widget.hide()
@@ -624,6 +646,9 @@ class MainWindow(QMainWindow):
                 self.settings_service._settings.window_geometry.maximized = False
                 self.settings_service._settings.window_geometry.fullscreen = False
             self.settings_service._save_settings()
+        
+        # Shutdown ServiceExtension plugins
+        self.plugin_controller.shutdown_service_extensions()
         
         event.accept()
     

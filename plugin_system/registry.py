@@ -4,15 +4,27 @@ Plugin registry system for managing discovered and loaded plugins.
 This module provides the PluginRegistry class which maintains a registry of all
 available plugins, handles plugin registration, enables/disables plugins, and
 manages version compatibility checks.
+
+New in v3.4.0: Support for multiple extension interfaces (MenuExtension,
+StatusExtension, ToolbarExtension, ServiceExtension, EventSubscriberExtension).
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Optional, List, Dict, Type
+from typing import Any, Optional, List, Dict, Tuple, Type
 
-# Import after BaseTabPlugin is defined to avoid circular import issues
-from .base import BaseTabPlugin  # type: ignore
+# Import interfaces for type checking
+from .interfaces import (
+    Plugin,
+    TabExtension,
+    MenuExtension,
+    StatusExtension,
+    ToolbarExtension,
+    ServiceExtension,
+    EventSubscriberExtension,
+    SettingsExtension,
+)
 from .version_utils import check_version_compatibility, get_gui_version
 
 logger = logging.getLogger(__name__)
@@ -37,19 +49,40 @@ def _is_show_all_platforms() -> bool:
 
 
 class PluginRegistry:
-    """Registry for managing discovered plugins."""
+    """Registry for managing discovered plugins.
+    
+    Supports multiple extension interfaces introduced in v3.4.0:
+    - TabExtension: Plugins that provide a tab widget
+    - MenuExtension: Plugins that contribute menu items
+    - StatusExtension: Plugins that contribute status bar widgets
+    - ToolbarExtension: Plugins that contribute toolbar actions
+    - ServiceExtension: Plugins that provide background services
+    - EventSubscriberExtension: Plugins that subscribe to events
+    """
 
     def __init__(self) -> None:
-        self._plugins: Dict[str, Type[BaseTabPlugin]] = {}
-        self._core_plugins: Dict[str, Type[BaseTabPlugin]] = {}
-        self._external_plugins: Dict[str, Type[BaseTabPlugin]] = {}
+        # Main plugin registry (by name)
+        self._plugins: Dict[str, Type[Any]] = {}
+        self._core_plugins: Dict[str, Type[Any]] = {}
+        self._external_plugins: Dict[str, Type[Any]] = {}
         self._disabled_plugins: set = set()
         # Track plugins seen in this runtime to apply default-disabled only once per session
         self._seen_plugins: set = set()
         # Track version incompatibility reasons for plugins
         self._version_incompatibilities: Dict[str, str] = {}
+        
+        # Interface-based plugin tracking (v3.4.0)
+        self._tab_plugins: Dict[str, Type[TabExtension]] = {}
+        self._menu_plugins: Dict[str, Type[MenuExtension]] = {}
+        self._status_plugins: Dict[str, Type[StatusExtension]] = {}
+        self._toolbar_plugins: Dict[str, Type[ToolbarExtension]] = {}
+        self._service_plugins: Dict[str, Type[ServiceExtension]] = {}
+        self._event_subscriber_plugins: Dict[str, Type[EventSubscriberExtension]] = {}
+        
+        # Rejected plugins tracking (v3.4.0) - stores (plugin_class, reason)
+        self._rejected_plugins: Dict[str, Tuple[Type[Any], str]] = {}
 
-    def register_plugin(self, plugin_class: Type[BaseTabPlugin], is_core: bool = False) -> None:
+    def register_plugin(self, plugin_class: Type[Any], is_core: bool = False) -> None:
         """
         Register a plugin in the registry.
 
@@ -57,16 +90,30 @@ class PluginRegistry:
             plugin_class: The plugin class to register
             is_core: Whether this is a core plugin
         """
-        plugin_name = plugin_class.tab_name
+        # Get plugin name - prefer tab_name for backward compat, fallback to plugin_name
+        plugin_name = getattr(plugin_class, 'tab_name', None) or getattr(plugin_class, 'plugin_name', plugin_class.__name__)
 
-        # Validate plugin
-        errors = plugin_class.validate_plugin()
-        if errors:
-            raise ValueError(f"Invalid plugin '{plugin_name}': {', '.join(errors)}")
+        # Validate plugin (only if validate_plugin method exists)
+        # BaseTabPlugin has this method, but extension-only plugins may not
+        if hasattr(plugin_class, 'validate_plugin'):
+            errors = plugin_class.validate_plugin()
+            if errors:
+                raise ValueError(f"Invalid plugin '{plugin_name}': {', '.join(errors)}")
+        else:
+            # For extension-only plugins, do basic validation
+            errors = self._validate_extension_plugin(plugin_class, plugin_name)
+            if errors:
+                raise ValueError(f"Invalid plugin '{plugin_name}': {', '.join(errors)}")
 
         # Check platform compatibility (bypass if show_all_platforms is enabled)
         show_all = _is_show_all_platforms()
-        is_compatible = plugin_class.is_compatible()
+        # is_compatible() is only defined in BaseTabPlugin, provide fallback for extension-only plugins
+        if hasattr(plugin_class, 'is_compatible'):
+            is_compatible = plugin_class.is_compatible()
+        else:
+            # Default compatibility check for extension-only plugins
+            is_compatible = self._check_extension_plugin_compatibility(plugin_class)
+        
         supported_platforms = getattr(plugin_class, 'supported_platforms', [])
         
         if not show_all and not is_compatible:
@@ -90,7 +137,63 @@ class PluginRegistry:
         self._apply_default_disabled_state(plugin_class, plugin_name)
         self._seen_plugins.add(plugin_name)
 
-    def _check_plugin_compatibility(self, plugin_class: Type[BaseTabPlugin], plugin_name: str) -> bool:
+    def _validate_extension_plugin(self, plugin_class: Type[Any], plugin_name: str) -> List[str]:
+        """Validate an extension-only plugin (not inheriting from BaseTabPlugin).
+        
+        Args:
+            plugin_class: The plugin class to validate
+            plugin_name: Name of the plugin
+            
+        Returns:
+            List of validation error messages (empty if valid)
+        """
+        errors = []
+        
+        # Check that plugin has a name
+        if not getattr(plugin_class, 'plugin_name', None) and not getattr(plugin_class, 'tab_name', None):
+            errors.append("Plugin must define plugin_name or tab_name")
+        
+        # Check that plugin has at least one extension interface
+        has_interface = (
+            issubclass(plugin_class, TabExtension) or
+            issubclass(plugin_class, MenuExtension) or
+            issubclass(plugin_class, StatusExtension) or
+            issubclass(plugin_class, ToolbarExtension) or
+            issubclass(plugin_class, ServiceExtension) or
+            issubclass(plugin_class, EventSubscriberExtension) or
+            issubclass(plugin_class, SettingsExtension)
+        )
+        
+        if not has_interface:
+            errors.append("Plugin must implement at least one extension interface")
+        
+        return errors
+    
+    def _check_extension_plugin_compatibility(self, plugin_class: Type[Any]) -> bool:
+        """Check platform compatibility for extension-only plugins.
+        
+        Args:
+            plugin_class: The plugin class to check
+            
+        Returns:
+            True if compatible with current platform, False otherwise
+        """
+        import platform
+        current_platform = platform.system()
+        supported_platforms = getattr(plugin_class, 'supported_platforms', [])
+        
+        # If no supported_platforms specified, assume compatible
+        if not supported_platforms:
+            return True
+        
+        # Check if current platform is in supported list
+        # Normalize platform names (Windows, Linux)
+        normalized_current = current_platform.capitalize()
+        normalized_supported = [p.capitalize() for p in supported_platforms]
+        
+        return normalized_current in normalized_supported
+    
+    def _check_plugin_compatibility(self, plugin_class: Type[Any], plugin_name: str) -> bool:
         """Check if plugin version is compatible with GUI version.
         
         Args:
@@ -115,6 +218,8 @@ class PluginRegistry:
         
         if not is_compatible:
             self._version_incompatibilities[plugin_name] = error_msg or "Version incompatible"
+            # Store rejected plugin for display in Plugin Manager (v3.4.0)
+            self._rejected_plugins[plugin_name] = (plugin_class, error_msg or "Version incompatible")
             logger.warning(
                 f"Plugin '{plugin_name}' version requirement not met: "
                 f"{error_msg}. Skipping registration."
@@ -155,7 +260,7 @@ class PluginRegistry:
         
         return True
 
-    def _add_plugin_to_registry(self, plugin_name: str, plugin_class: Type[BaseTabPlugin], is_core: bool) -> None:
+    def _add_plugin_to_registry(self, plugin_name: str, plugin_class: Type[Any], is_core: bool) -> None:
         """Add plugin to the appropriate registry dictionaries.
         
         Args:
@@ -168,8 +273,32 @@ class PluginRegistry:
             self._core_plugins[plugin_name] = plugin_class
         else:
             self._external_plugins[plugin_name] = plugin_class
+        
+        # Categorize by interface (v3.4.0)
+        self._categorize_plugin_by_interface(plugin_name, plugin_class)
+    
+    def _categorize_plugin_by_interface(self, plugin_name: str, plugin_class: Type[Any]) -> None:
+        """Categorize a plugin by which interfaces it implements.
+        
+        Args:
+            plugin_name: Name of the plugin
+            plugin_class: The plugin class
+        """
+        # Check each interface and add to appropriate dict
+        if issubclass(plugin_class, TabExtension):
+            self._tab_plugins[plugin_name] = plugin_class
+        if issubclass(plugin_class, MenuExtension):
+            self._menu_plugins[plugin_name] = plugin_class
+        if issubclass(plugin_class, StatusExtension):
+            self._status_plugins[plugin_name] = plugin_class
+        if issubclass(plugin_class, ToolbarExtension):
+            self._toolbar_plugins[plugin_name] = plugin_class
+        if issubclass(plugin_class, ServiceExtension):
+            self._service_plugins[plugin_name] = plugin_class
+        if issubclass(plugin_class, EventSubscriberExtension):
+            self._event_subscriber_plugins[plugin_name] = plugin_class
 
-    def _apply_default_disabled_state(self, plugin_class: Type[BaseTabPlugin], plugin_name: str) -> None:
+    def _apply_default_disabled_state(self, plugin_class: Type[Any], plugin_name: str) -> None:
         """Apply default disabled state if plugin has disabled_by_default flag.
         
         Args:
@@ -186,19 +315,19 @@ class PluginRegistry:
         except Exception:
             pass
 
-    def get_all_plugins(self) -> Dict[str, BaseTabPlugin]:
+    def get_all_plugins(self) -> Dict[str, Type[Any]]:
         """Get all registered plugins."""
         return self._plugins.copy()
 
-    def get_core_plugins(self) -> Dict[str, BaseTabPlugin]:
+    def get_core_plugins(self) -> Dict[str, Type[Any]]:
         """Get core plugins only."""
         return self._core_plugins.copy()
 
-    def get_external_plugins(self) -> Dict[str, BaseTabPlugin]:
+    def get_external_plugins(self) -> Dict[str, Type[Any]]:
         """Get external plugins only."""
         return self._external_plugins.copy()
 
-    def get_plugin(self, name: str) -> Optional[BaseTabPlugin]:
+    def get_plugin(self, name: str) -> Optional[Type[Any]]:
         """Get a specific plugin by name."""
         return self._plugins.get(name)
 
@@ -214,6 +343,14 @@ class PluginRegistry:
         self._disabled_plugins.clear()
         self._version_incompatibilities.clear()
         self._seen_plugins.clear()
+        # Clear interface dictionaries (v3.4.0)
+        self._tab_plugins.clear()
+        self._menu_plugins.clear()
+        self._status_plugins.clear()
+        self._toolbar_plugins.clear()
+        self._service_plugins.clear()
+        self._event_subscriber_plugins.clear()
+        self._rejected_plugins.clear()
 
     def get_version_incompatibility(self, name: str) -> Optional[str]:
         """
@@ -226,6 +363,15 @@ class PluginRegistry:
             Incompatibility message if plugin was rejected due to version, None otherwise
         """
         return self._version_incompatibilities.get(name)
+    
+    def get_rejected_plugins(self) -> Dict[str, Tuple[Type[Any], str]]:
+        """
+        Get plugins that were rejected during registration (e.g., version incompatible).
+        
+        Returns:
+            Dict mapping plugin name to (plugin_class, rejection_reason)
+        """
+        return self._rejected_plugins.copy()
 
     def disable_plugin(self, name: str) -> None:
         """Disable a plugin by name."""
@@ -239,9 +385,98 @@ class PluginRegistry:
         """Check if a plugin is enabled."""
         return name not in self._disabled_plugins
 
-    def get_enabled_plugins(self) -> Dict[str, Type[BaseTabPlugin]]:
+    def get_enabled_plugins(self) -> Dict[str, Type[Any]]:
         """Get all enabled plugins."""
         return {k: v for k, v in self._plugins.items() if self.is_enabled(k)}
+    
+    # =========================================================================
+    # Interface-based query methods (v3.4.0)
+    # =========================================================================
+    
+    def get_tab_extensions(self, enabled_only: bool = True) -> Dict[str, Type[TabExtension]]:
+        """Get plugins that implement TabExtension.
+        
+        Args:
+            enabled_only: If True, only return enabled plugins
+        """
+        if enabled_only:
+            return {k: v for k, v in self._tab_plugins.items() if self.is_enabled(k)}
+        return self._tab_plugins.copy()
+    
+    def get_menu_extensions(self, enabled_only: bool = True) -> Dict[str, Type[MenuExtension]]:
+        """Get plugins that implement MenuExtension.
+        
+        Args:
+            enabled_only: If True, only return enabled plugins
+        """
+        if enabled_only:
+            return {k: v for k, v in self._menu_plugins.items() if self.is_enabled(k)}
+        return self._menu_plugins.copy()
+    
+    def get_status_extensions(self, enabled_only: bool = True) -> Dict[str, Type[StatusExtension]]:
+        """Get plugins that implement StatusExtension.
+        
+        Args:
+            enabled_only: If True, only return enabled plugins
+        """
+        if enabled_only:
+            return {k: v for k, v in self._status_plugins.items() if self.is_enabled(k)}
+        return self._status_plugins.copy()
+    
+    def get_toolbar_extensions(self, enabled_only: bool = True) -> Dict[str, Type[ToolbarExtension]]:
+        """Get plugins that implement ToolbarExtension.
+        
+        Args:
+            enabled_only: If True, only return enabled plugins
+        """
+        if enabled_only:
+            return {k: v for k, v in self._toolbar_plugins.items() if self.is_enabled(k)}
+        return self._toolbar_plugins.copy()
+    
+    def get_service_extensions(self, enabled_only: bool = True) -> Dict[str, Type[ServiceExtension]]:
+        """Get plugins that implement ServiceExtension.
+        
+        Args:
+            enabled_only: If True, only return enabled plugins
+        """
+        if enabled_only:
+            return {k: v for k, v in self._service_plugins.items() if self.is_enabled(k)}
+        return self._service_plugins.copy()
+    
+    def get_event_subscriber_extensions(self, enabled_only: bool = True) -> Dict[str, Type[EventSubscriberExtension]]:
+        """Get plugins that implement EventSubscriberExtension.
+        
+        Args:
+            enabled_only: If True, only return enabled plugins
+        """
+        if enabled_only:
+            return {k: v for k, v in self._event_subscriber_plugins.items() if self.is_enabled(k)}
+        return self._event_subscriber_plugins.copy()
+    
+    # =========================================================================
+    # Event Bus (v3.4.0)
+    # =========================================================================
+    
+    def publish_event(self, event_name: str, event_data: Dict[str, Any] = None) -> None:
+        """Publish an event to all subscribed plugins.
+        
+        Args:
+            event_name: Name of the event (e.g., 'plugin_enabled', 'theme_changed')
+            event_data: Optional data associated with the event
+        """
+        if event_data is None:
+            event_data = {}
+        
+        subscribers = self.get_event_subscriber_extensions(enabled_only=True)
+        
+        for plugin_name, plugin_class in subscribers.items():
+            try:
+                subscriptions = plugin_class.get_event_subscriptions()
+                if event_name in subscriptions:
+                    callback = subscriptions[event_name]
+                    callback(event_data)
+            except Exception as e:
+                logger.error(f"Error delivering event '{event_name}' to '{plugin_name}': {e}")
 
 
 # Global plugin registry instance

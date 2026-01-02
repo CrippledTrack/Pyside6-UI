@@ -8,14 +8,15 @@ activation/deactivation, and lifecycle management, extracted from MainWindow.
 from __future__ import annotations
 
 import logging
-import platform
 from typing import Any, Dict, Optional, Callable, TYPE_CHECKING
 
 from PySide6.QtCore import Signal, QObject
 from PySide6.QtWidgets import QTabWidget, QWidget
 
+from ...constants import CURRENT_PLATFORM
+
 if TYPE_CHECKING:
-    from ...services.interfaces import IAdminService, IDaemonService
+    from ...services.container import ServiceContainer
     from ....plugin_system.base import BaseTabPlugin
 
 from ..widgets.admin_required_placeholder import AdminRequiredPlaceholder
@@ -24,8 +25,6 @@ from ..widgets.loading_placeholder import LoadingPlaceholder
 from ...utils.admin import needs_admin_for_plugin
 
 logger = logging.getLogger(__name__)
-
-CURRENT_PLATFORM = platform.system().lower()
 
 
 class TabController(QObject):
@@ -41,22 +40,28 @@ class TabController(QObject):
     def __init__(
         self,
         tab_widget: QTabWidget,
-        admin_service: "IAdminService",
-        daemon_service: Optional["IDaemonService"] = None,
+        container: "ServiceContainer",
         parent: Optional[QObject] = None
     ) -> None:
         """Initialize the tab controller.
         
         Args:
             tab_widget: The tab widget to manage
-            admin_service: Admin service for checking privileges
-            daemon_service: Optional daemon service (for Linux)
+            container: Service container for dependency injection
             parent: Optional parent object
         """
         super().__init__(parent)
         self.tab_widget = tab_widget
-        self.admin_service = admin_service
-        self.daemon_service = daemon_service
+        self.container = container
+        
+        # Retrieve services from container
+        from ...services.admin_service import AdminService
+        from ...services.daemon_service import DaemonService
+        
+        self.admin_service = container.get(AdminService)
+        # DaemonService is only relevant on Linux
+        self.daemon_service = container.get(DaemonService) if CURRENT_PLATFORM == "linux" else None
+        
         self.loaded_tabs: Dict[str, Dict[str, Any]] = {}
         self.is_loading_tab = False
         self._previous_tab_index = -1

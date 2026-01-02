@@ -16,13 +16,13 @@ from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 
 from .constants import VERSION as GUI_API_VERSION
-from .services.logging_service import setup_logging
+from .services.logging_service import setup_logging, set_dev_logging_override
 from .services.container import ServiceContainer
 from .services.settings_service import SettingsService
 from .ui.main_window import MainWindow
 from .utils.console import apply_console_setting
+from .utils.admin import set_dev_mode
 from .utils.imports import get_platforms_constants
-from ..themes.theme_manager import ThemeManager
 
 # Import platform constants using the utility function
 constants = get_platforms_constants()
@@ -43,10 +43,13 @@ def run(argv: List[str]) -> int:
         from .daemon.server import run_daemon
         return run_daemon(argv)
     
-    # Check for dev mode flag - bypasses admin requirements for tab loading
-    if '-dev' in argv or '--dev' in argv:
-        from .utils.admin import set_dev_mode
+    # Check for dev mode flag or dev version - bypasses admin requirements for tab loading and enables dev logging
+    dev_flag = ('-dev' in argv or '--dev' in argv)
+    dev_version = ('-dev' in str(VERSION)) or ('-dev' in str(GUI_API_VERSION))
+    is_dev = dev_flag or dev_version
+    if is_dev:
         set_dev_mode(True)
+        set_dev_logging_override(True)
 
     # Prevent multiple instances on Linux (check BEFORE any initialization)
     lock_file = None
@@ -72,7 +75,7 @@ def run(argv: List[str]) -> int:
     logger.info(f"GUI API Version: v{GUI_API_VERSION}")
 
     # Log dev mode status now that logging is configured
-    if '-dev' in argv or '--dev' in argv:
+    if is_dev:
         logger.warning("DEV MODE ENABLED - admin requirements bypassed, Dev menu available")
 
     # Initialize service container
@@ -112,29 +115,42 @@ def run(argv: List[str]) -> int:
 
     app.setFont(QFont("Segoe UI", 10))
 
+    # Now that QApplication exists, register ThemeManager in the container
+    # (ThemeManager requires QApplication for palette detection)
+    from ..themes.theme_manager import ThemeManager
+    theme_manager = ThemeManager(settings_service=settings_service)
+    container.register_singleton(ThemeManager, theme_manager)
+    logger.info("ThemeManager registered in container")
+
     # On Linux, start privileged daemon (optional - app can run without it)
     daemon_client = None
     if platform.system().lower() == "linux":
+        from .constants import REQUIRE_ADMIN_BY_DEFAULT
         from .services.daemon_service import DaemonService
         daemon_service = container.get(DaemonService)
-        logger.info("Starting privileged daemon...")
-        daemon_client = start_daemon()
-        if not daemon_client or not daemon_client.is_connected():
-            logger.warning("Failed to start privileged daemon. Some features requiring admin privileges will be disabled.")
-            logger.warning("The application will continue in limited mode. Tabs requiring admin privileges will be disabled.")
-            daemon_client = None
+        
+        # Only start daemon if admin is required by default
+        # This avoids prompting for password when REQUIRE_ADMIN_BY_DEFAULT is False
+        if not REQUIRE_ADMIN_BY_DEFAULT:
+            logger.info("REQUIRE_ADMIN_BY_DEFAULT is False - skipping privileged daemon startup")
         else:
-            # Store daemon client globally for utils to use
-            set_daemon_client(daemon_client)
-            logger.info("Privileged daemon started successfully")
+            logger.info("Starting privileged daemon...")
+            daemon_client = start_daemon()
+            if not daemon_client or not daemon_client.is_connected():
+                logger.warning("Failed to start privileged daemon. Some features requiring admin privileges will be disabled.")
+                logger.warning("The application will continue in limited mode. Tabs requiring admin privileges will be disabled.")
+                daemon_client = None
+            else:
+                # Store daemon client globally for utils to use
+                set_daemon_client(daemon_client)
+                logger.info("Privileged daemon started successfully")
 
-    # Apply theme using ThemeManager with saved preference
-    theme_manager = ThemeManager(settings_service=settings_service)
+    # Apply theme using saved preference
     saved_theme = settings_service.get_theme_preference()
     theme_manager.apply_auto_theme(saved_theme=saved_theme)
 
     # Create MainWindow with service container
-    window = MainWindow(theme_manager, settings_service=settings_service, container=container)
+    window = MainWindow(settings_service=settings_service, container=container)
     window.show()
 
     exit_code = app.exec()

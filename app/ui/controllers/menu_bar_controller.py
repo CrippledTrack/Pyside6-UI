@@ -8,19 +8,18 @@ state management, and menu item updates, extracted from MainWindow.
 from __future__ import annotations
 
 import logging
-import platform
 from typing import Optional, Callable, TYPE_CHECKING, Any
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenuBar, QMenu, QWidget
 
+from ...constants import CURRENT_PLATFORM
+
 if TYPE_CHECKING:
-    from ...services.interfaces import IAdminService, IDaemonService, ISettingsService
+    from ...services.container import ServiceContainer
 
 logger = logging.getLogger(__name__)
-
-CURRENT_PLATFORM = platform.system().lower()
 
 
 class MenuBarController(QObject):
@@ -32,26 +31,29 @@ class MenuBarController(QObject):
     def __init__(
         self,
         menu_bar: QMenuBar,
-        admin_service: Optional["IAdminService"] = None,
-        daemon_service: Optional["IDaemonService"] = None,
-        settings_service: Optional[Any] = None,
+        container: "ServiceContainer",
         parent_widget: Optional[QWidget] = None
     ) -> None:
         """Initialize the menu bar controller.
         
         Args:
             menu_bar: The menu bar widget to manage
-            admin_service: Optional admin service for checking privileges
-            daemon_service: Optional daemon service (for Linux)
-            settings_service: Optional settings service for tooltips
+            container: Service container for dependency injection
             parent_widget: Optional parent widget for menu items
         """
         super().__init__(parent_widget)
         self.menu_bar = menu_bar
-        self.admin_service = admin_service
-        self.daemon_service = daemon_service
-        self.settings_service = settings_service
+        self.container = container
         self.parent_widget = parent_widget
+        
+        # Retrieve services from container
+        from ...services.admin_service import AdminService
+        from ...services.daemon_service import DaemonService
+        from ...services.settings_service import SettingsService
+        
+        self.admin_service = container.get(AdminService)
+        self.daemon_service = container.get(DaemonService) if CURRENT_PLATFORM == "linux" else None
+        self.settings_service = container.get(SettingsService)
         
         # Menu actions (stored for state management)
         self.manage_plugins_action: Optional[QAction] = None

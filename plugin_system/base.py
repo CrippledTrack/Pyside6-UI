@@ -2,21 +2,65 @@
 Base plugin interface for Basic GUI Application tabs.
 
 All tab plugins must inherit from BaseTabPlugin.
+
+This module provides backward-compatible base classes that implement the
+new extension interfaces defined in interfaces.py. Existing plugins using
+BaseTabPlugin will continue to work without modification.
 """
 from __future__ import annotations
 
 import platform
-from abc import ABC, abstractmethod
+import re
+from abc import ABC, ABCMeta, abstractmethod
 from typing import Optional, List, Dict, Any, Type
 
-class BaseTabPlugin(ABC):
+# Import new extension interfaces
+from .interfaces import (
+    Plugin,
+    TabExtension,
+    MenuExtension,
+    StatusExtension,
+    ToolbarExtension,
+    ServiceExtension,
+    EventSubscriberExtension,
+    SettingsExtension,
+)
+
+
+class PluginMeta(ABCMeta):
+    """Metaclass for BaseTabPlugin to handle plugin_name/plugin_description aliasing.
+    
+    This provides backward compatibility by aliasing plugin_name to tab_name
+    and plugin_description to tab_description at the class level.
+    
+    Combines ABCMeta functionality with attribute aliasing.
+    """
+    
+    def __getattr__(cls, name: str) -> Any:
+        """Handle attribute access for aliased attributes."""
+        if name == 'plugin_name':
+            # Alias plugin_name to tab_name
+            return getattr(cls, 'tab_name', None)
+        elif name == 'plugin_description':
+            # Alias plugin_description to tab_description
+            return getattr(cls, 'tab_description', None)
+        raise AttributeError(f"'{cls.__name__}' has no attribute '{name}'")
+
+
+class BaseTabPlugin(Plugin, TabExtension, ABC, metaclass=PluginMeta):
     """
     Base class for all tab plugins in the Basic GUI Application.
     
     All tab plugins must inherit from this class and implement the required methods.
+    
+    This class combines the Plugin (metadata) and TabExtension (tab widget)
+    interfaces for backward compatibility with existing plugins.
+    
+    New plugins can choose to implement individual interfaces directly if they
+    don't need a tab (e.g., MenuExtension only, or ServiceExtension only).
     """
     
-    # Required class attributes
+    # Required class attributes (backward compatible with existing plugins)
     tab_name: str = "Unnamed Tab"
     tab_description: str = "No description provided"
     supported_platforms: List[str] = ["Windows", "Linux"]  # Platforms this plugin supports
@@ -27,12 +71,20 @@ class BaseTabPlugin(ABC):
     # If True, the plugin will be disabled by default on first discovery (can be enabled by user)
     disabled_by_default: bool = False
     
+    # Plugin dependencies (new in v3.4.0, optional)
+    dependencies: List[str] = []
+    
     # Version requirements (optional)
     # Simple minimum version (e.g., "3.0.0")
     min_gui_version: Optional[str] = None
     # Advanced range specification (e.g., ">=3.0.0,<4.0.0")
     # Takes precedence over min_gui_version if both are specified
     required_gui_version: Optional[str] = None
+    
+    # plugin_name and plugin_description are aliased to tab_name and tab_description
+    # via the PluginMeta metaclass for backward compatibility.
+    # Accessing SomePlugin.plugin_name will return SomePlugin.tab_name
+    # Accessing SomePlugin.plugin_description will return SomePlugin.tab_description
     
     @classmethod
     @abstractmethod
@@ -110,7 +162,8 @@ class BaseTabPlugin(ABC):
             'compatible': cls.is_compatible(),
             'current_platform': cls.get_current_platform(),
             'min_gui_version': getattr(cls, 'min_gui_version', None),
-            'required_gui_version': getattr(cls, 'required_gui_version', None)
+            'required_gui_version': getattr(cls, 'required_gui_version', None),
+            'dependencies': getattr(cls, 'dependencies', []),  # New in v3.4.0
         }
     
     @classmethod
@@ -134,13 +187,13 @@ class BaseTabPlugin(ABC):
         
         # Validate version requirements format (basic check)
         if hasattr(cls, 'min_gui_version') and cls.min_gui_version:
-            import re
             if not re.match(r'^\d+\.\d+(?:\.\d+)?', str(cls.min_gui_version)):
                 errors.append(f"Invalid min_gui_version format: {cls.min_gui_version}")
         
         if hasattr(cls, 'required_gui_version') and cls.required_gui_version:
             # Basic format check for range specifications
             # Should contain operators like >=, <, etc. and version numbers
+            # Note: hyphen (-) is NOT an operator - it's part of version strings like "3.4.0-dev"
             req_str = str(cls.required_gui_version)
             if not re.search(r'[><=]+', req_str):
                 errors.append(f"Invalid required_gui_version format (must include operators): {cls.required_gui_version}")
@@ -236,6 +289,39 @@ class CoreTabPlugin(BaseTabPlugin):
     is_core_plugin: bool = True
 
 
+# Re-export new interfaces for convenient access
+from .interfaces import (
+    Plugin as PluginBase,
+    TabExtension,
+    MenuExtension,
+    StatusExtension,
+    ToolbarExtension,
+    ServiceExtension,
+    EventSubscriberExtension,
+    SettingsExtension,
+)
+
+from .types import MenuItemDefinition, ToolbarAction, PluginEvent
+
 from .registry import PluginRegistry, plugin_registry  # re-export
 
-__all__ = ['BaseTabPlugin', 'CoreTabPlugin', 'PluginRegistry', 'plugin_registry']
+__all__ = [
+    # Backward compatible exports
+    'BaseTabPlugin',
+    'CoreTabPlugin',
+    'PluginRegistry',
+    'plugin_registry',
+    # New extension interfaces (v3.4.0)
+    'PluginBase',
+    'TabExtension',
+    'MenuExtension',
+    'StatusExtension',
+    'ToolbarExtension',
+    'ServiceExtension',
+    'EventSubscriberExtension',
+    'SettingsExtension',
+    # New types (v3.4.0)
+    'MenuItemDefinition',
+    'ToolbarAction',
+    'PluginEvent',
+]
