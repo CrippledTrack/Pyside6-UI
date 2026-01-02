@@ -12,6 +12,14 @@ from typing import Any, Dict, Optional, Callable, TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Signal
 
+from ....plugin_system.registry import plugin_registry
+from ....plugin_system.interfaces import (
+    MenuExtension,
+    StatusExtension,
+    ToolbarExtension,
+    ServiceExtension,
+)
+
 if TYPE_CHECKING:
     from ...services.container import ServiceContainer
     from ....plugin_system.base import BaseTabPlugin
@@ -67,13 +75,6 @@ class PluginController(QObject):
         Returns:
             True if toggle was successful, False otherwise
         """
-        from ....plugin_system.registry import plugin_registry
-        from ....plugin_system.interfaces import (
-            MenuExtension,
-            StatusExtension,
-            ToolbarExtension,
-            ServiceExtension,
-        )
         
         plugin_class = self.plugin_service.get_plugin(plugin_name)
         if not plugin_class:
@@ -127,12 +128,6 @@ class PluginController(QObject):
             plugin_name: Name of the plugin
             plugin_class: The plugin class
         """
-        from ....plugin_system.interfaces import (
-            MenuExtension,
-            StatusExtension,
-            ToolbarExtension,
-            ServiceExtension,
-        )
         
         try:
             # Integrate Menu Extension
@@ -164,7 +159,6 @@ class PluginController(QObject):
             plugin_name: Name of the plugin
             plugin_class: The plugin class
         """
-        from ....plugin_system.interfaces import ServiceExtension
         
         try:
             # Remove menu actions - stored as (action, target_menu) tuples
@@ -362,13 +356,6 @@ class PluginController(QObject):
         Args:
             main_window: The MainWindow instance to integrate into
         """
-        from ....plugin_system.registry import plugin_registry
-        from ....plugin_system.interfaces import (
-            MenuExtension,
-            StatusExtension,
-            ToolbarExtension,
-            ServiceExtension,
-        )
         
         self._main_window = main_window
         

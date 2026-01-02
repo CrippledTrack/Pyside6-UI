@@ -8,19 +8,18 @@ state management, and menu item updates, extracted from MainWindow.
 from __future__ import annotations
 
 import logging
-import platform
 from typing import Optional, Callable, TYPE_CHECKING, Any
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenuBar, QMenu, QWidget
 
+from ...constants import CURRENT_PLATFORM
+
 if TYPE_CHECKING:
     from ...services.container import ServiceContainer
 
 logger = logging.getLogger(__name__)
-
-CURRENT_PLATFORM = platform.system().lower()
 
 
 class MenuBarController(QObject):

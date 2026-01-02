@@ -8,16 +8,14 @@ across Windows and Linux systems.
 from __future__ import annotations
 
 import logging
-import platform
 from typing import Any, Dict, Optional, TYPE_CHECKING
+
+from ..constants import CURRENT_PLATFORM
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget
 
 logger = logging.getLogger(__name__)
-
-# Platform-specific imports
-CURRENT_PLATFORM = platform.system().lower()
 
 if CURRENT_PLATFORM == "windows":
     from ..utils.elevation_windows import is_admin as _is_admin_windows, run_as_admin

@@ -8,13 +8,13 @@ based on the current tab and version information.
 from __future__ import annotations
 
 import logging
-import platform
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QMainWindow
     from .tab_controller import TabController
 
+from ...constants import CURRENT_PLATFORM
 from ...utils.display_utils import build_title
 from ...utils.imports import get_platforms_constants
 
@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 constants = get_platforms_constants()
 VERSION = constants.VERSION
 VERSION_NAME = constants.VERSION_NAME
-CURRENT_PLATFORM = platform.system().lower()
 
 
 class WindowTitleManager:

@@ -54,7 +54,8 @@ VERSION = constants.VERSION
 VERSION_INFO = constants.VERSION_INFO
 VERSION_NAME = constants.VERSION_NAME
 
-CURRENT_PLATFORM = platform.system().lower()
+# Import centralized platform constant
+from ..constants import CURRENT_PLATFORM
 
 # Platform-specific elevation imports (for restart_as_admin)
 if CURRENT_PLATFORM == "windows":

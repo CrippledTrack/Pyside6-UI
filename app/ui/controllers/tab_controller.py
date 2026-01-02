@@ -8,11 +8,12 @@ activation/deactivation, and lifecycle management, extracted from MainWindow.
 from __future__ import annotations
 
 import logging
-import platform
 from typing import Any, Dict, Optional, Callable, TYPE_CHECKING
 
 from PySide6.QtCore import Signal, QObject
 from PySide6.QtWidgets import QTabWidget, QWidget
+
+from ...constants import CURRENT_PLATFORM
 
 if TYPE_CHECKING:
     from ...services.container import ServiceContainer
@@ -24,8 +25,6 @@ from ..widgets.loading_placeholder import LoadingPlaceholder
 from ...utils.admin import needs_admin_for_plugin
 
 logger = logging.getLogger(__name__)
-
-CURRENT_PLATFORM = platform.system().lower()
 
 
 class TabController(QObject):
