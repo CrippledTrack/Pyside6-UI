@@ -243,6 +243,8 @@ class PluginManagementDialog(QDialog):
             # Add to main registry (bypass version check)
             plugin_registry._plugins[name] = plugin_class
             plugin_registry._external_plugins[name] = plugin_class
+            # Categorize by interface so extension methods work properly
+            plugin_registry._categorize_plugin_by_interface(name, plugin_class)
             # Enable it
             plugin_registry.enable_plugin(name)
             self.pluginToggled.emit(name, True)
