@@ -233,6 +233,27 @@ class MainWindow(QMainWindow):
     
     def _start_tab_loader(self) -> None:
         """Configure and start the tab loading thread."""
+        # Clean up any previously running tab loader thread
+        if hasattr(self, 'tab_loader') and self.tab_loader is not None:
+            try:
+                # Disconnect signals to prevent duplicate callbacks
+                self.tab_loader.finished.disconnect()
+                self.tab_loader.error.disconnect()
+                self.tab_loader.add_tab.disconnect()
+            except (RuntimeError, TypeError):
+                # Signals may already be disconnected
+                pass
+            
+            # Wait for the thread to finish if still running
+            if self.tab_loader.isRunning():
+                logger.debug("Waiting for previous tab loader thread to finish...")
+                self.tab_loader.quit()
+                self.tab_loader.wait(5000)  # Wait up to 5 seconds
+                if self.tab_loader.isRunning():
+                    logger.warning("Previous tab loader thread did not finish in time")
+                    self.tab_loader.terminate()
+                    self.tab_loader.wait()
+        
         plugin_service = self.container.get(PluginService)
         self.tab_loader = TabLoaderThread(
             plugin_service=plugin_service

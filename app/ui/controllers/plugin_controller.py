@@ -57,6 +57,7 @@ class PluginController(QObject):
         self._plugin_toolbar_actions: Dict[str, list] = {}  # plugin_name -> [QAction, ...]
         self._plugin_status_widgets: Dict[str, list] = {}  # plugin_name -> [QWidget, ...]
         self._plugin_created_menus: Dict[str, list] = {}  # plugin_name -> [QMenu, ...] menus created by plugin
+        self._service_extensions_started: bool = False  # Track if service extensions have been started
         
         # Retrieve services from container
         from ...services.settings_service import SettingsService
@@ -373,8 +374,9 @@ class PluginController(QObject):
         logger.info("Cleaning up all plugin extensions...")
         
         try:
-            # Shutdown all ServiceExtension plugins first
-            self.shutdown_service_extensions()
+            # Shutdown all ServiceExtension plugins first (only if they were started)
+            if self._service_extensions_started:
+                self.shutdown_service_extensions()
             
             # Remove all menu actions
             for plugin_name in list(self._plugin_menu_actions.keys()):
@@ -531,7 +533,8 @@ class PluginController(QObject):
             
             # Add separator before if requested
             if item.separator_before:
-                target_menu.addSeparator()
+                sep_action = target_menu.addSeparator()
+                self._plugin_menu_actions[name].append((sep_action, target_menu))
             
             # Create action
             action = QAction(item.label, self._main_window)
@@ -546,7 +549,8 @@ class PluginController(QObject):
             
             # Add separator after if requested
             if item.separator_after:
-                target_menu.addSeparator()
+                sep_action = target_menu.addSeparator()
+                self._plugin_menu_actions[name].append((sep_action, target_menu))
             
             logger.debug(f"Added menu item '{item.label}' to '{item.menu}' from plugin '{name}'")
     
@@ -634,6 +638,8 @@ class PluginController(QObject):
                     plugin_class.on_application_start(self.container)
                 except Exception as e:
                     logger.error(f"Failed to start service extension '{name}': {e}")
+            # Mark that service extensions have been started
+            self._service_extensions_started = True
         except Exception as e:
             logger.error(f"Error starting service extensions: {e}")
     
@@ -649,6 +655,8 @@ class PluginController(QObject):
                     plugin_class.on_application_shutdown()
                 except Exception as e:
                     logger.error(f"Error shutting down service extension '{name}': {e}")
+            # Mark that service extensions have been shut down
+            self._service_extensions_started = False
         except Exception as e:
             logger.error(f"Error shutting down service extensions: {e}")
 

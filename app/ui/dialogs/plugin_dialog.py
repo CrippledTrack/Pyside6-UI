@@ -518,7 +518,12 @@ class PluginManagementDialog(QDialog):
     def disable_all(self) -> None:
         """Disable all plugins and call lifecycle hooks."""
         for name, _ in self._all_plugins:
-            plugin_registry.disable_plugin(name)
+            # Only process if actually enabled
+            if not plugin_registry.is_enabled(name):
+                continue
+            # Emit signal FIRST so plugin controller can remove extensions
+            # before the plugin is disabled in the registry
+            self.pluginToggled.emit(name, False)
             # Call lifecycle hook
             plugin_class = plugin_registry.get_plugin(name)
             if plugin_class and hasattr(plugin_class, 'on_plugin_disabled'):
@@ -528,7 +533,6 @@ class PluginManagementDialog(QDialog):
                     import logging
                     logger = logging.getLogger(__name__)
                     logger.debug(f"Error calling on_plugin_disabled hook for {name}: {e}")
-            self.pluginToggled.emit(name, False)
         self.apply_filters()
 
     def on_table_context_menu(self, pos: QPoint) -> None:
