@@ -48,6 +48,9 @@ class PluginController(QObject):
         super().__init__(parent)
         self.container = container
         
+        # Set container on registry for v4.0.0 plugin instantiation
+        plugin_registry.set_container(container)
+        
         # For dynamic extension integration
         self._main_window = None
         self._plugin_toolbar = None
@@ -159,7 +162,9 @@ class PluginController(QObject):
             # Start Service Extension (has on_application_start method)
             if hasattr(plugin_class, 'on_application_start'):
                 if self.settings_service.is_extension_enabled(plugin_name, "Service"):
-                    plugin_class.on_application_start(self.container)
+                    # Get instance for v4.0.0 support
+                    instance = plugin_registry.get_plugin_instance(plugin_name)
+                    instance.on_application_start(self.container)
                     logger.info(f"Dynamically started service extension for '{plugin_name}'")
                 else:
                     logger.debug(f"Service extension disabled for '{plugin_name}'")
@@ -230,7 +235,10 @@ class PluginController(QObject):
             # Shutdown Service Extension (has on_application_shutdown method)
             if hasattr(plugin_class, 'on_application_shutdown'):
                 try:
-                    plugin_class.on_application_shutdown()
+                    # Get instance for v4.0.0 support
+                    # If it was running, instance should exist
+                    instance = plugin_registry.get_plugin_instance(plugin_name)
+                    instance.on_application_shutdown()
                     logger.info(f"Shutdown service extension for '{plugin_name}'")
                 except Exception as e:
                     logger.error(f"Error shutting down service extension '{plugin_name}': {e}")
@@ -526,7 +534,9 @@ class PluginController(QObject):
         """Add menu items from a MenuExtension plugin."""
         from PySide6.QtGui import QAction
         
-        menu_items = plugin_class.get_menu_items()
+        # Get plugin instance
+        instance = plugin_registry.get_plugin_instance(name)
+        menu_items = instance.get_menu_items()
         menu_bar = self._main_window.menuBar()
         
         # Track actions for this plugin as (action, target_menu) tuples
@@ -575,7 +585,9 @@ class PluginController(QObject):
     
     def _integrate_status_extension(self, name: str, plugin_class: type) -> None:
         """Add status bar widget from a StatusExtension plugin."""
-        widget = plugin_class.create_status_widget(self._main_window.statusBar())
+        # Get plugin instance
+        instance = plugin_registry.get_plugin_instance(name)
+        widget = instance.create_status_widget(self._main_window.statusBar())
         if widget:
             self._main_window.statusBar().addPermanentWidget(widget)
             # Track widget for removal on disable
@@ -610,7 +622,9 @@ class PluginController(QObject):
         """Add toolbar actions from a ToolbarExtension plugin to the plugin toolbar."""
         from PySide6.QtGui import QAction
         
-        actions = plugin_class.get_toolbar_actions()
+        # Get plugin instance
+        instance = plugin_registry.get_plugin_instance(name)
+        actions = instance.get_toolbar_actions()
         
         # Track actions for this plugin
         if name not in self._plugin_toolbar_actions:
@@ -647,8 +661,10 @@ class PluginController(QObject):
             for name, plugin_class in service_plugins.items():
                 try:
                     if self.settings_service.is_extension_enabled(name, "Service"):
+                        # Get plugin instance and start service
+                        instance = plugin_registry.get_plugin_instance(name)
                         logger.info(f"Starting service extension: {name}")
-                        plugin_class.on_application_start(self.container)
+                        instance.on_application_start(self.container)
                     else:
                         logger.debug(f"Service extension disabled for '{name}'")
                 except Exception as e:
@@ -666,8 +682,13 @@ class PluginController(QObject):
             service_plugins = plugin_registry.get_service_extensions(enabled_only=True)
             for name, plugin_class in service_plugins.items():
                 try:
-                    logger.info(f"Shutting down service extension: {name}")
-                    plugin_class.on_application_shutdown()
+                    # Get plugin instance and shutdown service
+                    # Note: We need the instance to be created/cached even if we are shutting down
+                    # But typically if it was running, it should be in cache
+                    if name in plugin_registry._plugin_instances:
+                        instance = plugin_registry.get_plugin_instance(name)
+                        logger.info(f"Shutting down service extension: {name}")
+                        instance.on_application_shutdown()
                 except Exception as e:
                     logger.error(f"Error shutting down service extension '{name}': {e}")
             # Mark that service extensions have been shut down

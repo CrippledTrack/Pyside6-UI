@@ -217,7 +217,11 @@ class PluginDiscovery:
         
         plugin_classes = self._find_plugin_classes_in_module(module)
         for plugin_class in plugin_classes:
-            plugin_name = plugin_class.tab_name
+            # v4.0.0: Prefer plugin_name, fall back to tab_name
+            plugin_name = getattr(plugin_class, 'plugin_name', None)
+            if not plugin_name or plugin_name == "Unnamed Plugin":
+                plugin_name = getattr(plugin_class, 'tab_name', "Unknown Plugin")
+                
             plugins.append((plugin_name, plugin_class, f"local:{py_file.name}"))
             logger.info(f"Successfully loaded local plugin: {plugin_name} from {py_file.name}")
         
@@ -268,8 +272,12 @@ class PluginDiscovery:
             if not hasattr(cls, 'create_widget') or not callable(cls.create_widget):
                 return False
             
-            # Must have a valid tab_name
-            if not hasattr(cls, 'tab_name') or not cls.tab_name or cls.tab_name == "Unnamed Tab":
+            # Check for valid name (plugin_name OR tab_name)
+            # v4.0.0: plugin_name is preferred
+            has_plugin_name = hasattr(cls, 'plugin_name') and cls.plugin_name and cls.plugin_name != "Unnamed Plugin"
+            has_tab_name = hasattr(cls, 'tab_name') and cls.tab_name and cls.tab_name != "Unnamed Tab"
+            
+            if not has_plugin_name and not has_tab_name:
                 return False
             
             return True
