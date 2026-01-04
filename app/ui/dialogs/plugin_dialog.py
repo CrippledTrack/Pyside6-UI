@@ -106,12 +106,12 @@ class PluginManagementDialog(QDialog):
         self.details_module = QLabel("-")
         self.details_min_gui_version = QLabel("-")
         self.details_required_gui_version = QLabel("-")
-        self.details_extensions = QLabel("-")  # Show extension types
+        self.details_types = QLabel("-")  # Show plugin types
         form.addRow("Name:", self.details_name)
         form.addRow("Version:", self.details_version)
         form.addRow("Authors:", self.details_author)
         form.addRow("Type:", self.details_type)
-        form.addRow("Extensions:", self.details_extensions)  # New row for extensions
+        form.addRow("Types:", self.details_types)  # New row for types
         form.addRow("Requires Admin:", self.details_requires_admin)
         form.addRow("Platforms:", self.details_platforms)
         form.addRow("Module:", self.details_module)
@@ -166,31 +166,41 @@ class PluginManagementDialog(QDialog):
 
     def _get_extension_types(self, plugin_class: type) -> str:
         """Get a string describing which extension interfaces the plugin implements."""
-        from ....plugin_system.interfaces import (
-            TabExtension,
-            MenuExtension,
-            StatusExtension,
-            ToolbarExtension,
-            ServiceExtension,
-            EventSubscriberExtension,
-            SettingsExtension,
-        )
-        
         extensions = []
-        if issubclass(plugin_class, TabExtension):
+        
+        # Check for Tab extension (has create_widget method)
+        if hasattr(plugin_class, 'create_widget'):
             extensions.append("Tab")
-        if issubclass(plugin_class, MenuExtension):
+        
+        # Check for Menu extension (has get_menu_items method)
+        if hasattr(plugin_class, 'get_menu_items'):
             extensions.append("Menu")
-        if issubclass(plugin_class, StatusExtension):
+        
+        # Check for Status extension (has create_status_widget method)
+        if hasattr(plugin_class, 'create_status_widget'):
             extensions.append("Status")
-        if issubclass(plugin_class, ToolbarExtension):
+        
+        # Check for Toolbar extension (has get_toolbar_actions method)
+        if hasattr(plugin_class, 'get_toolbar_actions'):
             extensions.append("Toolbar")
-        if issubclass(plugin_class, ServiceExtension):
+        
+        # Check for Service extension (has on_application_start method)  
+        if hasattr(plugin_class, 'on_application_start'):
             extensions.append("Service")
-        if issubclass(plugin_class, EventSubscriberExtension):
+        
+        # Check for Event subscriber extension (has get_event_subscriptions method)
+        if hasattr(plugin_class, 'get_event_subscriptions'):
             extensions.append("Events")
-        if issubclass(plugin_class, SettingsExtension):
-            extensions.append("Settings")
+        
+        # Check for Settings extension (has get_settings_widget method)
+        # Note: Be careful as BaseTabPlugin also has this - only count if not default
+        if hasattr(plugin_class, 'get_settings_widget'):
+            method = getattr(plugin_class, 'get_settings_widget')
+            # Check if it's overridden (not just inherited from base)
+            from ....plugin_system.base import BaseTabPlugin
+            base_method = getattr(BaseTabPlugin, 'get_settings_widget', None)
+            if method is not base_method:
+                extensions.append("Settings")
         
         return ", ".join(extensions) if extensions else ""
 
@@ -419,9 +429,9 @@ class PluginManagementDialog(QDialog):
         self.details_required_gui_version.setText(info.get('required_gui_version') or "-")
         self.details_description.setPlainText(info.get('description', ''))
         
-        # Detect extension types
-        extensions = self._get_extension_types(plugin_class)
-        self.details_extensions.setText(extensions if extensions else "Tab only")
+        # Detect plugin types
+        types_str = self._get_extension_types(plugin_class)
+        self.details_types.setText(types_str if types_str else "Tab only")
 
         # Configure button availability
         has_config = any([
@@ -437,7 +447,7 @@ class PluginManagementDialog(QDialog):
         self.details_version.setText("-")
         self.details_author.setText("-")
         self.details_type.setText("-")
-        self.details_extensions.setText("-")
+        self.details_types.setText("-")
         self.details_requires_admin.setText("-")
         self.details_platforms.setText("-")
         self.details_module.setText("-")
