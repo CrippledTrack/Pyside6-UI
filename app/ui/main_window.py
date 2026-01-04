@@ -307,7 +307,7 @@ class MainWindow(QMainWindow):
         logger.info("All tabs loaded successfully")
         self._update_window_title()
         
-        # Integrate v3.4.0 extension plugins (Menu, Status, Toolbar, Service)
+        # Integrate extension plugins (Menu, Status, Toolbar, Service)
         self.plugin_controller.integrate_extensions(self)
     
     def on_tab_load_error(self, error_msg: str) -> None:
@@ -339,7 +339,7 @@ class MainWindow(QMainWindow):
             self._plugin_dialog.activateWindow()
             return
 
-        dlg = PluginManagementDialog(self, self.settings_service)
+        dlg = PluginManagementDialog(self, self.settings_service, self.plugin_controller)
         dlg.setWindowModality(Qt.WindowModality.NonModal)
         dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dlg.pluginToggled.connect(self.plugin_controller.toggle_plugin)

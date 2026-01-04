@@ -1,7 +1,7 @@
 """
 Example plugin for Basic GUI Application.
 
-This demonstrates how to create a comprehensive plugin using all v3.4.0
+This demonstrates how to create a comprehensive plugin using all
 extension interfaces:
 - TabExtension (via BaseTabPlugin) - provides a tab in the main window
 - MenuExtension - contributes menu items
@@ -42,7 +42,7 @@ class ExampleTabPlugin(
     SettingsExtension
 ):
     """
-    Comprehensive example plugin demonstrating all v3.4.0 extension interfaces.
+    Comprehensive example plugin demonstrating all extension interfaces.
     
     This plugin shows how a single class can implement multiple interfaces
     to extend the application in various ways.
@@ -52,7 +52,7 @@ class ExampleTabPlugin(
     # Plugin Metadata (from BaseTabPlugin/Plugin)
     # =========================================================================
     tab_name = "Example Plugin"
-    tab_description = "A comprehensive example plugin showing all v3.4.0 extension points"
+    tab_description = "A comprehensive example plugin showing all extension points"
     supported_platforms = ["Windows", "Linux"]
     requires_admin = False
     plugin_version = "2.0.0"
@@ -142,7 +142,7 @@ class ExampleTabPlugin(
             None,
             "About Example Plugin",
             "<h2>Example Plugin v2.0</h2>"
-            "<p>A comprehensive example demonstrating all v3.4.0 extension interfaces:</p>"
+            "<p>A comprehensive example demonstrating all extension interfaces:</p>"
             "<ul>"
             "<li><b>TabExtension</b> - This tab you're viewing</li>"
             "<li><b>MenuExtension</b> - Tools → Example Plugin Action</li>"
@@ -305,13 +305,13 @@ class ExampleWidget(QWidget):
         layout = QVBoxLayout(self)
         
         # Title label
-        title_label = QLabel("Example Plugin v2.0 (v3.4.0 Extensions Demo)")
+        title_label = QLabel("Example Plugin v2.0 (Extensions Demo)")
         title_label.setStyleSheet("font-size: 18px; font-weight: bold; margin: 10px;")
         layout.addWidget(title_label)
         
         # Description
         desc_label = QLabel(
-            "This plugin demonstrates all v3.4.0 extension interfaces:\n"
+            "This plugin demonstrates all extension interfaces:\n"
             "• TabExtension - This tab you're viewing\n"
             "• MenuExtension - Tools → Example Plugin Action (Ctrl+Shift+E)\n"
             "• StatusExtension - \"Example: Ready\" in status bar\n"
