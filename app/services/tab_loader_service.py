@@ -18,6 +18,7 @@ from PySide6.QtWidgets import QWidget
 
 if TYPE_CHECKING:
     from .plugin_service import PluginService
+    from .settings_service import SettingsService
 
 logger = logging.getLogger(__name__)
 
@@ -40,13 +41,15 @@ class TabLoaderThread(QThread):
     def __init__(
         self,
         parent: Optional[QWidget] = None,
-        plugin_service: Optional["PluginService"] = None
+        plugin_service: Optional["PluginService"] = None,
+        settings_service: Optional["SettingsService"] = None
     ) -> None:
         """Initialize the tab loader thread.
         
         Args:
             parent: Optional parent widget
             plugin_service: Plugin service for discovery and registry access (required)
+            settings_service: Settings service for session restoration (optional)
         """
         super().__init__(parent)
         self.setObjectName("TabLoaderThread")
@@ -55,6 +58,7 @@ class TabLoaderThread(QThread):
             raise ValueError("PluginService is required for TabLoaderThread")
         
         self._plugin_service = plugin_service
+        self._settings_service = settings_service
 
     def run(self) -> None:
         """Execute the plugin loading process.
@@ -80,9 +84,25 @@ class TabLoaderThread(QThread):
             self.error.emit(str(e))
 
     def _emit_enabled_plugins(self) -> None:
-        """Emit add_tab signals for all enabled plugins."""
+        """Emit add_tab signals for all enabled plugins, respecting saved order."""
         enabled_plugins = self._plugin_service.get_enabled_plugins()
-        for tab_name, plugin_class in enabled_plugins.items():
+        
+        # Get saved tab order if available
+        saved_order = []
+        if self._settings_service:
+            saved_order = self._settings_service.get_tab_order()
+        
+        # 1. Add tabs in saved order
+        for tab_name in saved_order:
+            if tab_name in enabled_plugins:
+                plugin_class = enabled_plugins[tab_name]
+                self.add_tab.emit(tab_name, plugin_class)
+                # Remove from dict to track what's left
+                del enabled_plugins[tab_name]
+        
+        # 2. Add remaining (new/unsaved) tabs alphabetically
+        for tab_name in sorted(enabled_plugins.keys()):
+            plugin_class = enabled_plugins[tab_name]
             self.add_tab.emit(tab_name, plugin_class)
 
 

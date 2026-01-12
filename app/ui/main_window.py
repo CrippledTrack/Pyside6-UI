@@ -191,8 +191,17 @@ class MainWindow(QMainWindow):
         self.setStatusBar(status_bar)
         status_bar.setMaximumHeight(20)
         
+        # Get notification service
+        from ..services.notification_service import NotificationService
+        notification_service = self.container.get(NotificationService)
+        
         # Create status bar manager
-        self.status_bar_manager = StatusBarManager(status_bar, self)
+        self.status_bar_manager = StatusBarManager(
+            status_bar, 
+            self, 
+            notification_service,
+            self.theme_manager
+        )
     
     def _setup_menu_bar(self) -> None:
         """Create menu bar and all menu items."""
@@ -256,7 +265,8 @@ class MainWindow(QMainWindow):
         
         plugin_service = self.container.get(PluginService)
         self.tab_loader = TabLoaderThread(
-            plugin_service=plugin_service
+            plugin_service=plugin_service,
+            settings_service=self.settings_service
         )
         self.tab_loader.finished.connect(self.on_tabs_loaded)
         self.tab_loader.error.connect(self.on_tab_load_error)
@@ -306,6 +316,16 @@ class MainWindow(QMainWindow):
 
         logger.info("All tabs loaded successfully")
         self._update_window_title()
+        
+        # Restore last active tab
+        if self.settings_service:
+            last_active = self.settings_service.get_last_active_tab()
+            if last_active:
+                # Find index of this tab
+                for i in range(self.tab_widget.count()):
+                    if self.tab_widget.tabText(i) == last_active:
+                        self.tab_widget.setCurrentIndex(i)
+                        break
         
         # Integrate extension plugins (Menu, Status, Toolbar, Service)
         self.plugin_controller.integrate_extensions(self)
@@ -475,8 +495,13 @@ class MainWindow(QMainWindow):
             self.toast_manager.update_theme_manager(self.theme_manager)
             self.toast_manager.refresh_theme()
         
+        # Refresh status bar notifications with new theme
+        if hasattr(self, 'status_bar_manager') and self.status_bar_manager:
+            self.status_bar_manager.refresh_theme()
+        
         # Publish event for subscribers
         plugin_registry.publish_event("theme_changed", {"theme": theme_name})
+
     
     def restart_as_admin(self) -> None:
         """Restart the application with administrator/root privileges.
@@ -605,7 +630,9 @@ class MainWindow(QMainWindow):
     
     def setup_toast_manager(self) -> None:
         """Setup the toast notification manager."""
-        self.toast_manager = ToastManager(self, self.theme_manager)
+        from ..services.notification_service import NotificationService
+        notification_service = self.container.get(NotificationService)
+        self.toast_manager = ToastManager(self, self.theme_manager, notification_service)
     
     def setup_shortcuts(self) -> None:
         """Setup keyboard shortcuts."""
@@ -666,6 +693,12 @@ class MainWindow(QMainWindow):
             else:
                 self.settings_service._settings.window_geometry.maximized = False
                 self.settings_service._settings.window_geometry.fullscreen = False
+            
+            # Save session state (tab order and active tab)
+            tab_order = self.tab_controller.get_tab_order()
+            active_tab = self.tab_controller.get_current_tab_name()
+            self.settings_service.save_session_state(tab_order, active_tab)
+            
             self.settings_service._save_settings()
         
         # Shutdown ServiceExtension plugins

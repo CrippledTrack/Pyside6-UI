@@ -62,6 +62,9 @@ class AppSettings:
     gui_version: str = ""
     # Plugin settings
     plugin_settings: Dict[str, Dict[str, Any]] = None
+    # Session state
+    tab_order: List[str] = None
+    last_active_tab: str = None
     
     def __post_init__(self) -> None:
         """Initialize default values for complex fields"""
@@ -71,6 +74,8 @@ class AppSettings:
             self.window_geometry = WindowGeometry()
         if self.plugin_settings is None:
             self.plugin_settings = {}
+        if self.tab_order is None:
+            self.tab_order = []
 
 
 class SettingsService:
@@ -147,6 +152,13 @@ class SettingsService:
             # Load plugin settings
             if 'plugin_settings' in data and isinstance(data['plugin_settings'], dict):
                 self._settings.plugin_settings = data['plugin_settings'].copy()
+
+            # Load session state
+            if 'tab_order' in data and isinstance(data['tab_order'], list):
+                self._settings.tab_order = data['tab_order']
+            
+            if 'last_active_tab' in data and isinstance(data['last_active_tab'], str):
+                self._settings.last_active_tab = data['last_active_tab']
             
             logger.info(f"Settings loaded from {self._settings_file}")
         except Exception as e:
@@ -176,7 +188,9 @@ class SettingsService:
                 'toast_duration': self._settings.toast_duration,
                 'new_ui_enabled': self._settings.new_ui_enabled,
                 'gui_version': self._settings.gui_version,
-                'plugin_settings': self._settings.plugin_settings.copy()
+                'plugin_settings': self._settings.plugin_settings.copy(),
+                'tab_order': self._settings.tab_order,
+                'last_active_tab': self._settings.last_active_tab
             }
             
             # Write to file
@@ -370,6 +384,28 @@ class SettingsService:
         states[extension_type] = enabled
         self.save_plugin_extension_states(plugin_name, states)
         logger.debug(f"Extension '{extension_type}' for '{plugin_name}' set to {enabled}")
+
+    # Session state methods
+    def save_session_state(self, tab_order: List[str], last_active_tab: Optional[str]) -> None:
+        """
+        Save session state (tab order and active tab).
+        
+        Args:
+            tab_order: List of tab names in order
+            last_active_tab: Name of the currently active tab
+        """
+        self._settings.tab_order = tab_order
+        self._settings.last_active_tab = last_active_tab
+        self._save_settings()
+        logger.debug(f"Session state saved: {len(tab_order)} tabs, active={last_active_tab}")
+
+    def get_tab_order(self) -> List[str]:
+        """Get saved tab order."""
+        return self._settings.tab_order.copy()
+
+    def get_last_active_tab(self) -> Optional[str]:
+        """Get saved last active tab."""
+        return self._settings.last_active_tab
 
 
 def load_settings() -> SettingsService:

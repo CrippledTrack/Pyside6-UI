@@ -87,6 +87,7 @@ class ServiceContainer:
         from .daemon_service import DaemonService
         from .admin_service import AdminService
         from .plugin_service import PluginService
+        from .notification_service import NotificationService
         
         # 1. Settings service (no dependencies)
         if SettingsService not in self._services:
@@ -109,6 +110,11 @@ class ServiceContainer:
             settings_service = self.get(SettingsService)
             plugin_service = PluginService(settings_service=settings_service)
             self.register_singleton(PluginService, plugin_service)
+
+        # 5. Notification service (no dependencies)
+        if NotificationService not in self._services:
+            notification_service = NotificationService()
+            self.register_singleton(NotificationService, notification_service)
         
         self._initialized = True
         logger.info("Services initialized successfully")

@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget
     from ...themes.theme_manager import ThemeManager
     from ..widgets.toast_notification import ToastNotification
+    from ...services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -19,15 +20,38 @@ logger = logging.getLogger(__name__)
 class ToastManager:
     """Manages multiple toast notifications."""
     
-    def __init__(self, parent_widget: Optional["QWidget"] = None, theme_manager: Optional["ThemeManager"] = None) -> None:
+    def __init__(
+        self,
+        parent_widget: Optional["QWidget"] = None,
+        theme_manager: Optional["ThemeManager"] = None,
+        notification_service: Optional["NotificationService"] = None
+    ) -> None:
         self.parent_widget = parent_widget
         self.theme_manager = theme_manager
+        self.notification_service = notification_service
         self.active_toasts: list["ToastNotification"] = []
     
     def show_toast(self, message: str, notification_type: str = "info", duration: int = 3000) -> None:
         """Show a toast notification."""
         from ..widgets.toast_notification import ToastNotification
+        from ...services.notification_service import NotificationType
         
+        # Add to notification history if service is available
+        if self.notification_service:
+            try:
+                # Map string type to enum
+                type_map = {
+                    "info": NotificationType.INFO,
+                    "success": NotificationType.SUCCESS,
+                    "warning": NotificationType.WARNING,
+                    "error": NotificationType.ERROR,
+                    "loading": NotificationType.INFO
+                }
+                service_type = type_map.get(notification_type, NotificationType.INFO)
+                self.notification_service.add_notification(message, service_type)
+            except Exception as e:
+                logger.error(f"Failed to add notification to history: {e}")
+
         # Close all existing toasts when showing a new one
         self.clear_all()
         

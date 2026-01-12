@@ -152,75 +152,70 @@ class ToastNotification(QFrame):
         return False
     
     def _get_notification_colors(self, notification_type: str, is_dark: bool) -> dict:
-        """Get notification colors based on type and theme."""
-        if is_dark:
-            base_styles = {
-                "info": {
-                    "background": "rgba(33, 150, 243, 0.85)",
-                    "border": "#2196f3",
-                    "text": "#ffffff",
-                    "hover": "rgba(33, 150, 243, 0.95)"
-                },
-                "success": {
-                    "background": "rgba(76, 175, 80, 0.85)",
-                    "border": "#4caf50",
-                    "text": "#ffffff",
-                    "hover": "rgba(76, 175, 80, 0.95)"
-                },
-                "warning": {
-                    "background": "rgba(255, 152, 0, 0.85)",
-                    "border": "#ff9800",
-                    "text": "#ffffff",
-                    "hover": "rgba(255, 152, 0, 0.95)"
-                },
-                "error": {
-                    "background": "rgba(244, 67, 54, 0.85)",
-                    "border": "#f44336",
-                    "text": "#ffffff",
-                    "hover": "rgba(244, 67, 54, 0.95)"
-                },
-                "loading": {
-                    "background": "rgba(156, 39, 176, 0.85)",
-                    "border": "#9c27b0",
-                    "text": "#ffffff",
-                    "hover": "rgba(156, 39, 176, 0.95)"
-                }
-            }
-        else:
-            base_styles = {
-                "info": {
-                    "background": "#ffffff",
-                    "border": "#2196f3",
-                    "text": "#1976d2",
-                    "hover": "rgba(33, 150, 243, 0.1)"
-                },
-                "success": {
-                    "background": "#ffffff",
-                    "border": "#4caf50",
-                    "text": "#2e7d32",
-                    "hover": "rgba(76, 175, 80, 0.1)"
-                },
-                "warning": {
-                    "background": "#ffffff",
-                    "border": "#ff9800",
-                    "text": "#f57c00",
-                    "hover": "rgba(255, 152, 0, 0.1)"
-                },
-                "error": {
-                    "background": "#ffffff",
-                    "border": "#f44336",
-                    "text": "#d32f2f",
-                    "hover": "rgba(244, 67, 54, 0.1)"
-                },
-                "loading": {
-                    "background": "#ffffff",
-                    "border": "#9c27b0",
-                    "text": "#7b1fa2",
-                    "hover": "rgba(156, 39, 176, 0.1)"
-                }
-            }
+        """Get notification colors based on type and theme.
         
-        return base_styles.get(notification_type, base_styles["info"])
+        Now derives colors from the theme's palette rather than using hardcoded values.
+        """
+        if not self.theme_manager:
+            # Fallback to default colors if no theme manager
+            return self._get_default_notification_colors(notification_type)
+        
+        # Get current theme colors
+        current_theme = self.theme_manager.get_current_theme()
+        theme_data = self.theme_manager.themes.get(current_theme, {})
+        palette = theme_data.get('palette', {})
+        
+        # Extract theme colors
+        window_color = palette.get('window', '#2d2d2d' if is_dark else '#ffffff')
+        text_color = palette.get('window_text', '#ffffff' if is_dark else '#000000')
+        base_color = palette.get('base', '#1e1e1e' if is_dark else '#f5f5f5')
+        highlight_color = palette.get('highlight', '#0078d4')
+        button_color = palette.get('button', '#3d3d3d' if is_dark else '#e0e0e0')
+        
+        # Parse highlight color to get RGB
+        def parse_hex_color(hex_color: str) -> tuple:
+            """Parse hex color to RGB tuple."""
+            hex_color = hex_color.lstrip('#')
+            if len(hex_color) == 6:
+                return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+            return (0, 120, 212)  # Default blue
+        
+        def adjust_hue(r: int, g: int, b: int, notification_type: str) -> tuple:
+            """Adjust hue based on notification type."""
+            if notification_type == "success":
+                # Shift toward green
+                return (max(0, r - 30), min(255, g + 40), max(0, b - 30))
+            elif notification_type == "warning":
+                # Shift toward orange/yellow
+                return (min(255, r + 50), min(255, g + 20), max(0, b - 50))
+            elif notification_type == "error":
+                # Shift toward red
+                return (min(255, r + 60), max(0, g - 60), max(0, b - 60))
+            elif notification_type == "loading":
+                # Shift toward purple
+                return (min(255, r + 20), max(0, g - 40), min(255, b + 40))
+            else:  # info - keep original
+                return (r, g, b)
+        
+        r, g, b = parse_hex_color(highlight_color)
+        r, g, b = adjust_hue(r, g, b, notification_type)
+        
+        # Create colors based on theme
+        if is_dark:
+            border_color = f"rgb({r}, {g}, {b})"
+            background_color = f"rgba({r}, {g}, {b}, 0.25)"
+            hover_color = f"rgba({r}, {g}, {b}, 0.35)"
+        else:
+            border_color = f"rgb({r}, {g}, {b})"
+            background_color = window_color
+            hover_color = f"rgba({r}, {g}, {b}, 0.1)"
+        
+        return {
+            "background": background_color,
+            "border": border_color,
+            "text": text_color,
+            "hover": hover_color
+        }
     
     def _get_default_notification_colors(self, notification_type: str) -> dict:
         """Get default notification colors when no theme manager is available."""

@@ -317,6 +317,17 @@ class TabController(QObject):
         """
         return self.tab_widget.count()
     
+    def get_tab_order(self) -> List[str]:
+        """Get the current order of tabs.
+        
+        Returns:
+            List of tab names in their current visual order
+        """
+        order = []
+        for i in range(self.tab_widget.count()):
+            order.append(self.tab_widget.tabText(i))
+        return order
+
     def clear_loaded_tabs(self) -> None:
         """Clear all loaded tab state.
         

@@ -109,9 +109,16 @@ def run(argv: List[str]) -> int:
 
     app = QApplication(argv)
 
-    # Set the style to Fusion on Windows by default
+    # Set the style to Fusion on Windows by default and set App ID for notifications
     if platform.system().lower() == "windows":
         app.setStyle("Fusion")
+        try:
+            import ctypes
+            # Set AppUserModelID so notifications are attributed to the app in the Action Center
+            myappid = f'CyberPatriot.Scripts.GUI.{GUI_API_VERSION}'
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+        except Exception as e:
+            print(f"Failed to set AppUserModelID: {e}", file=sys.stderr)
 
     app.setFont(QFont("Segoe UI", 10))
 
@@ -121,6 +128,7 @@ def run(argv: List[str]) -> int:
     theme_manager = ThemeManager(settings_service=settings_service)
     container.register_singleton(ThemeManager, theme_manager)
     logger.info("ThemeManager registered in container")
+
 
     # On Linux, start privileged daemon (optional - app can run without it)
     daemon_client = None
