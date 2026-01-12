@@ -60,7 +60,7 @@ class ExampleTabPlugin(
     plugin_authors = ["Example Author", "Contributors"]
     min_gui_version = "3.4.0"
     required_gui_version = ">=3.4.0"
-    disabled_by_default = True  # Set to False to test extensions on launch
+    disabled_by_default = False  # Set to False to test extensions on launch
     
     # Dependencies on other plugins (optional)
     dependencies: List[str] = []

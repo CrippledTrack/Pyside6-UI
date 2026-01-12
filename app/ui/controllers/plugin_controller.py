@@ -133,23 +133,35 @@ class PluginController(QObject):
         try:
             # Integrate Menu Extension
             if issubclass(plugin_class, MenuExtension):
-                self._integrate_menu_extension(plugin_name, plugin_class)
-                logger.info(f"Dynamically integrated menu extension for '{plugin_name}'")
+                if self.settings_service.is_extension_enabled(plugin_name, "Menu"):
+                    self._integrate_menu_extension(plugin_name, plugin_class)
+                    logger.info(f"Dynamically integrated menu extension for '{plugin_name}'")
+                else:
+                    logger.debug(f"Menu extension disabled for '{plugin_name}'")
             
             # Integrate Status Extension
             if issubclass(plugin_class, StatusExtension):
-                self._integrate_status_extension(plugin_name, plugin_class)
-                logger.info(f"Dynamically integrated status extension for '{plugin_name}'")
+                if self.settings_service.is_extension_enabled(plugin_name, "Status"):
+                    self._integrate_status_extension(plugin_name, plugin_class)
+                    logger.info(f"Dynamically integrated status extension for '{plugin_name}'")
+                else:
+                    logger.debug(f"Status extension disabled for '{plugin_name}'")
             
             # Integrate Toolbar Extension (adds to Plugins menu)
             if issubclass(plugin_class, ToolbarExtension):
-                self._integrate_toolbar_extension(plugin_name, plugin_class)
-                logger.info(f"Dynamically integrated toolbar extension for '{plugin_name}'")
+                if self.settings_service.is_extension_enabled(plugin_name, "Toolbar"):
+                    self._integrate_toolbar_extension(plugin_name, plugin_class)
+                    logger.info(f"Dynamically integrated toolbar extension for '{plugin_name}'")
+                else:
+                    logger.debug(f"Toolbar extension disabled for '{plugin_name}'")
             
             # Start Service Extension
             if issubclass(plugin_class, ServiceExtension):
-                plugin_class.on_application_start(self.container)
-                logger.info(f"Dynamically started service extension for '{plugin_name}'")
+                if self.settings_service.is_extension_enabled(plugin_name, "Service"):
+                    plugin_class.on_application_start(self.container)
+                    logger.info(f"Dynamically started service extension for '{plugin_name}'")
+                else:
+                    logger.debug(f"Service extension disabled for '{plugin_name}'")
         except Exception as e:
             logger.error(f"Error dynamically integrating extensions for '{plugin_name}': {e}")
     
@@ -236,6 +248,36 @@ class PluginController(QObject):
             True if enabled, False otherwise
         """
         return self.plugin_service.is_enabled(plugin_name)
+    
+    def refresh_plugin_extensions(self, plugin_name: str) -> None:
+        """Refresh extensions for a plugin to apply extension type toggle changes.
+        
+        This removes all existing extensions and re-integrates them based on
+        current settings (respecting extension type enabled states).
+        
+        Args:
+            plugin_name: Name of the plugin to refresh
+        """
+        if not self._main_window:
+            logger.debug("Cannot refresh extensions: MainWindow not set")
+            return
+        
+        plugin_class = self.plugin_service.get_plugin(plugin_name)
+        if not plugin_class:
+            logger.warning(f"Plugin '{plugin_name}' not found")
+            return
+        
+        if not self.plugin_service.is_enabled(plugin_name):
+            logger.debug(f"Plugin '{plugin_name}' is disabled, skipping refresh")
+            return
+        
+        # Remove existing extensions for this plugin
+        self._remove_plugin_extensions_dynamic(plugin_name, plugin_class)
+        
+        # Re-integrate with current settings
+        self._integrate_plugin_extensions_dynamic(plugin_name, plugin_class)
+        
+        logger.info(f"Refreshed extensions for '{plugin_name}'")
     
     def get_plugin(self, plugin_name: str) -> Optional[Any]:
         """Get a plugin class by name.
@@ -407,6 +449,16 @@ class PluginController(QObject):
                         logger.debug(f"Error removing toolbar action: {e}")
                 del self._plugin_toolbar_actions[plugin_name]
             
+            # Remove all status widgets
+            for plugin_name in list(self._plugin_status_widgets.keys()):
+                for widget in self._plugin_status_widgets[plugin_name]:
+                    try:
+                        self._main_window.statusBar().removeWidget(widget)
+                        widget.hide()
+                    except Exception as e:
+                        logger.debug(f"Error removing status widget: {e}")
+                del self._plugin_status_widgets[plugin_name]
+
             # Hide toolbar if empty
             if self._plugin_toolbar and not self._plugin_toolbar.actions():
                 self._plugin_toolbar.hide()
@@ -432,7 +484,10 @@ class PluginController(QObject):
             menu_plugins = plugin_registry.get_menu_extensions(enabled_only=True)
             for name, plugin_class in menu_plugins.items():
                 try:
-                    self._integrate_menu_extension(name, plugin_class)
+                    if self.settings_service.is_extension_enabled(name, "Menu"):
+                        self._integrate_menu_extension(name, plugin_class)
+                    else:
+                        logger.debug(f"Menu extension disabled for '{name}'")
                 except Exception as e:
                     logger.error(f"Failed to integrate menu extension '{name}': {e}")
             
@@ -440,7 +495,10 @@ class PluginController(QObject):
             status_plugins = plugin_registry.get_status_extensions(enabled_only=True)
             for name, plugin_class in status_plugins.items():
                 try:
-                    self._integrate_status_extension(name, plugin_class)
+                    if self.settings_service.is_extension_enabled(name, "Status"):
+                        self._integrate_status_extension(name, plugin_class)
+                    else:
+                        logger.debug(f"Status extension disabled for '{name}'")
                 except Exception as e:
                     logger.error(f"Failed to integrate status extension '{name}': {e}")
             
@@ -448,7 +506,10 @@ class PluginController(QObject):
             toolbar_plugins = plugin_registry.get_toolbar_extensions(enabled_only=True)
             for name, plugin_class in toolbar_plugins.items():
                 try:
-                    self._integrate_toolbar_extension(name, plugin_class)
+                    if self.settings_service.is_extension_enabled(name, "Toolbar"):
+                        self._integrate_toolbar_extension(name, plugin_class)
+                    else:
+                        logger.debug(f"Toolbar extension disabled for '{name}'")
                 except Exception as e:
                     logger.error(f"Failed to integrate toolbar extension '{name}': {e}")
             
@@ -585,8 +646,11 @@ class PluginController(QObject):
             service_plugins = plugin_registry.get_service_extensions(enabled_only=True)
             for name, plugin_class in service_plugins.items():
                 try:
-                    logger.info(f"Starting service extension: {name}")
-                    plugin_class.on_application_start(self.container)
+                    if self.settings_service.is_extension_enabled(name, "Service"):
+                        logger.info(f"Starting service extension: {name}")
+                        plugin_class.on_application_start(self.container)
+                    else:
+                        logger.debug(f"Service extension disabled for '{name}'")
                 except Exception as e:
                     logger.error(f"Failed to start service extension '{name}': {e}")
             # Mark that service extensions have been started

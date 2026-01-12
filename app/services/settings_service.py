@@ -314,6 +314,63 @@ class SettingsService:
         """
         return self._settings.plugin_settings.get(plugin_name, {}).copy()
 
+    def get_plugin_extension_states(self, plugin_name: str) -> Dict[str, bool]:
+        """
+        Get extension enabled states for a specific plugin.
+        
+        Args:
+            plugin_name: Name of the plugin
+            
+        Returns:
+            Dictionary mapping extension type to enabled state.
+            Default is all extensions enabled (True).
+        """
+        plugin_settings = self._settings.plugin_settings.get(plugin_name, {})
+        return plugin_settings.get('extension_states', {}).copy()
+    
+    def save_plugin_extension_states(self, plugin_name: str, states: Dict[str, bool]) -> None:
+        """
+        Save extension enabled states for a specific plugin.
+        
+        Args:
+            plugin_name: Name of the plugin
+            states: Dictionary mapping extension type (e.g. "Tab", "Menu") to enabled state
+        """
+        if plugin_name not in self._settings.plugin_settings:
+            self._settings.plugin_settings[plugin_name] = {}
+        self._settings.plugin_settings[plugin_name]['extension_states'] = states.copy()
+        self._save_settings()
+        logger.debug(f"Extension states saved for '{plugin_name}': {states}")
+    
+    def is_extension_enabled(self, plugin_name: str, extension_type: str) -> bool:
+        """
+        Check if a specific extension type is enabled for a plugin.
+        
+        Args:
+            plugin_name: Name of the plugin
+            extension_type: Type of extension (e.g. "Tab", "Menu", "Toolbar")
+            
+        Returns:
+            True if enabled (default), False if explicitly disabled
+        """
+        states = self.get_plugin_extension_states(plugin_name)
+        # Default to enabled if not explicitly set
+        return states.get(extension_type, True)
+    
+    def set_extension_enabled(self, plugin_name: str, extension_type: str, enabled: bool) -> None:
+        """
+        Enable or disable a specific extension type for a plugin.
+        
+        Args:
+            plugin_name: Name of the plugin
+            extension_type: Type of extension (e.g. "Tab", "Menu", "Toolbar")
+            enabled: Whether the extension should be enabled
+        """
+        states = self.get_plugin_extension_states(plugin_name)
+        states[extension_type] = enabled
+        self.save_plugin_extension_states(plugin_name, states)
+        logger.debug(f"Extension '{extension_type}' for '{plugin_name}' set to {enabled}")
+
 
 def load_settings() -> SettingsService:
     """Load and return a settings service instance"""
