@@ -423,18 +423,19 @@ def generate_stylesheet(
             border-radius: {border_radius};
             outline: none;
         }}
-        QListWidget::item, QListView::item, QTreeWidget::item, QTreeView::item {{
-            padding: 4px; /* Reduced padding to save space */
-            border-radius: 4px;
-            margin: 1px 4px;
+        QListWidget::item, QListView::item, QTreeWidget::item, QTreeView::item, QTableWidget::item {{
+            padding: 4px 8px;
+            border: none;
+            margin: 0px;
         }}
         QListWidget::item:selected, QListView::item:selected,
-        QTreeWidget::item:selected, QTreeView::item:selected {{
+        QTreeWidget::item:selected, QTreeView::item:selected, QTableWidget::item:selected {{
             background-color: {accent_color};
             color: {button_text};
+            border: none;
         }}
         QListWidget::item:hover:!selected, QListView::item:hover:!selected,
-        QTreeWidget::item:hover:!selected, QTreeView::item:hover:!selected {{
+        QTreeWidget::item:hover:!selected, QTreeView::item:hover:!selected, QTableWidget::item:hover:!selected {{
             background-color: {hover_overlay};
         }}
         QHeaderView::section {{
@@ -453,6 +454,7 @@ def generate_stylesheet(
         
         /* ===== Checkboxes ===== */
         QCheckBox {{
+            background-color: transparent;
             color: {text_color};
             spacing: 8px;
             padding: 4px;
@@ -479,6 +481,7 @@ def generate_stylesheet(
         
         /* ===== Radio Buttons ===== */
         QRadioButton {{
+            background-color: transparent;
             color: {text_color};
             spacing: 8px;
             padding: 4px;

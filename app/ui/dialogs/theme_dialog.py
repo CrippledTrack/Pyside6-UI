@@ -142,8 +142,8 @@ class ThemePreviewWidget(QFrame):
 class ThemeDialog(QDialog):
     """Dialog for selecting and managing themes"""
     
-    themeSelected = Signal(str)  # Signal emitted when a theme is selected
-    uiToggleChanged = Signal(bool)  # Signal emitted when UI toggle changes
+    theme_selected = Signal(str)  # Signal emitted when a theme is selected
+    ui_toggle_changed = Signal(bool)  # Signal emitted when UI toggle changes
     
     def __init__(
         self, 
@@ -267,7 +267,7 @@ class ThemeDialog(QDialog):
                 # When checked=False, it means "New UI is disabled", so show "Enable New UI"
                 self.ui_toggle_checkbox.setText("Disable New UI" if checked else "Enable New UI")
                 # Emit signal to notify main window
-                self.uiToggleChanged.emit(checked)
+                self.ui_toggle_changed.emit(checked)
             except Exception as e:
                 logger.error(f"Failed to save UI toggle setting: {e}")
     
@@ -323,7 +323,7 @@ class ThemeDialog(QDialog):
         
         if self.theme_manager.apply_theme(theme_name):
             self.current_theme = theme_name
-            self.themeSelected.emit(theme_name)
+            self.theme_selected.emit(theme_name)
             self.load_themes()  # Refresh the list to show current theme
             QMessageBox.information(self, "Success", f"Theme '{theme_name}' applied successfully!")
         else:

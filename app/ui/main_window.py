@@ -362,7 +362,7 @@ class MainWindow(QMainWindow):
         dlg = PluginManagementDialog(self, self.settings_service, self.plugin_controller)
         dlg.setWindowModality(Qt.WindowModality.NonModal)
         dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dlg.pluginToggled.connect(self.plugin_controller.toggle_plugin)
+        dlg.plugin_toggled.connect(self.plugin_controller.toggle_plugin)
         dlg.destroyed.connect(lambda: setattr(self, "_plugin_dialog", None))
         dlg.resize(900, 560)
 
@@ -381,7 +381,9 @@ class MainWindow(QMainWindow):
         if enabled:
             plugin_class = self.plugin_controller.get_plugin(plugin_name)
             if plugin_class:
-                self.tab_controller.add_tab(plugin_name, plugin_class)
+                # Check if Tab extension is enabled
+                if self.settings_service.is_extension_enabled(plugin_name, "Tab"):
+                    self.tab_controller.add_tab(plugin_name, plugin_class)
         else:
             self.tab_controller.remove_tab(plugin_name)
         
@@ -397,8 +399,8 @@ class MainWindow(QMainWindow):
         dialog = ThemeDialog(self.theme_manager, self.settings_service, self)
         dialog.setWindowModality(Qt.WindowModality.NonModal)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dialog.themeSelected.connect(self.on_theme_selected)
-        dialog.uiToggleChanged.connect(self._on_ui_toggle_from_dialog)
+        dialog.theme_selected.connect(self.on_theme_selected)
+        dialog.ui_toggle_changed.connect(self._on_ui_toggle_from_dialog)
         dialog.destroyed.connect(lambda: setattr(self, "_theme_dialog", None))
 
         self._theme_dialog = dialog

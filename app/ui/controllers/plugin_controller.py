@@ -10,7 +10,12 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional, Callable, TYPE_CHECKING
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal, Qt
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QToolBar
+
+from ...services.plugin_service import PluginService
+from ...services.settings_service import SettingsService
 
 from ....plugin_system.registry import plugin_registry
 from ....plugin_system.interfaces import (
@@ -63,8 +68,6 @@ class PluginController(QObject):
         self._service_extensions_started: bool = False  # Track if service extensions have been started
         
         # Retrieve services from container
-        from ...services.settings_service import SettingsService
-        from ...services.plugin_service import PluginService
         
         self.settings_service = container.get(SettingsService)
         self.plugin_service = container.get(PluginService)
@@ -284,6 +287,20 @@ class PluginController(QObject):
         
         # Re-integrate with current settings
         self._integrate_plugin_extensions_dynamic(plugin_name, plugin_class)
+        
+        # Handle Dynamic Tab Extension Toggle
+        # We need to manually handle this because tabs are normally managed by MainWindow via plugin_toggled
+        if hasattr(plugin_class, 'create_widget') and self._main_window and hasattr(self._main_window, 'tab_controller'):
+            should_have_tab = self.settings_service.is_extension_enabled(plugin_name, "Tab")
+            # Check if tab is currently loaded
+            tab_exists = plugin_name in self._main_window.tab_controller.loaded_tabs
+            
+            if should_have_tab and not tab_exists:
+                self._main_window.tab_controller.add_tab(plugin_name, plugin_class)
+                logger.info(f"Dynamically added tab for '{plugin_name}'")
+            elif not should_have_tab and tab_exists:
+                self._main_window.tab_controller.remove_tab(plugin_name)
+                logger.info(f"Dynamically removed tab for '{plugin_name}'")
         
         logger.info(f"Refreshed extensions for '{plugin_name}'")
     
@@ -532,7 +549,7 @@ class PluginController(QObject):
     
     def _integrate_menu_extension(self, name: str, plugin_class: type) -> None:
         """Add menu items from a MenuExtension plugin."""
-        from PySide6.QtGui import QAction
+
         
         # Get plugin instance
         instance = plugin_registry.get_plugin_instance(name)
@@ -598,8 +615,7 @@ class PluginController(QObject):
     
     def _get_or_create_plugin_toolbar(self):
         """Get or create the plugin toolbar."""
-        from PySide6.QtWidgets import QToolBar
-        from PySide6.QtCore import Qt
+
         
         # Return cached toolbar if exists
         if self._plugin_toolbar is not None:
@@ -620,7 +636,7 @@ class PluginController(QObject):
     
     def _integrate_toolbar_extension(self, name: str, plugin_class: type) -> None:
         """Add toolbar actions from a ToolbarExtension plugin to the plugin toolbar."""
-        from PySide6.QtGui import QAction
+
         
         # Get plugin instance
         instance = plugin_registry.get_plugin_instance(name)
@@ -654,7 +670,7 @@ class PluginController(QObject):
     
     def start_service_extensions(self) -> None:
         """Start all ServiceExtension plugins."""
-        from ....plugin_system.registry import plugin_registry
+
         
         try:
             service_plugins = plugin_registry.get_service_extensions(enabled_only=True)
@@ -676,7 +692,7 @@ class PluginController(QObject):
     
     def shutdown_service_extensions(self) -> None:
         """Shutdown all ServiceExtension plugins."""
-        from ....plugin_system.registry import plugin_registry
+
         
         try:
             service_plugins = plugin_registry.get_service_extensions(enabled_only=True)

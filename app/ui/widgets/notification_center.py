@@ -84,7 +84,7 @@ class NotificationItemWidget(QFrame):
         self.theme_manager = theme_manager
         self.setup_ui()
     
-    def setup_ui(self):
+    def setup_ui(self) -> None:
         # Clean, modern frame styling instead of StyledPanel/Raised
         self.setFrameShape(QFrame.Shape.NoFrame)
         
@@ -698,7 +698,7 @@ class NotificationCenterWidget(QWidget):
                 if isinstance(widget, NotificationItemWidget):
                     widget.apply_theme()
     
-    def refresh_list(self):
+    def refresh_list(self) -> None:
         """Refresh the notification list from the service."""
         # Clear existing items (except the stretch at the end)
         while self.scroll_layout.count() > 1:

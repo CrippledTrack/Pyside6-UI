@@ -40,7 +40,7 @@ class ToastNotification(QFrame):
         self.setup_animation()
         self.apply_theme()
     
-    def setup_ui(self):
+    def setup_ui(self) -> None:
         """Setup the toast notification UI."""
         # Use Tool window type - stays above parent but not globally on top of all apps
         # Don't use WindowStaysOnTopHint as it makes it globally on top
@@ -89,7 +89,7 @@ class ToastNotification(QFrame):
         
     
     
-    def apply_theme(self):
+    def apply_theme(self) -> None:
         """Apply theme styling based on notification type and current theme."""
         if self.theme_manager:
             # Get current theme colors
@@ -221,7 +221,7 @@ class ToastNotification(QFrame):
         """Get default notification colors when no theme manager is available."""
         return self._get_notification_colors(notification_type, False)
     
-    def setup_animation(self):
+    def setup_animation(self) -> None:
         """Setup slide-in animation."""
         self.animation = QPropertyAnimation(self, b"geometry")
         self.animation.setDuration(250)

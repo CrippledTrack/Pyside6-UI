@@ -9,22 +9,28 @@ plugin settings.
 from __future__ import annotations
 
 import inspect
+import logging
 import os
 import sys
-from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem,
-    QHeaderView, QCheckBox, QMessageBox, QLineEdit, QComboBox, QSplitter, QWidget, QFormLayout,
-    QTextEdit, QAbstractItemView, QMenu, QGroupBox
-)
-from PySide6.QtCore import Signal, Qt, QPoint
 from typing import Optional, List, Tuple, Any, Type, Dict
+
+from PySide6.QtCore import Signal, Qt, QPoint
+from PySide6.QtWidgets import (
+    QAbstractItemView, QCheckBox, QComboBox, QDialog, QFormLayout, QGroupBox,
+    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMenu, QMessageBox,
+    QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QTextEdit,
+    QVBoxLayout, QWidget
+)
+
 from ....plugin_system.base import plugin_registry, BaseTabPlugin
+
+logger = logging.getLogger(__name__)
 
 
 class PluginManagementDialog(QDialog):
     """Dialog for managing plugin lifecycle and configuration."""
     
-    pluginToggled = Signal(str, bool)
+    plugin_toggled = Signal(str, bool)  # Emitted when a plugin is toggled (name, enabled)
     
     def __init__(self, parent: Optional[QWidget] = None, settings_service: Optional[Any] = None, plugin_controller: Optional[Any] = None) -> None:
         super().__init__(parent)
@@ -238,7 +244,7 @@ class PluginManagementDialog(QDialog):
         """
         # Don't call registry directly - let the controller handle it
         # This ensures dynamic extension integration runs for new plugins
-        self.pluginToggled.emit(name, bool(state))
+        self.plugin_toggled.emit(name, bool(state))
         
         # If this is the currently selected plugin, refresh the details panel
         # to update the extension checkboxes (grey out if disabled)
@@ -249,7 +255,7 @@ class PluginManagementDialog(QDialog):
         """Force-enable a version-incompatible plugin."""
         if not state:
             # Being disabled - let the controller handle it via signal
-            self.pluginToggled.emit(name, False)
+            self.plugin_toggled.emit(name, False)
             
             # If this is the currently selected plugin, refresh the details panel
             if name == self.get_selected_plugin_name():
@@ -283,7 +289,7 @@ class PluginManagementDialog(QDialog):
             plugin_registry._categorize_plugin_by_interface(name, plugin_class)
             # Enable it
             plugin_registry.enable_plugin(name)
-            self.pluginToggled.emit(name, True)
+            self.plugin_toggled.emit(name, True)
             # Reload to update UI
             self.load_plugins()
 
@@ -377,6 +383,7 @@ class PluginManagementDialog(QDialog):
             if is_rejected:
                 # Create container widget with checkbox + warning label
                 container = QWidget()
+                container.setStyleSheet("background-color: transparent;")
                 container_layout = QHBoxLayout(container)
                 container_layout.setContentsMargins(4, 0, 4, 0)
                 container_layout.setSpacing(4)
@@ -567,10 +574,8 @@ class PluginManagementDialog(QDialog):
                 try:
                     plugin_class.on_plugin_enabled()
                 except Exception as e:
-                    import logging
-                    logger = logging.getLogger(__name__)
                     logger.debug(f"Error calling on_plugin_enabled hook for {name}: {e}")
-            self.pluginToggled.emit(name, True)
+            self.plugin_toggled.emit(name, True)
         self.apply_filters()
         self.on_selection_changed()  # Refresh extension checkboxes
 
@@ -586,10 +591,8 @@ class PluginManagementDialog(QDialog):
             try:
                 plugin_class.on_plugin_disabled()
             except Exception as e:
-                import logging
-                logger = logging.getLogger(__name__)
                 logger.debug(f"Error calling on_plugin_disabled hook for {name}: {e}")
-        self.pluginToggled.emit(name, False)
+        self.plugin_toggled.emit(name, False)
         self.apply_filters()
         self.on_selection_changed()  # Refresh extension checkboxes
 
@@ -605,10 +608,8 @@ class PluginManagementDialog(QDialog):
                     try:
                         plugin_class.on_plugin_enabled()
                     except Exception as e:
-                        import logging
-                        logger = logging.getLogger(__name__)
                         logger.debug(f"Error calling on_plugin_enabled hook for {name}: {e}")
-                self.pluginToggled.emit(name, True)
+                self.plugin_toggled.emit(name, True)
         self.apply_filters()
         self.on_selection_changed()  # Refresh extension checkboxes
 
@@ -620,16 +621,13 @@ class PluginManagementDialog(QDialog):
                 continue
             # Emit signal FIRST so plugin controller can remove extensions
             # before the plugin is disabled in the registry
-            self.pluginToggled.emit(name, False)
+            self.plugin_toggled.emit(name, False)
             # Call lifecycle hook
             plugin_class = plugin_registry.get_plugin(name)
             if plugin_class and hasattr(plugin_class, 'on_plugin_disabled'):
                 try:
                     plugin_class.on_plugin_disabled()
                 except Exception as e:
-                    import logging
-                    logger = logging.getLogger(__name__)
-                    logger.debug(f"Error calling on_plugin_disabled hook for {name}: {e}")
                     logger.debug(f"Error calling on_plugin_disabled hook for {name}: {e}")
         self.apply_filters()
         self.on_selection_changed()  # Refresh extension checkboxes
