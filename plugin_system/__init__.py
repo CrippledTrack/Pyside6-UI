@@ -1,5 +1,5 @@
 """
-Plugin system for CyberPatriot-Scripts GUI
+Plugin system for Basic UI Application
 
 v4.0.0 BREAKING CHANGES:
 - Instance-based plugins with ServiceContainer injection

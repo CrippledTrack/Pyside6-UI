@@ -45,9 +45,9 @@ class ExampleTabPlugin(BaseTabPlugin):
     plugin_version = "2.0.1"
     plugin_author = "Example Author"
     plugin_authors = ["Example Author", "Contributors"]
-    min_gui_version = "3.4.0"
-    required_gui_version = ">=3.4.0"
-    disabled_by_default = True  # Set to False to test extensions on launch
+    min_gui_version = "4.0.0"
+    required_gui_version = ">=4.0.0"
+    disabled_by_default = True
     
     # Dependencies on other plugins
     dependencies: List[str] = []

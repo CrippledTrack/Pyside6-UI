@@ -17,6 +17,8 @@ if TYPE_CHECKING:
     from ...services.notification_service import NotificationService, Notification
     from ...themes.theme_manager import ThemeManager
 
+from ...constants import CURRENT_PLATFORM
+
 from ...services.notification_service import NotificationType
 
 
@@ -242,18 +244,27 @@ class NotificationCenterWidget(QWidget):
         self._use_new_ui = not getattr(theme_manager, '_use_legacy', True)
         
         if self._use_new_ui:
-            # New UI: Modern styling with rounded corners and shadow
-            self.setFixedWidth(370)  # 350 + shadow margin
-            self.setFixedHeight(420)  # 400 + shadow margin
-            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-            
-            # Add drop shadow effect for floating appearance
-            from PySide6.QtWidgets import QGraphicsDropShadowEffect
-            shadow = QGraphicsDropShadowEffect(self)
-            shadow.setBlurRadius(20)
-            shadow.setOffset(0, 4)
-            shadow.setColor(QColor(0, 0, 0, 80))  # Semi-transparent black
-            self.setGraphicsEffect(shadow)
+            # New UI: Modern styling with rounded corners
+            # Platform-specific shadow handling
+            if CURRENT_PLATFORM == "windows":
+                # Windows: QGraphicsDropShadowEffect has rendering issues
+                # Use standard size without shadow effect
+                self.setFixedWidth(350)
+                self.setFixedHeight(400)
+                self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+                # No shadow effect on Windows
+            else:
+                # Linux: Shadow effect works properly
+                self.setFixedWidth(370)  # 350 + shadow margin
+                self.setFixedHeight(420)  # 400 + shadow margin
+                self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+                
+                from PySide6.QtWidgets import QGraphicsDropShadowEffect
+                shadow = QGraphicsDropShadowEffect(self)
+                shadow.setBlurRadius(15)
+                shadow.setOffset(0, 3)
+                shadow.setColor(QColor(0, 0, 0, 60))
+                self.setGraphicsEffect(shadow)
         else:
             # Classic mode: Simple styling without shadow
             self.setFixedWidth(350)
@@ -269,11 +280,11 @@ class NotificationCenterWidget(QWidget):
     def setup_ui(self):
         layout = QVBoxLayout(self)
         
-        if self._use_new_ui:
-            # Add margins to prevent shadow clipping in new UI mode
+        if self._use_new_ui and CURRENT_PLATFORM != "windows":
+            # Add margins to prevent shadow clipping in new UI mode (Linux only)
             layout.setContentsMargins(10, 6, 10, 14)
         else:
-            # Classic mode: no extra margins needed
+            # Windows or classic mode: no extra margins needed
             layout.setContentsMargins(0, 0, 0, 0)
         
         layout.setSpacing(0)
@@ -295,13 +306,33 @@ class NotificationCenterWidget(QWidget):
         
         if self._use_new_ui:
             # New UI: rounded corners with border
-            self.container.setStyleSheet(f"""
-                QFrame#notificationContainer {{
-                    background-color: {base_color};
-                    border: 1px solid {button_color};
-                    border-radius: 8px;
-                }}
-            """)
+            if CURRENT_PLATFORM == "windows":
+                # Windows: Enhanced border for better separation without shadow
+                # Adjust border based on theme brightness
+                is_dark_theme = theme_data.get('is_dark', True)
+                if is_dark_theme:
+                    # Dark theme: slightly lighter border for visibility
+                    border_color = _adjust_color(button_color, 1.2)
+                else:
+                    # Light theme: slightly darker border for definition
+                    border_color = _adjust_color(button_color, 0.8)
+                
+                self.container.setStyleSheet(f"""
+                    QFrame#notificationContainer {{
+                        background-color: {base_color};
+                        border: 2px solid {border_color};
+                        border-radius: 8px;
+                    }}
+                """)
+            else:
+                # Linux: Standard border (shadow provides separation)
+                self.container.setStyleSheet(f"""
+                    QFrame#notificationContainer {{
+                        background-color: {base_color};
+                        border: 1px solid {button_color};
+                        border-radius: 8px;
+                    }}
+                """)
         else:
             # Classic mode: simple flat styling
             self.container.setStyleSheet(f"""
@@ -472,20 +503,35 @@ class NotificationCenterWidget(QWidget):
             from PySide6.QtWidgets import QGraphicsDropShadowEffect
             
             if self._use_new_ui:
-                # Switch to new UI: add shadow and adjust size
-                self.setFixedWidth(370)
-                self.setFixedHeight(420)
-                self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+                # Switch to new UI
+                if CURRENT_PLATFORM == "windows":
+                    # Windows: No shadow effect
+                    self.setFixedWidth(350)
+                    self.setFixedHeight(400)
+                    self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+                    self.setGraphicsEffect(None)  # Remove any existing shadow
+                else:
+                    # Linux: Add shadow effect
+                    self.setFixedWidth(370)
+                    self.setFixedHeight(420)
+                    self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+                    
+                    from PySide6.QtWidgets import QGraphicsDropShadowEffect
+                    shadow = QGraphicsDropShadowEffect(self)
+                    shadow.setBlurRadius(15)
+                    shadow.setOffset(0, 3)
+                    shadow.setColor(QColor(0, 0, 0, 60))
+                    self.setGraphicsEffect(shadow)
                 
-                shadow = QGraphicsDropShadowEffect(self)
-                shadow.setBlurRadius(20)
-                shadow.setOffset(0, 4)
-                shadow.setColor(QColor(0, 0, 0, 80))
-                self.setGraphicsEffect(shadow)
-                
-                # Update layout margins
-                self.layout().setContentsMargins(10, 6, 10, 14)
-                self.scroll_layout.setContentsMargins(0, 0, 0, 8)
+                # Update layout margins (platform-specific)
+                if CURRENT_PLATFORM == "windows":
+                    # Windows: No shadow margins needed
+                    self.layout().setContentsMargins(0, 0, 0, 0)
+                    self.scroll_layout.setContentsMargins(0, 0, 0, 0)
+                else:
+                    # Linux: Add shadow margins
+                    self.layout().setContentsMargins(10, 6, 10, 14)
+                    self.scroll_layout.setContentsMargins(0, 0, 0, 8)
             else:
                 # Switch to classic mode: remove shadow and adjust size
                 self.setFixedWidth(350)
@@ -511,13 +557,32 @@ class NotificationCenterWidget(QWidget):
         
         # Update container styling
         if self._use_new_ui:
-            self.container.setStyleSheet(f"""
-                QFrame#notificationContainer {{
-                    background-color: {base_color};
-                    border: 1px solid {button_color};
-                    border-radius: 8px;
-                }}
-            """)
+            if CURRENT_PLATFORM == "windows":
+                # Windows: Enhanced border for better separation
+                is_dark_theme = theme_data.get('is_dark', True)
+                if is_dark_theme:
+                    # Dark theme: slightly lighter border
+                    border_color = _adjust_color(button_color, 1.2)
+                else:
+                    # Light theme: slightly darker border
+                    border_color = _adjust_color(button_color, 0.8)
+                
+                self.container.setStyleSheet(f"""
+                    QFrame#notificationContainer {{
+                        background-color: {base_color};
+                        border: 2px solid {border_color};
+                        border-radius: 8px;
+                    }}
+                """)
+            else:
+                # Linux: Standard border
+                self.container.setStyleSheet(f"""
+                    QFrame#notificationContainer {{
+                        background-color: {base_color};
+                        border: 1px solid {button_color};
+                        border-radius: 8px;
+                    }}
+                """)
         else:
             self.container.setStyleSheet(f"""
                 QFrame#notificationContainer {{
@@ -645,14 +710,15 @@ class NotificationCenterWidget(QWidget):
         current_theme = self.theme_manager.get_current_theme()
         theme_data = self.theme_manager.themes.get(current_theme, {})
         palette = theme_data.get('palette', {})
-        muted_text_color = palette.get('text', '#666666')
+        # Use window_text for better visibility in all themes (light and dark)
+        empty_text_color = palette.get('window_text', '#ffffff')
         
         # Add items
         notifications = self.notification_service.get_notifications()
         if not notifications:
             empty_label = QLabel("No notifications")
             empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            empty_label.setStyleSheet(f"color: {muted_text_color}; padding: 20px;")
+            empty_label.setStyleSheet(f"color: {empty_text_color}; padding: 20px; opacity: 0.7;")
             self.scroll_layout.insertWidget(0, empty_label)
         else:
             for note in notifications:

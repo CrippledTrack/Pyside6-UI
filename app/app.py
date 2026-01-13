@@ -56,7 +56,7 @@ def run(argv: List[str]) -> int:
     lock_file_path = None
     if platform.system().lower() == "linux":
         import fcntl
-        lock_file_path = '/tmp/cyberpatriot-ui.lock'
+        lock_file_path = '/tmp/basic-ui.lock'
         try:
             lock_file = open(lock_file_path, 'w')
             fcntl.lockf(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -115,7 +115,7 @@ def run(argv: List[str]) -> int:
         try:
             import ctypes
             # Set AppUserModelID so notifications are attributed to the app in the Action Center
-            myappid = f'CyberPatriot.Scripts.GUI.{GUI_API_VERSION}'
+            myappid = f'{VERSION_NAME}.Scripts.GUI.{GUI_API_VERSION}'
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
         except Exception as e:
             print(f"Failed to set AppUserModelID: {e}", file=sys.stderr)

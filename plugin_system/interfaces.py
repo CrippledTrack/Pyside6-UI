@@ -1,5 +1,5 @@
 """
-Plugin extension interfaces for the CyberPatriot-Scripts GUI.
+Plugin extension interfaces for the Basic UI Application.
 
 This module defines Protocol-based interfaces for each extension point that plugins
 can implement. Plugins can implement any combination of these interfaces.

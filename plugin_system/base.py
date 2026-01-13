@@ -1,5 +1,5 @@
 """
-Base plugin classes for the CyberPatriot-Scripts GUI.
+Base plugin classes for the Basic UI Application.
 
 v4.0.0 BREAKING CHANGES:
 - BaseTabPlugin is now instance-based (use `self` instead of `cls`)
