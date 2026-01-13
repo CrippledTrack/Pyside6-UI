@@ -296,10 +296,11 @@ class PluginManagementDialog(QDialog):
     def reload_plugins(self) -> None:
         """Reload all plugins from the registry."""
         # Clear and re-discover plugins
-        from ...services.plugin_service import discover_and_register_all_plugins
+        # from ...services.plugin_service import discover_and_register_all_plugins
         plugin_registry.clear()
-        # Use the comprehensive plugin discovery that handles both external and built-in plugins
-        discover_and_register_all_plugins()
+        # Use the comprehensive plugin discovery from the service
+        if self.plugin_controller and self.plugin_controller.plugin_service:
+            self.plugin_controller.plugin_service.discover_and_register_all_plugins()
         QMessageBox.information(self, "Plugins Reloaded", "Plugins have been reloaded.")
         self.load_plugins()
 

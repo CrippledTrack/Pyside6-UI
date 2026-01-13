@@ -314,18 +314,6 @@ class PluginService:
         return self._discovery_complete
 
 
-# Legacy function for backward compatibility
-def discover_and_register_all_plugins() -> Tuple[List[Type[Any]], Dict[str, Any]]:
-    """Discover and register core and external plugins.
-    
-    This is a legacy function for backward compatibility.
-    New code should use PluginService.discover_and_register_all_plugins().
-    
-    Returns (registered_core_plugins, summary) where summary may contain counts/metadata.
-    """
-    service = PluginService()
-    return service.discover_and_register_all_plugins()
 
-
-__all__ = ['PluginService', 'discover_and_register_all_plugins']
+__all__ = ['PluginService']
 

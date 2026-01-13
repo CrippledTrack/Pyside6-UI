@@ -241,8 +241,8 @@ class PluginRegistry:
         if not self._container:
             raise ValueError("ServiceContainer not set - call set_container() first")
         
-        # Use migration utility to wrap legacy or instantiate new
-        from .migration import wrap_legacy_plugin
+        # Use compatibility utility to wrap legacy or instantiate new
+        from .compatibility import wrap_legacy_plugin
         instance = wrap_legacy_plugin(plugin_class, self._container)
         self._plugin_instances[name] = instance
         

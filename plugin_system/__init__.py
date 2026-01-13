@@ -22,7 +22,7 @@ from .interfaces import (
     Plugin,  # Legacy ABC
 )
 from .types import MenuItemDefinition, ToolbarAction, PluginEvent
-from .migration import LegacyPluginAdapter, wrap_legacy_plugin
+from .compatibility import LegacyPluginAdapter, wrap_legacy_plugin
 
 __all__ = [
     # v4.0.0 base classes

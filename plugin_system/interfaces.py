@@ -10,7 +10,7 @@ v4.0.0 BREAKING CHANGES:
 - Removed `tab_name` aliasing - use `plugin_name` and `tab_title`
 - `create_widget` now typed to return QWidget
 
-Legacy 3.x plugins can use LegacyPluginAdapter from migration.py.
+Legacy 3.x plugins can use LegacyPluginAdapter from compatibility.py.
 """
 
 from __future__ import annotations

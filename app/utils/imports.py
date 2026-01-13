@@ -18,7 +18,7 @@ def get_platforms_constants() -> Any:
     This function handles the common import pattern:
     1. Try direct import from app_plugins.constants (new name)
     2. Try adding parent directory to sys.path and import from app_plugins.constants
-    3. LEGACY: Fallback to platforms.constants (deprecated, 3.0.0 compatibility)
+    3. LEGACY: Fallback to platforms.constants
     4. Fallback to app.constants
     
     Returns:
@@ -46,14 +46,14 @@ def get_platforms_constants() -> Any:
     except ImportError:
         pass
     
-    # LEGACY: Support for old 'platforms/' folder name (deprecated, 3.0.0 compatibility)
+    # LEGACY: Support for old 'platforms/' folder name
     try:
         from platforms import constants
         return constants
     except ImportError:
         pass
     
-    # LEGACY: Support for old 'platforms/' folder name with path manipulation (deprecated, 3.0.0 compatibility)
+    # LEGACY: Support for old 'platforms/' folder name with path manipulation
     try:
         current_file = Path(__file__).resolve()
         parent_dir = current_file.parent.parent.parent.parent

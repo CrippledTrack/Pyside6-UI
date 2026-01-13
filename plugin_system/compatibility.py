@@ -1,8 +1,8 @@
 """
-Migration utilities for adapting legacy plugins to v4.0.0.
+Compatibility utilities for adapting legacy plugins to v4.0.0.
 
 This module provides the LegacyPluginAdapter class which wraps v3.x 
-classmethod-based plugins to work with the new instance-based architecture.
+class-based plugins to work with the new instance-based architecture.
 """
 from __future__ import annotations
 
@@ -20,8 +20,7 @@ class LegacyPluginAdapter:
     """Adapts a v3.x classmethod-based plugin to the v4.0.0 instance interface.
     
     This adapter wraps legacy plugins that use @classmethod and allows them
-    to work with the new instance-based plugin system. It logs deprecation
-    warnings to encourage migration.
+    to work with the new instance-based plugin system. 
     
     Example:
         # Old 3.x plugin
