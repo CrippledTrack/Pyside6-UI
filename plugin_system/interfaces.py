@@ -217,8 +217,8 @@ class Plugin(ABC):
     plugin_author: str = "Unknown"
     plugin_authors: List[str] = []
     
-    # Platform support
-    supported_platforms: List[str] = ["Windows", "Linux"]
+    # Platform support (empty list = all platforms supported)
+    supported_platforms: List[str] = []
     
     # Optional: dependencies on other plugins (by plugin_name)
     dependencies: List[str] = []
@@ -244,10 +244,13 @@ class Plugin(ABC):
 
         author_text = ", ".join(authors_list) if authors_list else str(getattr(cls, 'plugin_author', 'Unknown'))
 
+        # If supported_platforms is empty, show all application-supported platforms
+        display_platforms = cls.supported_platforms if cls.supported_platforms else ["Windows", "Linux"]
+
         return {
             'name': getattr(cls, 'plugin_name', cls.__name__),
             'description': cls.plugin_description,
-            'supported_platforms': cls.supported_platforms,
+            'supported_platforms': display_platforms,
             'version': cls.plugin_version,
             'author': author_text,
             'authors': authors_list,

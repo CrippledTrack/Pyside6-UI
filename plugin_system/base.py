@@ -67,8 +67,8 @@ class BaseTabPlugin:
     tab_name: str = "Unnamed Tab"  # Alias for plugin_name/tab_title
     tab_description: str = "No description provided"  # Alias for plugin_description
     
-    # Platform support
-    supported_platforms: List[str] = ["Windows", "Linux"]
+    # Platform support (empty list = all platforms supported)
+    supported_platforms: List[str] = []
     
     # Plugin dependencies (optional)
     dependencies: List[str] = []
@@ -136,7 +136,12 @@ class BaseTabPlugin:
     # Class methods that don't need instance state
     @classmethod
     def is_supported_platform(cls, platform_name: str) -> bool:
-        """Check if this plugin supports the given platform."""
+        """Check if this plugin supports the given platform.
+        
+        If supported_platforms is empty, all platforms are supported.
+        """
+        if not cls.supported_platforms:
+            return True  # Empty = all platforms supported
         return platform_name.capitalize() in cls.supported_platforms
     
     @classmethod
@@ -176,11 +181,14 @@ class BaseTabPlugin:
         if not description or description == "No description provided":
             description = getattr(cls, 'tab_description', "No description provided")
 
+        # If supported_platforms is empty, show all application-supported platforms
+        display_platforms = cls.supported_platforms if cls.supported_platforms else ["Windows", "Linux"]
+        
         return {
             'name': name,
             'tab_title': title,
             'description': description,
-            'supported_platforms': cls.supported_platforms,
+            'supported_platforms': display_platforms,
             'requires_admin': cls.requires_admin,
             'version': cls.plugin_version,
             'author': author_text,
@@ -213,8 +221,7 @@ class BaseTabPlugin:
         if not has_title:
             errors.append("Plugin must define a valid tab_title or tab_name")
         
-        if not cls.supported_platforms:
-            errors.append("Plugin must define supported_platforms")
+        # Note: supported_platforms is optional - empty means all platforms supported
         
         if not cls.plugin_version:
             errors.append("Plugin must define plugin_version")
@@ -281,6 +288,12 @@ class LegacyBaseTabPlugin(Plugin):
     
     @classmethod
     def is_supported_platform(cls, platform_name: str) -> bool:
+        """Check if this plugin supports the given platform.
+        
+        If supported_platforms is empty, all platforms are supported.
+        """
+        if not cls.supported_platforms:
+            return True  # Empty = all platforms supported
         return platform_name.capitalize() in cls.supported_platforms
     
     @classmethod
@@ -305,10 +318,13 @@ class LegacyBaseTabPlugin(Plugin):
 
         author_text = ", ".join(authors_list) if authors_list else str(getattr(cls, 'plugin_author', 'Unknown'))
 
+        # If supported_platforms is empty, show all application-supported platforms
+        display_platforms = cls.supported_platforms if cls.supported_platforms else ["Windows", "Linux"]
+
         return {
             'name': getattr(cls, 'tab_name', cls.__name__),
             'description': getattr(cls, 'tab_description', ''),
-            'supported_platforms': cls.supported_platforms,
+            'supported_platforms': display_platforms,
             'requires_admin': cls.requires_admin,
             'version': cls.plugin_version,
             'author': author_text,

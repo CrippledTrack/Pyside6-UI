@@ -71,7 +71,7 @@ def _find_app_plugins_dir() -> Optional[Path]:
     """Find the app_plugins or platforms directory.
     
     Searches common locations for the external plugins directory.
-    Supports both 'app_plugins' (preferred) and 'platforms' (legacy) folder names.
+    Checks app_plugins first (highest priority), then platforms (middle priority).
     
     Returns:
         Path to plugins directory, or None if not found
@@ -79,14 +79,14 @@ def _find_app_plugins_dir() -> Optional[Path]:
     # Try relative to the GUI package
     gui_path = Path(__file__).parent.parent.parent.parent.parent  # dev_mode_utils -> utils -> app -> GUI -> project root
     
-    # Check common locations (app_plugins first, then legacy platforms)
+    # Check common locations (app_plugins first, then platforms)
     candidates = [
         gui_path.parent / "app_plugins",  # Sibling to GUI
         gui_path / "app_plugins",  # Inside GUI's parent
         Path.cwd() / "app_plugins",  # Current working directory
-        gui_path.parent / "platforms",  # Legacy: sibling to GUI
-        gui_path / "platforms",  # Legacy: inside GUI's parent
-        Path.cwd() / "platforms",  # Legacy: current working directory
+        gui_path.parent / "platforms",  # Sibling to GUI
+        gui_path / "platforms",  # Inside GUI's parent
+        Path.cwd() / "platforms",  # Current working directory
     ]
     
     for candidate in candidates:

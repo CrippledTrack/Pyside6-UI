@@ -120,19 +120,36 @@ class PluginService:
     def discover_and_register_all_plugins(self) -> Tuple[List[Type[Any]], Dict[str, Any]]:
         """Discover and register core and external plugins.
         
+        Core plugins are loaded from (in priority order):
+        1. app_plugins/core_plugins.py (highest)
+        2. platforms/core_plugins.py (middle)
+        3. GUI/plugin_system/core_plugins.py (lowest)
+        
+        Non-core plugins are discovered from (in priority order):
+        1. app_plugins/{platform}/plugins/ and app_plugins/common/plugins/
+        2. platforms/{platform}/plugins/ and platforms/common/plugins/
+        3. External plugins directory (project_root/plugins/)
+        4. GUI/plugins/ (built-in examples)
+        
         Returns (registered_core_plugins, summary) where summary may contain counts/metadata.
         """
         registered_core: List[Type[Any]] = []
         summary: Dict[str, Any] = {"total_discovered": 0}
 
         try:
-            # Register core plugins from both sources
-            logger.info("Attempting to load core plugins...")
+            # Load core plugins from all three sources in priority order
+            logger.info("Attempting to load core plugins from all sources...")
+            app_plugins = self._load_core_plugins_from_source("app_plugins")
             platforms_plugins = self._load_core_plugins_from_source("platforms")
             gui_plugins = self._load_core_plugins_from_source("gui")
             
-            all_core_plugins = platforms_plugins + gui_plugins
-            logger.info("Total core plugins to register: %d plugins", len(all_core_plugins))
+            # Merge with priority (app_plugins > platforms > GUI)
+            all_core_plugins = self._merge_plugins_with_priority([
+                app_plugins,       # Highest priority
+                platforms_plugins, # Middle priority
+                gui_plugins,       # Lowest priority
+            ])
+            logger.info("Total core plugins to register after merge: %d plugins", len(all_core_plugins))
             registered_core = self._register_core_plugins(all_core_plugins)
 
             # In dev mode with show_all_platforms, also load cross-platform plugins
@@ -149,28 +166,80 @@ class PluginService:
             except ImportError as e:
                 logger.debug(f"Cross-platform plugins not available: {e}")
 
-            # Discover plugins from both external and built-in locations
+            # Discover non-core plugins from multiple locations in priority order
             try:
                 from ...plugin_system.discovery import discover_and_register_plugins as discover
                 from ..utils.paths import get_plugins_dir
-
-                # Discover external plugins (in parent project's plugins directory)
+                from ..constants import CURRENT_PLATFORM
+                
+                # GUI directory (this file is at GUI/app/services/plugin_service.py)
+                gui_dir = Path(__file__).parent.parent.parent
+                
+                def find_external_dir(folder_name: str) -> Optional[Path]:
+                    """Find an external directory by checking multiple candidate locations.
+                    
+                    This handles cases where GUI is used as a submodule or standalone.
+                    """
+                    candidates = [
+                        gui_dir.parent / folder_name,     # Sibling to GUI (most common)
+                        gui_dir / folder_name,            # Inside GUI directory
+                        Path.cwd() / folder_name,         # Current working directory
+                        Path.cwd().parent / folder_name,  # Parent of cwd
+                    ]
+                    for candidate in candidates:
+                        if candidate.exists() and candidate.is_dir():
+                            return candidate
+                    return None
+                
+                def discover_from_dir(plugins_dir: Optional[Path], source_name: str) -> int:
+                    """Discover plugins from a directory and return count."""
+                    if plugins_dir is None or not plugins_dir.exists():
+                        logger.debug(f"{source_name} directory not found or does not exist")
+                        return 0
+                    results, dir_summary = discover(str(plugins_dir))
+                    count = dir_summary.get("total_discovered", 0) if isinstance(dir_summary, dict) else 0
+                    if count > 0:
+                        logger.info(f"{source_name} plugin discovery: {count} plugins found")
+                        summary["total_discovered"] = summary.get("total_discovered", 0) + count
+                    return count
+                
+                # Priority 1: app_plugins/{platform}/plugins/ and app_plugins/common/plugins/
+                app_plugins_dir = find_external_dir("app_plugins")
+                if app_plugins_dir:
+                    discover_from_dir(
+                        app_plugins_dir / CURRENT_PLATFORM / "plugins",
+                        f"app_plugins/{CURRENT_PLATFORM}/plugins"
+                    )
+                    discover_from_dir(
+                        app_plugins_dir / "common" / "plugins",
+                        "app_plugins/common/plugins"
+                    )
+                
+                # Priority 2: platforms/{platform}/plugins/ and platforms/common/plugins/
+                platforms_dir = find_external_dir("platforms")
+                if platforms_dir:
+                    discover_from_dir(
+                        platforms_dir / CURRENT_PLATFORM / "plugins",
+                        f"platforms/{CURRENT_PLATFORM}/plugins"
+                    )
+                    discover_from_dir(
+                        platforms_dir / "common" / "plugins",
+                        "platforms/common/plugins"
+                    )
+                
+                # Priority 3: External plugins (in parent project's plugins directory)
                 external_plugins_dir = str(get_plugins_dir())
                 external_results, external_summary = discover(external_plugins_dir)
                 if isinstance(external_summary, dict):
-                    summary.update(external_summary)
+                    summary["total_discovered"] = summary.get("total_discovered", 0) + external_summary.get("total_discovered", 0)
                 logger.info("External plugin discovery complete: %s plugins found", external_summary.get("total_discovered", 0))
 
-                # Discover built-in plugins (in GUI/plugins directory)
-                gui_plugins_dir = str(Path(__file__).parent.parent.parent / "plugins")
+                # Priority 4: Built-in plugins (in GUI/plugins directory)
+                gui_plugins_dir = str(gui_dir / "plugins")
                 builtin_results, builtin_summary = discover(gui_plugins_dir)
                 if isinstance(builtin_summary, dict):
-                    # Merge the summaries
                     summary["total_discovered"] = summary.get("total_discovered", 0) + builtin_summary.get("total_discovered", 0)
-                    if "local_plugins" in summary and "local_plugins" in builtin_summary:
-                        summary["local_plugins"] = summary["local_plugins"] + builtin_summary["local_plugins"]
-                    else:
-                        summary["builtin_plugins"] = builtin_summary.get("local_plugins", 0)
+                    summary["builtin_plugins"] = builtin_summary.get("local_plugins", 0)
                 logger.info("Built-in plugin discovery complete: %s plugins found", builtin_summary.get("total_discovered", 0))
             except Exception as e:  # pragma: no cover - optional discovery
                 logger.warning("Plugin discovery failed: %s", e)
@@ -181,31 +250,65 @@ class PluginService:
         self._discovery_complete = True
         return registered_core, summary
     
+    def _find_external_dir(self, folder_name: str) -> Optional[Path]:
+        """Find an external directory by checking multiple candidate locations.
+        
+        This handles cases where GUI is used as a submodule or standalone.
+        
+        Args:
+            folder_name: Name of the directory to find (e.g., 'app_plugins', 'platforms')
+            
+        Returns:
+            Path to the directory if found, None otherwise
+        """
+        gui_dir = Path(__file__).parent.parent.parent
+        candidates = [
+            gui_dir.parent / folder_name,     # Sibling to GUI (most common)
+            gui_dir / folder_name,            # Inside GUI directory
+            Path.cwd() / folder_name,         # Current working directory
+            Path.cwd().parent / folder_name,  # Parent of cwd
+        ]
+        for candidate in candidates:
+            if candidate.exists() and candidate.is_dir():
+                return candidate
+        return None
+    
     def _load_core_plugins_from_source(self, source: str) -> List[Type[Any]]:
         """Load core plugins from a specific source.
         
         Args:
-            source: Either 'platforms' (for app_plugins/, with legacy fallback) or 'gui'
+            source: One of 'app_plugins', 'platforms', or 'gui'
             
         Returns:
             List of plugin classes, empty list on error
         """
         try:
-            if source == "platforms":
-                parent_dir = Path(__file__).parent.parent.parent
-                with _with_sys_path(parent_dir):
-                    # Try new name first (app_plugins)
-                    try:
+            # GUI directory (this file is at GUI/app/services/plugin_service.py)
+            gui_dir = Path(__file__).parent.parent.parent
+            
+            if source == "app_plugins":
+                app_plugins_dir = self._find_external_dir("app_plugins")
+                if app_plugins_dir is None:
+                    logger.debug("app_plugins directory not found")
+                    return []
+                # Add both the parent dir (for app_plugins imports) and GUI (for plugins.base imports)
+                with _with_sys_path(app_plugins_dir.parent):
+                    with _with_sys_path(gui_dir):
                         from app_plugins.core_plugins import get_core_plugins  # type: ignore
                         plugins = get_core_plugins()
-                        logger.info("App plugins core plugins retrieved: %d plugins", len(plugins))
+                        logger.info("app_plugins core plugins retrieved: %d plugins", len(plugins))
                         return plugins
-                    except ImportError:
-                        # LEGACY: Support for old 'platforms/' folder name (deprecated, 3.0.0 compatibility)
+            elif source == "platforms":
+                platforms_dir = self._find_external_dir("platforms")
+                if platforms_dir is None:
+                    logger.debug("platforms directory not found")
+                    return []
+                # Add both the parent dir (for platforms imports) and GUI (for plugins.base imports)
+                with _with_sys_path(platforms_dir.parent):
+                    with _with_sys_path(gui_dir):
                         from platforms.core_plugins import get_core_plugins  # type: ignore
                         plugins = get_core_plugins()
-                        logger.warning("Using legacy 'platforms/' folder for core plugins (deprecated, 3.0.0 compatibility). Consider migrating to 'app_plugins/'")
-                        logger.info("Platforms core plugins retrieved: %d plugins", len(plugins))
+                        logger.info("platforms core plugins retrieved: %d plugins", len(plugins))
                         return plugins
             elif source == "gui":
                 from ...plugin_system.core_plugins import get_core_plugins
@@ -218,6 +321,30 @@ class PluginService:
         except Exception as e:
             logger.info("Failed to load %s core plugins: %s", source, e)
             return []
+    
+    def _merge_plugins_with_priority(
+        self,
+        plugin_lists: List[List[Type[Any]]]
+    ) -> List[Type[Any]]:
+        """Merge plugin lists with earlier lists taking priority on conflicts.
+        
+        Args:
+            plugin_lists: List of plugin class lists, ordered by priority (highest first)
+            
+        Returns:
+            Merged list of plugin classes with duplicates resolved by priority
+        """
+        seen_names: Dict[str, Type[Any]] = {}
+        
+        for plugin_list in plugin_lists:
+            for plugin_class in plugin_list:
+                name = getattr(plugin_class, 'tab_name', plugin_class.__name__)
+                if name not in seen_names:
+                    seen_names[name] = plugin_class
+                else:
+                    logger.debug(f"Skipping duplicate plugin '{name}' from lower priority source")
+        
+        return list(seen_names.values())
     
     def _register_core_plugins(self, plugin_classes: List[Type[Any]]) -> List[Type[Any]]:
         """Register a list of core plugin classes.

@@ -1,79 +1,64 @@
-"""Import utilities for handling platform constants with fallback support.
+"""Import utilities for handling platform constants with priority-based merging.
 
-This module provides functions to import constants from various locations
-with backward compatibility for legacy folder structures.
+This module provides functions to import and merge constants from multiple
+sources with a defined priority order.
 """
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 
 def get_platforms_constants() -> Any:
     """
-    Import and return the app_plugins.constants module with fallback handling.
+    Import and merge constants from multiple sources with priority.
     
-    This function handles the common import pattern:
-    1. Try direct import from app_plugins.constants (new name)
-    2. Try adding parent directory to sys.path and import from app_plugins.constants
-    3. LEGACY: Fallback to platforms.constants
-    4. Fallback to app.constants
+    Priority order (highest to lowest):
+    1. app_plugins.constants (project-specific overrides)
+    2. platforms.constants (shared/community additions)
+    3. GUI/app/constants (framework defaults)
+    
+    Constants from higher priority sources override those from lower priority.
     
     Returns:
-        Module: The constants module (from app_plugins, platforms legacy, or app fallback)
+        SimpleNamespace: A module-like object with merged constants
     """
-    # First attempt: direct import from new name
+    # This file is at GUI/app/utils/imports.py
+    # Parent project root is 4 levels up
+    current_file = Path(__file__).resolve()
+    parent_dir = current_file.parent.parent.parent.parent
+    
+    # Ensure parent directory is in sys.path for imports
+    if str(parent_dir) not in sys.path:
+        sys.path.insert(0, str(parent_dir))
+    
+    # Start with GUI defaults (lowest priority)
+    from .. import constants as gui_constants
+    merged = {k: getattr(gui_constants, k) for k in dir(gui_constants) 
+              if not k.startswith('_')}
+    
+    # Apply platforms constants (middle priority)
     try:
-        from app_plugins import constants
-        return constants
+        from platforms import constants as platforms_constants
+        for k in dir(platforms_constants):
+            if not k.startswith('_'):
+                merged[k] = getattr(platforms_constants, k)
     except ImportError:
         pass
     
-    # Second attempt: add parent directory to path and try new name
+    # Apply app_plugins constants (highest priority)
     try:
-        # This file is at GUI/app/utils/imports.py
-        # Parent project root is 4 levels up
-        current_file = Path(__file__).resolve()
-        parent_dir = current_file.parent.parent.parent.parent
-        
-        if str(parent_dir) not in sys.path:
-            sys.path.insert(0, str(parent_dir))
-        
-        from app_plugins import constants
-        return constants
+        from app_plugins import constants as app_constants
+        for k in dir(app_constants):
+            if not k.startswith('_'):
+                merged[k] = getattr(app_constants, k)
     except ImportError:
         pass
     
-    # LEGACY: Support for old 'platforms/' folder name
-    try:
-        from platforms import constants
-        return constants
-    except ImportError:
-        pass
-    
-    # LEGACY: Support for old 'platforms/' folder name with path manipulation
-    try:
-        current_file = Path(__file__).resolve()
-        parent_dir = current_file.parent.parent.parent.parent
-        
-        if str(parent_dir) not in sys.path:
-            sys.path.insert(0, str(parent_dir))
-        
-        from platforms import constants
-        return constants
-    except ImportError:
-        pass
-    
-    # Fallback: use app.constants
-    try:
-        from app import constants
-        return constants
-    except ImportError:
-        # Relative import fallback
-        from .. import constants
-        return constants
+    return SimpleNamespace(**merged)
 
 
 __all__ = ['get_platforms_constants']
