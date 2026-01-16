@@ -34,6 +34,7 @@ from ..services.plugin_service import PluginService
 from ..services.admin_service import AdminService
 from ..services.daemon_service import DaemonService
 from ..services.tab_loader_service import TabLoaderThread
+from ..services.plugin_registry_facade import PluginRegistryFacade
 from .controllers.tab_controller import TabController
 from .controllers.plugin_controller import PluginController
 from .controllers.menu_bar_controller import MenuBarController
@@ -108,6 +109,7 @@ class MainWindow(QMainWindow):
         # Get services from container
         self.admin_service = container.get(AdminService)
         self.daemon_service = container.get(DaemonService)
+        self.plugin_registry = container.get(PluginRegistryFacade)
         
         # Register daemon refresh callback on Linux
         if CURRENT_PLATFORM == "linux":
@@ -256,12 +258,10 @@ class MainWindow(QMainWindow):
             # Wait for the thread to finish if still running
             if self.tab_loader.isRunning():
                 logger.debug("Waiting for previous tab loader thread to finish...")
-                self.tab_loader.quit()
+                self.tab_loader.cancel()
                 self.tab_loader.wait(5000)  # Wait up to 5 seconds
                 if self.tab_loader.isRunning():
                     logger.warning("Previous tab loader thread did not finish in time")
-                    self.tab_loader.terminate()
-                    self.tab_loader.wait()
         
         plugin_service = self.container.get(PluginService)
         self.tab_loader = TabLoaderThread(
@@ -483,8 +483,6 @@ class MainWindow(QMainWindow):
         Args:
             theme_name: Name of the selected theme
         """
-        from ...plugin_system.registry import plugin_registry
-        
         logger.info(f"Theme selected: {theme_name}")
         # Reapply theme with current UI flag setting
         if self.settings_service:
@@ -502,7 +500,7 @@ class MainWindow(QMainWindow):
             self.status_bar_manager.refresh_theme()
         
         # Publish event for subscribers
-        plugin_registry.publish_event("theme_changed", {"theme": theme_name})
+        self.plugin_registry.publish_event("theme_changed", {"theme": theme_name})
 
     
     def restart_as_admin(self) -> None:
@@ -683,26 +681,20 @@ class MainWindow(QMainWindow):
         if self.settings_service:
             # Save window geometry
             geom = self.geometry()
-            self.settings_service.save_window_geometry(
-                geom.x(), geom.y(), geom.width(), geom.height()
+            self.settings_service.save_window_state(
+                geom.x(),
+                geom.y(),
+                geom.width(),
+                geom.height(),
+                maximized=self.isMaximized(),
+                fullscreen=self.isFullScreen()
             )
-            
-            # Save window state
-            if self.isMaximized():
-                self.settings_service._settings.window_geometry.maximized = True
-            elif self.isFullScreen():
-                self.settings_service._settings.window_geometry.fullscreen = True
-            else:
-                self.settings_service._settings.window_geometry.maximized = False
-                self.settings_service._settings.window_geometry.fullscreen = False
             
             # Save session state (tab order and active tab)
             tab_order = self.tab_controller.get_tab_order()
             active_tab = self.tab_controller.get_current_tab_name()
             self.settings_service.save_session_state(tab_order, active_tab)
             
-            self.settings_service._save_settings()
-        
         # Shutdown ServiceExtension plugins
         self.plugin_controller.shutdown_service_extensions()
         

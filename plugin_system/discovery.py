@@ -8,6 +8,7 @@ from __future__ import annotations
 import inspect
 import importlib
 import importlib.util
+import hashlib
 import logging
 import os
 import sys
@@ -204,7 +205,7 @@ class PluginDiscovery:
     def _load_plugin_from_file(self, py_file: Path) -> List[Tuple[str, Type[BaseTabPlugin], str]]:
         """Load plugin classes from a single Python file."""
         plugins = []
-        module_name = py_file.stem
+        module_name = self._module_name_for_path(py_file)
         logger.debug(f"Attempting to load local plugin module: {module_name}")
         
         spec = importlib.util.spec_from_file_location(module_name, py_file)
@@ -226,6 +227,11 @@ class PluginDiscovery:
             logger.info(f"Successfully loaded local plugin: {plugin_name} from {py_file.name}")
         
         return plugins
+
+    def _module_name_for_path(self, py_file: Path) -> str:
+        """Generate a namespaced module name to avoid collisions in sys.modules."""
+        digest = hashlib.sha256(str(py_file).encode("utf-8")).hexdigest()[:8]
+        return f"gui_plugin_{py_file.stem}_{digest}"
     
     def _find_plugin_classes_in_module(self, module) -> List[Type[BaseTabPlugin]]:
         """

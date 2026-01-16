@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import SimpleNamespace, ModuleType
 from typing import Any
 
 
@@ -35,26 +35,35 @@ def get_platforms_constants() -> Any:
     if str(parent_dir) not in sys.path:
         sys.path.insert(0, str(parent_dir))
     
+    def is_constant(name: str, value: Any) -> bool:
+        if not name or not name.isupper():
+            return False
+        if isinstance(value, ModuleType) or callable(value):
+            return False
+        return isinstance(value, (str, int, float, bool, tuple, list, dict, type(None)))
+
+    def collect(module: ModuleType) -> dict[str, Any]:
+        return {
+            name: value
+            for name, value in vars(module).items()
+            if is_constant(name, value)
+        }
+
     # Start with GUI defaults (lowest priority)
     from .. import constants as gui_constants
-    merged = {k: getattr(gui_constants, k) for k in dir(gui_constants) 
-              if not k.startswith('_')}
+    merged = collect(gui_constants)
     
     # Apply platforms constants (middle priority)
     try:
         from platforms import constants as platforms_constants
-        for k in dir(platforms_constants):
-            if not k.startswith('_'):
-                merged[k] = getattr(platforms_constants, k)
+        merged.update(collect(platforms_constants))
     except ImportError:
         pass
     
     # Apply app_plugins constants (highest priority)
     try:
         from app_plugins import constants as app_constants
-        for k in dir(app_constants):
-            if not k.startswith('_'):
-                merged[k] = getattr(app_constants, k)
+        merged.update(collect(app_constants))
     except ImportError:
         pass
     

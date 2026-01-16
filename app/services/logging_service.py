@@ -45,6 +45,9 @@ DAEMON_LOGGER_PREFIXES = [
 ]
 
 _dev_logging_override: Optional[bool] = None
+_logging_configured: bool = False
+_previous_excepthook = None
+_previous_showwarning = None
 
 
 class CustomFormatter(logging.Formatter):
@@ -206,13 +209,17 @@ def setup_logging() -> logging.Logger:
 
     Matches the behavior previously implemented in main.py.
     """
+    global _logging_configured, _previous_excepthook, _previous_showwarning
     try:
+        if _logging_configured:
+            return logging.getLogger(__name__)
         if not LOGGING_ENABLED:
             # Minimal no-op configuration to avoid noisy handlers
             logging.getLogger().handlers.clear()
             logging.getLogger().addHandler(logging.NullHandler())
             logger = logging.getLogger(__name__)
             logger.disabled = True
+            _logging_configured = True
             return logger
         root_logger = logging.getLogger()
         # Auto-enable DEBUG logging for dev builds:
@@ -238,6 +245,8 @@ def setup_logging() -> logging.Logger:
                 "".join(traceback.format_tb(exc_traceback)),
             )
 
+        if _previous_excepthook is None:
+            _previous_excepthook = sys.excepthook
         sys.excepthook = handle_exception
 
         def handle_warning(message, category, filename, lineno, file=None, line=None):
@@ -246,10 +255,13 @@ def setup_logging() -> logging.Logger:
                 extra={"filename": filename, "lineno": lineno, "line": line},
             )
 
+        if _previous_showwarning is None:
+            _previous_showwarning = warnings.showwarning
         warnings.showwarning = handle_warning  # type: ignore[assignment]
 
         logger = logging.getLogger(__name__)
         logger.info("Logging configured successfully")
+        _logging_configured = True
         return logger
     except Exception as e:  # pragma: no cover - fallback path
         logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s%(exc_info)s")

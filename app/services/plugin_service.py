@@ -156,6 +156,23 @@ class PluginService:
             try:
                 from ..utils.admin import is_show_all_platforms
                 if is_show_all_platforms():
+                    from ..constants import CURRENT_PLATFORM
+                    try:
+                        if CURRENT_PLATFORM == "linux":
+                            from ..utils.dev_mode_utils.win32_mocks import install_win32_mocks
+                            install_win32_mocks()
+                        elif CURRENT_PLATFORM == "windows":
+                            from ..utils.dev_mode_utils.linux_mocks import install_linux_mocks
+                            install_linux_mocks()
+                    except Exception as e:
+                        logger.warning("Could not install cross-platform mocks: %s", e)
+
+                    try:
+                        from ..utils.dev_mode_utils.cross_platform_plugins import clear_cross_platform_cache
+                        clear_cross_platform_cache()
+                    except Exception as e:
+                        logger.debug("Could not clear cross-platform plugin cache: %s", e)
+
                     logger.info("Dev mode: Loading cross-platform plugins...")
                     from ..utils.dev_mode_utils.cross_platform_plugins import load_cross_platform_plugins
                     cross_platform = load_cross_platform_plugins()
@@ -175,22 +192,6 @@ class PluginService:
                 # GUI directory (this file is at GUI/app/services/plugin_service.py)
                 gui_dir = Path(__file__).parent.parent.parent
                 
-                def find_external_dir(folder_name: str) -> Optional[Path]:
-                    """Find an external directory by checking multiple candidate locations.
-                    
-                    This handles cases where GUI is used as a submodule or standalone.
-                    """
-                    candidates = [
-                        gui_dir.parent / folder_name,     # Sibling to GUI (most common)
-                        gui_dir / folder_name,            # Inside GUI directory
-                        Path.cwd() / folder_name,         # Current working directory
-                        Path.cwd().parent / folder_name,  # Parent of cwd
-                    ]
-                    for candidate in candidates:
-                        if candidate.exists() and candidate.is_dir():
-                            return candidate
-                    return None
-                
                 def discover_from_dir(plugins_dir: Optional[Path], source_name: str) -> int:
                     """Discover plugins from a directory and return count."""
                     if plugins_dir is None or not plugins_dir.exists():
@@ -204,7 +205,7 @@ class PluginService:
                     return count
                 
                 # Priority 1: app_plugins/{platform}/plugins/ and app_plugins/common/plugins/
-                app_plugins_dir = find_external_dir("app_plugins")
+                app_plugins_dir = self._find_external_dir("app_plugins")
                 if app_plugins_dir:
                     discover_from_dir(
                         app_plugins_dir / CURRENT_PLATFORM / "plugins",
@@ -216,7 +217,7 @@ class PluginService:
                     )
                 
                 # Priority 2: platforms/{platform}/plugins/ and platforms/common/plugins/
-                platforms_dir = find_external_dir("platforms")
+                platforms_dir = self._find_external_dir("platforms")
                 if platforms_dir:
                     discover_from_dir(
                         platforms_dir / CURRENT_PLATFORM / "plugins",

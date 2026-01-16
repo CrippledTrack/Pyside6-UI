@@ -268,6 +268,10 @@ class PluginRegistry:
                 logger.error(f"Failed to instantiate plugin '{name}': {e}")
         return result
 
+    def has_plugin_instance(self, name: str) -> bool:
+        """Check if a plugin instance is cached."""
+        return name in self._plugin_instances
+
     def _validate_extension_plugin(self, plugin_class: Type[Any], plugin_name: str) -> List[str]:
         """Validate an extension plugin."""
         errors = []

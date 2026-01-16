@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from ...services.container import ServiceContainer
     from ....plugin_system.base import BaseTabPlugin
 
-from ....plugin_system.registry import plugin_registry
+from ...services.plugin_registry_facade import PluginRegistryFacade
 
 from ..widgets.admin_required_placeholder import AdminRequiredPlaceholder
 from ..widgets.error_placeholder import ErrorPlaceholder
@@ -63,6 +63,7 @@ class TabController(QObject):
         self.admin_service = container.get(AdminService)
         # DaemonService is only relevant on Linux
         self.daemon_service = container.get(DaemonService) if CURRENT_PLATFORM == "linux" else None
+        self.registry = container.get(PluginRegistryFacade)
         
         self.loaded_tabs: Dict[str, Dict[str, Any]] = {}
         self.is_loading_tab = False
@@ -106,7 +107,7 @@ class TabController(QObject):
             if tab_info.get("instance"):
                 # Call deactivation hook
                 try:
-                    plugin_instance = plugin_registry.get_plugin_instance(tab_name)
+                    plugin_instance = self.registry.get_plugin_instance(tab_name)
                     if hasattr(plugin_instance, 'on_tab_deactivated'):
                         plugin_instance.on_tab_deactivated()
                 except Exception as e:
@@ -143,7 +144,7 @@ class TabController(QObject):
                 prev_instance_info = self.loaded_tabs.get(prev_tab_name)
                 # Only call if we have a widget instance
                 if prev_instance_info and prev_instance_info.get("instance"):
-                    plugin_instance = plugin_registry.get_plugin_instance(prev_tab_name)
+                    plugin_instance = self.registry.get_plugin_instance(prev_tab_name)
                     if hasattr(plugin_instance, 'on_tab_deactivated'):
                         plugin_instance.on_tab_deactivated()
                 self.tab_deactivated.emit(prev_tab_name)
@@ -192,7 +193,7 @@ class TabController(QObject):
                     tab_info["instance"] = admin_widget
                 else:
                     # Create the actual plugin widget using instance
-                    plugin_instance = plugin_registry.get_plugin_instance(tab_name)
+                    plugin_instance = self.registry.get_plugin_instance(tab_name)
                     tab_info["instance"] = plugin_instance.create_widget(self.tab_widget)
                 
                 # Replace placeholder with actual widget
@@ -207,7 +208,7 @@ class TabController(QObject):
             # Call activation hook for newly active tab
             if tab_info["instance"] and not isinstance(tab_info["instance"], (LoadingPlaceholder, ErrorPlaceholder, AdminRequiredPlaceholder)):
                 try:
-                    plugin_instance = plugin_registry.get_plugin_instance(tab_name)
+                    plugin_instance = self.registry.get_plugin_instance(tab_name)
                     if hasattr(plugin_instance, 'on_tab_activated'):
                         plugin_instance.on_tab_activated()
                 except Exception as e:
@@ -269,7 +270,7 @@ class TabController(QObject):
             
             logger.info(f"Creating widget for tab '{tab_name}' (daemon available)")
             # Create the actual widget using instance
-            plugin_instance = plugin_registry.get_plugin_instance(tab_name)
+            plugin_instance = self.registry.get_plugin_instance(tab_name)
             widget = plugin_instance.create_widget(self.tab_widget)
             tab_info["instance"] = widget
             
@@ -339,7 +340,7 @@ class TabController(QObject):
         for tab_name, tab_info in self.loaded_tabs.items():
             if tab_info.get("instance"):
                 try:
-                    plugin_instance = plugin_registry.get_plugin_instance(tab_name)
+                    plugin_instance = self.registry.get_plugin_instance(tab_name)
                     if hasattr(plugin_instance, 'on_tab_deactivated'):
                         plugin_instance.on_tab_deactivated()
                 except Exception as e:

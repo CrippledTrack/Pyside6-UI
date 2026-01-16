@@ -59,6 +59,12 @@ class TabLoaderThread(QThread):
         
         self._plugin_service = plugin_service
         self._settings_service = settings_service
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        """Request cooperative cancellation of the loader."""
+        self._cancelled = True
+        self.requestInterruption()
 
     def run(self) -> None:
         """Execute the plugin loading process.
@@ -69,15 +75,23 @@ class TabLoaderThread(QThread):
         3. Emits add_tab signals for enabled plugins
         """
         try:
+            if self._should_cancel():
+                return
             # Step 1: Discover and register all plugins
             self._plugin_service.discover_and_register_all_plugins()
             
+            if self._should_cancel():
+                return
             # Step 2: Load saved plugin states (user preferences)
             self._plugin_service.load_saved_plugin_states()
             
+            if self._should_cancel():
+                return
             # Step 3: Emit signals for all enabled plugins
             self._emit_enabled_plugins()
             
+            if self._should_cancel():
+                return
             self.finished.emit()
         except Exception as e:  # pragma: no cover - runtime error path
             logger.error(f"Error in TabLoaderThread: {e}")
@@ -94,6 +108,8 @@ class TabLoaderThread(QThread):
         
         # 1. Add tabs in saved order
         for tab_name in saved_order:
+            if self._should_cancel():
+                return
             if tab_name in enabled_plugins:
                 plugin_class = enabled_plugins[tab_name]
                 self.add_tab.emit(tab_name, plugin_class)
@@ -102,8 +118,14 @@ class TabLoaderThread(QThread):
         
         # 2. Add remaining (new/unsaved) tabs alphabetically
         for tab_name in sorted(enabled_plugins.keys()):
+            if self._should_cancel():
+                return
             plugin_class = enabled_plugins[tab_name]
             self.add_tab.emit(tab_name, plugin_class)
+
+    def _should_cancel(self) -> bool:
+        """Check if cancellation has been requested."""
+        return self._cancelled or self.isInterruptionRequested()
 
 
 __all__ = ['TabLoaderThread']

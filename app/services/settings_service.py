@@ -28,6 +28,8 @@ except (ImportError, AttributeError):
 
 logger = logging.getLogger(__name__)
 
+SETTINGS_SCHEMA_VERSION = 1
+
 
 @dataclass
 class WindowGeometry:
@@ -60,8 +62,13 @@ class AppSettings:
     new_ui_enabled: bool = NEW_UI_ENABLED_BY_DEFAULT
     # GUI version (for future migration detection)
     gui_version: str = ""
+    # Settings schema version (for migration detection)
+    settings_schema_version: int = SETTINGS_SCHEMA_VERSION
     # Plugin settings
     plugin_settings: Dict[str, Dict[str, Any]] = None
+    # Dev mode flags (persisted for convenience)
+    dev_mode: bool = False
+    show_all_platforms: bool = False
     # Session state
     tab_order: List[str] = None
     last_active_tab: str = None
@@ -95,6 +102,7 @@ class SettingsService:
         try:
             with open(self._settings_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
+            data = self._apply_migrations(data)
             
             # Load theme with backward compatibility for renamed defaults
             if 'theme' in data:
@@ -149,9 +157,19 @@ class SettingsService:
             if 'gui_version' in data:
                 self._settings.gui_version = str(data['gui_version'])
             
+            # Load settings schema version
+            if 'settings_schema_version' in data:
+                self._settings.settings_schema_version = int(data['settings_schema_version'])
+            
             # Load plugin settings
             if 'plugin_settings' in data and isinstance(data['plugin_settings'], dict):
                 self._settings.plugin_settings = data['plugin_settings'].copy()
+
+            # Load dev mode flags
+            if 'dev_mode' in data:
+                self._settings.dev_mode = bool(data['dev_mode'])
+            if 'show_all_platforms' in data:
+                self._settings.show_all_platforms = bool(data['show_all_platforms'])
 
             # Load session state
             if 'tab_order' in data and isinstance(data['tab_order'], list):
@@ -188,7 +206,10 @@ class SettingsService:
                 'toast_duration': self._settings.toast_duration,
                 'new_ui_enabled': self._settings.new_ui_enabled,
                 'gui_version': self._settings.gui_version,
+                'settings_schema_version': self._settings.settings_schema_version,
                 'plugin_settings': self._settings.plugin_settings.copy(),
+                'dev_mode': self._settings.dev_mode,
+                'show_all_platforms': self._settings.show_all_platforms,
                 'tab_order': self._settings.tab_order,
                 'last_active_tab': self._settings.last_active_tab
             }
@@ -227,15 +248,38 @@ class SettingsService:
     
     def save_window_geometry(self, x: int, y: int, width: int, height: int) -> None:
         """Save window geometry (only saves size, not position to avoid off-screen issues)"""
-        # Only save width and height, not x/y position
-        # This prevents windows from appearing off-screen when screen setup changes
-        self._settings.window_geometry = WindowGeometry(x=100, y=100, width=width, height=height)
-        self._save_settings()
-        logger.debug(f"Window geometry saved: {width}x{height}")
+        self.save_window_state(x, y, width, height, maximized=False, fullscreen=False)
     
     def get_window_geometry(self) -> WindowGeometry:
         """Get saved window geometry"""
         return self._settings.window_geometry
+
+    def save_window_state(
+        self,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+        maximized: bool,
+        fullscreen: bool
+    ) -> None:
+        """Save window size and state (position is sanitized to avoid off-screen issues)."""
+        self._settings.window_geometry = WindowGeometry(
+            x=100,
+            y=100,
+            width=width,
+            height=height,
+            maximized=maximized,
+            fullscreen=fullscreen
+        )
+        self._save_settings()
+        logger.debug(
+            "Window state saved: %sx%s (maximized=%s, fullscreen=%s)",
+            width,
+            height,
+            maximized,
+            fullscreen
+        )
     
     def get_logging_enabled(self) -> bool:
         """Get logging enabled setting"""
@@ -303,6 +347,18 @@ class SettingsService:
     def get_gui_version(self) -> str:
         """Get saved GUI version"""
         return self._settings.gui_version
+
+    def _apply_migrations(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply schema migrations to settings data."""
+        try:
+            current_version = int(data.get('settings_schema_version', 0))
+        except (TypeError, ValueError):
+            current_version = 0
+        
+        if current_version < 1:
+            data['settings_schema_version'] = 1
+        
+        return data
     
     def save_plugin_settings(self, plugin_name: str, settings: Dict[str, Any]) -> None:
         """
@@ -315,6 +371,26 @@ class SettingsService:
         self._settings.plugin_settings[plugin_name] = settings.copy()
         self._save_settings()
         logger.debug(f"Plugin settings saved for '{plugin_name}'")
+
+    def save_dev_mode(self, enabled: bool) -> None:
+        """Persist dev mode flag."""
+        self._settings.dev_mode = enabled
+        self._save_settings()
+        logger.debug("Dev mode saved: %s", enabled)
+
+    def get_dev_mode(self) -> bool:
+        """Get persisted dev mode flag."""
+        return self._settings.dev_mode
+
+    def save_show_all_platforms(self, enabled: bool) -> None:
+        """Persist show-all-platforms flag."""
+        self._settings.show_all_platforms = enabled
+        self._save_settings()
+        logger.debug("Show all platforms saved: %s", enabled)
+
+    def get_show_all_platforms(self) -> bool:
+        """Get persisted show-all-platforms flag."""
+        return self._settings.show_all_platforms
     
     def get_plugin_settings(self, plugin_name: str) -> Dict[str, Any]:
         """
