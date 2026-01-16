@@ -195,24 +195,16 @@ def get_gui_version() -> str:
     """
     Get the current GUI API version.
     
-    This function tries to import GUI_API_VERSION from app.py, with fallback to constants.
+    This function uses GUI/app/constants.py as the single source of truth.
     Returns:
         Current GUI version string (e.g., "3.0.0")
     """
     try:
-        # Try to import GUI_API_VERSION directly from app module
-        # Use a try-except to handle cases where app hasn't been imported yet
-        import sys
-        if 'GUI.app.app' in sys.modules:
-            module = sys.modules['GUI.app.app']
-            return getattr(module, 'GUI_API_VERSION', '3.0.0')
-        else:
-            # Fallback: import from constants directly
-            from GUI.app.constants import VERSION
-            return VERSION
+        from GUI.app.constants import VERSION
+        return VERSION
     except (ImportError, AttributeError) as e:
-        logger.warning(f"Could not import GUI_API_VERSION, assuming 3.0.0: {e}")
-        return "3.0.0"
+        logger.warning(f"Could not import GUI version constant, assuming 4.0.0: {e}")
+        return "4.0.0"
 
 
 __all__ = [

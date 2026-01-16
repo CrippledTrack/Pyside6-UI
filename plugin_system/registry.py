@@ -13,7 +13,10 @@ plugin instances (for the new instance-based architecture).
 
 from __future__ import annotations
 
+import inspect
 import logging
+import threading
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, Optional, List, Dict, Tuple, Type, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -49,44 +52,60 @@ def _is_show_all_platforms() -> bool:
         return False
 
 def _check_implements_interface(plugin_class: Type[Any], interface: Type) -> bool:
-    """Check if a plugin class implements an interface by checking for required methods.
-    
-    Since Protocol types don't work with issubclass() on classes (only instances),
-    we check for the presence of the signature methods for each interface.
+    """Check if a plugin class implements an interface.
+
+    Protocol types don't work with issubclass() reliably for classes, so we use
+    an explicit interface → requirements mapping and a minimal ABC fallback.
     """
-    # Define the signature methods for each interface type
-    interface_name = getattr(interface, '__name__', str(interface))
-    
-    if interface_name == 'TabExtension':
-        return hasattr(plugin_class, 'create_widget')
-    elif interface_name == 'MenuExtension':
-        return hasattr(plugin_class, 'get_menu_items')
-    elif interface_name == 'StatusExtension':
-        return hasattr(plugin_class, 'create_status_widget')
-    elif interface_name == 'ToolbarExtension':
-        return hasattr(plugin_class, 'get_toolbar_actions')
-    elif interface_name == 'ServiceExtension':
-        return hasattr(plugin_class, 'on_application_start')
-    elif interface_name == 'EventSubscriberExtension':
-        return hasattr(plugin_class, 'get_event_subscriptions')
-    elif interface_name == 'SettingsExtension':
-        # Check if get_settings_widget is overridden (not just inherited)
-        if not hasattr(plugin_class, 'get_settings_widget'):
+    interface_name = getattr(interface, "__name__", str(interface))
+
+    def _has_callable(attr: str) -> bool:
+        try:
+            member = inspect.getattr_static(plugin_class, attr)
+        except Exception:
             return False
-        from .base import BaseTabPlugin
-        method = getattr(plugin_class, 'get_settings_widget')
-        base_method = getattr(BaseTabPlugin, 'get_settings_widget', None)
-        return method is not base_method
-    elif interface_name == 'PluginProtocol':
-        return hasattr(plugin_class, 'plugin_name') and hasattr(plugin_class, 'supported_platforms')
-    
-    # Fallback: try ABC-style check
+        return callable(getattr(plugin_class, attr, None)) and member is not None
+
+    def _has_attr(attr: str) -> bool:
+        return hasattr(plugin_class, attr)
+
+    requirements: Dict[str, Dict[str, List[str]]] = {
+        "TabExtension": {"callable": ["create_widget"], "attrs": []},
+        "MenuExtension": {"callable": ["get_menu_items"], "attrs": []},
+        "StatusExtension": {"callable": ["create_status_widget"], "attrs": []},
+        "ToolbarExtension": {"callable": ["get_toolbar_actions"], "attrs": []},
+        "ServiceExtension": {"callable": ["on_application_start"], "attrs": []},
+        "EventSubscriberExtension": {"callable": ["get_event_subscriptions"], "attrs": []},
+        "SettingsExtension": {"callable": ["get_settings_widget"], "attrs": []},
+        "PluginProtocol": {"callable": [], "attrs": ["plugin_name", "supported_platforms"]},
+    }
+
+    req = requirements.get(interface_name)
+    if req:
+        if interface_name == "SettingsExtension":
+            # Must be overridden (not just inherited default from BaseTabPlugin)
+            try:
+                from .base import BaseTabPlugin
+                method = inspect.getattr_static(plugin_class, "get_settings_widget")
+                base_method = getattr(BaseTabPlugin, "get_settings_widget", None)
+                if getattr(plugin_class, "get_settings_widget", None) is base_method:
+                    return False
+                return method is not None and callable(getattr(plugin_class, "get_settings_widget", None))
+            except Exception:
+                return False
+
+        if any(not _has_callable(name) for name in req["callable"]):
+            return False
+        if any(not _has_attr(name) for name in req["attrs"]):
+            return False
+        return True
+
+    # Fallback: try ABC-style check (best-effort)
     try:
         if isinstance(interface, type) and issubclass(plugin_class, interface):
             return True
     except TypeError:
         pass
-    
     return False
 
 
@@ -123,6 +142,10 @@ class PluginRegistry:
         
         # Plugin instances cache (v4.0.0)
         self._plugin_instances: Dict[str, Any] = {}
+
+        # Optional async event delivery executor (opt-in)
+        self._event_executor: Optional[ThreadPoolExecutor] = None
+        self._event_executor_lock = threading.Lock()
         
         # Track plugins seen in this runtime
         self._seen_plugins: set = set()
@@ -435,6 +458,29 @@ class PluginRegistry:
         self._service_plugins.clear()
         self._event_subscriber_plugins.clear()
         self._rejected_plugins.clear()
+        self._shutdown_event_executor()
+
+    def _get_event_executor(self) -> ThreadPoolExecutor:
+        """Get/create the bounded executor used for async event delivery."""
+        with self._event_executor_lock:
+            if self._event_executor is None:
+                # Keep this small; event callbacks may touch non-thread-safe UI.
+                self._event_executor = ThreadPoolExecutor(
+                    max_workers=4,
+                    thread_name_prefix="plugin_events",
+                )
+            return self._event_executor
+
+    def _shutdown_event_executor(self) -> None:
+        """Shutdown the async event executor if it exists."""
+        with self._event_executor_lock:
+            if self._event_executor is not None:
+                try:
+                    self._event_executor.shutdown(wait=False, cancel_futures=True)
+                except TypeError:
+                    # Python <3.9 doesn't support cancel_futures
+                    self._event_executor.shutdown(wait=False)
+                self._event_executor = None
 
     def get_version_incompatibility(self, name: str) -> Optional[str]:
         """Get the version incompatibility reason for a plugin, if any."""
@@ -514,6 +560,11 @@ class PluginRegistry:
         Args:
             event_name: Name of the event
             event_data: Optional data associated with the event
+
+        Notes:
+            This is synchronous. If a subscriber is slow, it will slow the publisher.
+            For best-effort non-blocking delivery, use publish_event_async().
+            UI-touching callbacks must marshal back to the Qt main thread.
         """
         if event_data is None:
             event_data = {}
@@ -535,6 +586,44 @@ class PluginRegistry:
                     callback(event_data)
             except Exception as e:
                 logger.error(f"Error delivering event '{event_name}' to '{plugin_name}': {e}")
+
+    def publish_event_async(self, event_name: str, event_data: Dict[str, Any] = None) -> List["Future[None]"]:
+        """Publish an event asynchronously to subscribed plugins (opt-in).
+
+        This prevents slow subscribers from blocking the caller. Callbacks are
+        executed on a thread pool. Any UI work must marshal back to the Qt thread.
+        """
+        if event_data is None:
+            event_data = {}
+
+        subscribers = self.get_event_subscriber_extensions(enabled_only=True)
+        executor = self._get_event_executor()
+        futures: List[Future] = []
+
+        for plugin_name, plugin_class in subscribers.items():
+            try:
+                try:
+                    instance = self.get_plugin_instance(plugin_name)
+                    subscriptions = instance.get_event_subscriptions()
+                except (ValueError, AttributeError):
+                    subscriptions = plugin_class.get_event_subscriptions()
+
+                if event_name not in subscriptions:
+                    continue
+
+                callback = subscriptions[event_name]
+
+                def _run(cb=callback, data=event_data, name=plugin_name, ev=event_name):
+                    try:
+                        cb(data)
+                    except Exception as e:
+                        logger.error("Error delivering async event '%s' to '%s': %s", ev, name, e)
+
+                futures.append(executor.submit(_run))
+            except Exception as e:
+                logger.error("Error scheduling event '%s' to '%s': %s", event_name, plugin_name, e)
+
+        return futures
 
 
 # Global plugin registry instance

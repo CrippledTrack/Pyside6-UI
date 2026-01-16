@@ -12,7 +12,7 @@ import platform
 # =============================================================================
 # Version Information (can be overridden by app_plugins/constants.py)
 # =============================================================================
-VERSION = "4.0.0-dev-9"
+VERSION = "4.0.0--10"
 VERSION_NAME = "Basic UI Application"
 
 VERSION_INFO = {
