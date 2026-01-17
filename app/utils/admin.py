@@ -53,7 +53,7 @@ def set_dev_mode(enabled: bool) -> None:
     Args:
         enabled: True to enable dev mode, False to disable
     """
-    global _dev_mode
+    global _dev_mode, _show_all_platforms
     _dev_mode = enabled
     if not enabled:
         _show_all_platforms = False

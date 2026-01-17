@@ -8,7 +8,7 @@ activation/deactivation, and lifecycle management, extracted from MainWindow.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional, Callable, TYPE_CHECKING
+from typing import Any, Dict, Optional, Callable, TYPE_CHECKING, List
 
 from PySide6.QtCore import Signal, QObject
 from PySide6.QtWidgets import QTabWidget, QWidget
@@ -142,12 +142,20 @@ class TabController(QObject):
             try:
                 prev_tab_name = self.tab_widget.tabText(self._previous_tab_index)
                 prev_instance_info = self.loaded_tabs.get(prev_tab_name)
-                # Only call if we have a widget instance
-                if prev_instance_info and prev_instance_info.get("instance"):
-                    plugin_instance = self.registry.get_plugin_instance(prev_tab_name)
-                    if hasattr(plugin_instance, 'on_tab_deactivated'):
-                        plugin_instance.on_tab_deactivated()
-                self.tab_deactivated.emit(prev_tab_name)
+                prev_instance = prev_instance_info.get("instance") if prev_instance_info else None
+
+                # Only deactivate/emit for a real plugin tab widget (not placeholders)
+                if prev_instance and not isinstance(
+                    prev_instance, (LoadingPlaceholder, ErrorPlaceholder, AdminRequiredPlaceholder)
+                ):
+                    try:
+                        plugin_instance = self.registry.get_plugin_instance(prev_tab_name)
+                        if hasattr(plugin_instance, 'on_tab_deactivated'):
+                            plugin_instance.on_tab_deactivated()
+                    except Exception as e:
+                        logger.debug(f"Error calling deactivation hook: {e}")
+
+                    self.tab_deactivated.emit(prev_tab_name)
             except Exception as e:
                 logger.debug(f"Error calling deactivation hook: {e}")
         
@@ -213,7 +221,7 @@ class TabController(QObject):
                         plugin_instance.on_tab_activated()
                 except Exception as e:
                     logger.debug(f"Error calling activation hook for {tab_name}: {e}")
-            self.tab_activated.emit(tab_name)
+                self.tab_activated.emit(tab_name)
         
         except Exception as e:
             logger.error(f"Error loading tab {tab_name}: {e}")
@@ -386,4 +394,3 @@ class TabController(QObject):
 
 
 __all__ = ['TabController']
-

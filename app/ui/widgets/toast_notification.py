@@ -219,7 +219,34 @@ class ToastNotification(QFrame):
     
     def _get_default_notification_colors(self, notification_type: str) -> dict:
         """Get default notification colors when no theme manager is available."""
-        return self._get_notification_colors(notification_type, False)
+        palette = self.palette()
+        window_color = palette.color(QPalette.ColorRole.Window)
+        text_color = palette.color(QPalette.ColorRole.WindowText)
+        is_dark = window_color.lightnessF() < 0.5
+
+        accents = {
+            "info": QColor("#0078d4"),
+            "success": QColor("#2e7d32"),
+            "warning": QColor("#ed6c02"),
+            "error": QColor("#d32f2f"),
+            "loading": QColor("#6a1b9a"),
+        }
+        accent = accents.get(notification_type, accents["info"])
+        r, g, b = accent.red(), accent.green(), accent.blue()
+
+        if is_dark:
+            background_color = f"rgba({r}, {g}, {b}, 0.25)"
+            hover_color = f"rgba({r}, {g}, {b}, 0.35)"
+        else:
+            background_color = window_color.name()
+            hover_color = f"rgba({r}, {g}, {b}, 0.1)"
+
+        return {
+            "background": background_color,
+            "border": accent.name(),
+            "text": text_color.name(),
+            "hover": hover_color,
+        }
     
     def setup_animation(self) -> None:
         """Setup slide-in animation."""
@@ -327,4 +354,3 @@ class ToastNotification(QFrame):
 
 
 __all__ = ['ToastNotification']
-
