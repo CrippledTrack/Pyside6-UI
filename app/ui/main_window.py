@@ -34,6 +34,7 @@ from ..services.plugin_service import PluginService
 from ..services.admin_service import AdminService
 from ..services.daemon_service import DaemonService
 from ..services.tab_loader_service import TabLoaderThread
+from ..services.plugin_registry_facade import PluginRegistryFacade
 from .controllers.tab_controller import TabController
 from .controllers.plugin_controller import PluginController
 from .controllers.menu_bar_controller import MenuBarController
@@ -108,6 +109,7 @@ class MainWindow(QMainWindow):
         # Get services from container
         self.admin_service = container.get(AdminService)
         self.daemon_service = container.get(DaemonService)
+        self.plugin_registry = container.get(PluginRegistryFacade)
         
         # Register daemon refresh callback on Linux
         if CURRENT_PLATFORM == "linux":
@@ -191,8 +193,17 @@ class MainWindow(QMainWindow):
         self.setStatusBar(status_bar)
         status_bar.setMaximumHeight(20)
         
+        # Get notification service
+        from ..services.notification_service import NotificationService
+        notification_service = self.container.get(NotificationService)
+        
         # Create status bar manager
-        self.status_bar_manager = StatusBarManager(status_bar, self)
+        self.status_bar_manager = StatusBarManager(
+            status_bar, 
+            self, 
+            notification_service,
+            self.theme_manager
+        )
     
     def _setup_menu_bar(self) -> None:
         """Create menu bar and all menu items."""
@@ -247,16 +258,15 @@ class MainWindow(QMainWindow):
             # Wait for the thread to finish if still running
             if self.tab_loader.isRunning():
                 logger.debug("Waiting for previous tab loader thread to finish...")
-                self.tab_loader.quit()
+                self.tab_loader.cancel()
                 self.tab_loader.wait(5000)  # Wait up to 5 seconds
                 if self.tab_loader.isRunning():
                     logger.warning("Previous tab loader thread did not finish in time")
-                    self.tab_loader.terminate()
-                    self.tab_loader.wait()
         
         plugin_service = self.container.get(PluginService)
         self.tab_loader = TabLoaderThread(
-            plugin_service=plugin_service
+            plugin_service=plugin_service,
+            settings_service=self.settings_service
         )
         self.tab_loader.finished.connect(self.on_tabs_loaded)
         self.tab_loader.error.connect(self.on_tab_load_error)
@@ -307,7 +317,17 @@ class MainWindow(QMainWindow):
         logger.info("All tabs loaded successfully")
         self._update_window_title()
         
-        # Integrate v3.4.0 extension plugins (Menu, Status, Toolbar, Service)
+        # Restore last active tab
+        if self.settings_service:
+            last_active = self.settings_service.get_last_active_tab()
+            if last_active:
+                # Find index of this tab
+                for i in range(self.tab_widget.count()):
+                    if self.tab_widget.tabText(i) == last_active:
+                        self.tab_widget.setCurrentIndex(i)
+                        break
+        
+        # Integrate extension plugins (Menu, Status, Toolbar, Service)
         self.plugin_controller.integrate_extensions(self)
     
     def on_tab_load_error(self, error_msg: str) -> None:
@@ -339,10 +359,10 @@ class MainWindow(QMainWindow):
             self._plugin_dialog.activateWindow()
             return
 
-        dlg = PluginManagementDialog(self, self.settings_service)
+        dlg = PluginManagementDialog(self, self.settings_service, self.plugin_controller)
         dlg.setWindowModality(Qt.WindowModality.NonModal)
         dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dlg.pluginToggled.connect(self.plugin_controller.toggle_plugin)
+        dlg.plugin_toggled.connect(self.plugin_controller.toggle_plugin)
         dlg.destroyed.connect(lambda: setattr(self, "_plugin_dialog", None))
         dlg.resize(900, 560)
 
@@ -361,7 +381,9 @@ class MainWindow(QMainWindow):
         if enabled:
             plugin_class = self.plugin_controller.get_plugin(plugin_name)
             if plugin_class:
-                self.tab_controller.add_tab(plugin_name, plugin_class)
+                # Check if Tab extension is enabled
+                if self.settings_service.is_extension_enabled(plugin_name, "Tab"):
+                    self.tab_controller.add_tab(plugin_name, plugin_class)
         else:
             self.tab_controller.remove_tab(plugin_name)
         
@@ -377,8 +399,8 @@ class MainWindow(QMainWindow):
         dialog = ThemeDialog(self.theme_manager, self.settings_service, self)
         dialog.setWindowModality(Qt.WindowModality.NonModal)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dialog.themeSelected.connect(self.on_theme_selected)
-        dialog.uiToggleChanged.connect(self._on_ui_toggle_from_dialog)
+        dialog.theme_selected.connect(self.on_theme_selected)
+        dialog.ui_toggle_changed.connect(self._on_ui_toggle_from_dialog)
         dialog.destroyed.connect(lambda: setattr(self, "_theme_dialog", None))
 
         self._theme_dialog = dialog
@@ -461,8 +483,6 @@ class MainWindow(QMainWindow):
         Args:
             theme_name: Name of the selected theme
         """
-        from ...plugin_system.registry import plugin_registry
-        
         logger.info(f"Theme selected: {theme_name}")
         # Reapply theme with current UI flag setting
         if self.settings_service:
@@ -475,8 +495,13 @@ class MainWindow(QMainWindow):
             self.toast_manager.update_theme_manager(self.theme_manager)
             self.toast_manager.refresh_theme()
         
+        # Refresh status bar notifications with new theme
+        if hasattr(self, 'status_bar_manager') and self.status_bar_manager:
+            self.status_bar_manager.refresh_theme()
+        
         # Publish event for subscribers
-        plugin_registry.publish_event("theme_changed", {"theme": theme_name})
+        self.plugin_registry.publish_event("theme_changed", {"theme": theme_name})
+
     
     def restart_as_admin(self) -> None:
         """Restart the application with administrator/root privileges.
@@ -605,7 +630,9 @@ class MainWindow(QMainWindow):
     
     def setup_toast_manager(self) -> None:
         """Setup the toast notification manager."""
-        self.toast_manager = ToastManager(self, self.theme_manager)
+        from ..services.notification_service import NotificationService
+        notification_service = self.container.get(NotificationService)
+        self.toast_manager = ToastManager(self, self.theme_manager, notification_service)
     
     def setup_shortcuts(self) -> None:
         """Setup keyboard shortcuts."""
@@ -654,20 +681,20 @@ class MainWindow(QMainWindow):
         if self.settings_service:
             # Save window geometry
             geom = self.geometry()
-            self.settings_service.save_window_geometry(
-                geom.x(), geom.y(), geom.width(), geom.height()
+            self.settings_service.save_window_state(
+                geom.x(),
+                geom.y(),
+                geom.width(),
+                geom.height(),
+                maximized=self.isMaximized(),
+                fullscreen=self.isFullScreen()
             )
             
-            # Save window state
-            if self.isMaximized():
-                self.settings_service._settings.window_geometry.maximized = True
-            elif self.isFullScreen():
-                self.settings_service._settings.window_geometry.fullscreen = True
-            else:
-                self.settings_service._settings.window_geometry.maximized = False
-                self.settings_service._settings.window_geometry.fullscreen = False
-            self.settings_service._save_settings()
-        
+            # Save session state (tab order and active tab)
+            tab_order = self.tab_controller.get_tab_order()
+            active_tab = self.tab_controller.get_current_tab_name()
+            self.settings_service.save_session_state(tab_order, active_tab)
+            
         # Shutdown ServiceExtension plugins
         self.plugin_controller.shutdown_service_extensions()
         

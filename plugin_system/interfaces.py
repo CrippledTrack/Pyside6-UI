@@ -1,28 +1,213 @@
 """
-Plugin extension interfaces for the CyberPatriot-Scripts GUI.
+Plugin extension interfaces for the Basic UI Application.
 
-This module defines abstract base classes for each extension point that plugins
+This module defines Protocol-based interfaces for each extension point that plugins
 can implement. Plugins can implement any combination of these interfaces.
 
-All interfaces are optional - plugins only need to implement the ones they use.
-Backward compatibility: existing plugins using BaseTabPlugin continue to work.
+v4.0.0 BREAKING CHANGES:
+- All interfaces now use typing.Protocol instead of ABC
+- Methods are instance-based (use `self`) instead of classmethods
+- Removed `tab_name` aliasing - use `plugin_name` and `tab_title`
+- `create_widget` now typed to return QWidget
+
+Legacy 3.x plugins can use LegacyPluginAdapter from compatibility.py.
 """
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import (
+    Any, Callable, Dict, List, Optional, 
+    Protocol, runtime_checkable, TYPE_CHECKING
+)
 
 if TYPE_CHECKING:
+    from PySide6.QtWidgets import QWidget
     from .types import MenuItemDefinition, ToolbarAction
+    from ..app.services.container import ServiceContainer
+
+
+@runtime_checkable
+class PluginProtocol(Protocol):
+    """Base protocol all plugins must satisfy.
+    
+    This is checked at runtime using isinstance() to determine if a class
+    is a valid plugin.
+    """
+    
+    # Required metadata (class-level)
+    plugin_name: str
+    plugin_version: str
+    supported_platforms: List[str]
+    
+    # Optional metadata with defaults
+    plugin_description: str
+    plugin_author: str
+    plugin_authors: List[str]
+    dependencies: List[str]
+    disabled_by_default: bool
+    min_gui_version: Optional[str]
+    required_gui_version: Optional[str]
+
+
+@runtime_checkable
+class TabExtension(Protocol):
+    """Interface for plugins that provide a tab widget.
+    
+    This is the primary extension point for adding new tabs to the application.
+    
+    Attributes:
+        plugin_name: Unique identifier for the plugin
+        tab_title: Display name shown in the tab bar
+        requires_admin: Whether admin privileges are needed
+    """
+    
+    plugin_name: str
+    tab_title: str
+    requires_admin: bool
+    
+    def create_widget(self, parent: Optional["QWidget"] = None) -> "QWidget":
+        """Create and return a UI widget to be used as the tab's content.
+        
+        Args:
+            parent: The parent widget (e.g., QTabWidget for PySide6)
+            
+        Returns:
+            A QWidget instance for the tab content
+        """
+        ...
+    
+    def on_tab_activated(self) -> None:
+        """Called when the tab becomes active. Optional override."""
+        ...
+    
+    def on_tab_deactivated(self) -> None:
+        """Called when the tab becomes inactive. Optional override."""
+        ...
+
+
+@runtime_checkable
+class MenuExtension(Protocol):
+    """Interface for plugins that contribute menu items to the main menu bar."""
+    
+    plugin_name: str
+    
+    def get_menu_items(self) -> List["MenuItemDefinition"]:
+        """Return a list of menu items to add to the application menu bar.
+        
+        Returns:
+            List of MenuItemDefinition objects specifying menu, label, callback, etc.
+        """
+        ...
+
+
+@runtime_checkable
+class StatusExtension(Protocol):
+    """Interface for plugins that contribute widgets to the status bar."""
+    
+    plugin_name: str
+    
+    def create_status_widget(self, parent: Optional["QWidget"] = None) -> "QWidget":
+        """Create and return a widget to display in the status bar.
+        
+        Args:
+            parent: The parent widget (status bar)
+            
+        Returns:
+            A UI widget to embed in the status bar
+        """
+        ...
+
+
+@runtime_checkable
+class ToolbarExtension(Protocol):
+    """Interface for plugins that contribute actions to the main toolbar."""
+    
+    plugin_name: str
+    
+    def get_toolbar_actions(self) -> List["ToolbarAction"]:
+        """Return a list of actions to add to the main toolbar.
+        
+        Returns:
+            List of ToolbarAction objects
+        """
+        ...
+
+
+@runtime_checkable
+class ServiceExtension(Protocol):
+    """Interface for plugins that provide background services with no UI.
+    
+    These plugins are initialized when the application starts and cleaned up
+    when it shuts down. They can perform background tasks, monitoring, etc.
+    """
+    
+    plugin_name: str
+    
+    def on_application_start(self, container: "ServiceContainer") -> None:
+        """Called when the application starts.
+        
+        Args:
+            container: The ServiceContainer for accessing other services
+        """
+        ...
+    
+    def on_application_shutdown(self) -> None:
+        """Called when the application is shutting down."""
+        ...
+
+
+@runtime_checkable
+class EventSubscriberExtension(Protocol):
+    """Interface for plugins that subscribe to application events.
+    
+    This enables cross-plugin communication via a publish/subscribe pattern.
+    """
+    
+    plugin_name: str
+    
+    def get_event_subscriptions(self) -> Dict[str, Callable[..., None]]:
+        """Return a mapping of event names to callback functions.
+        
+        Returns:
+            Dict mapping event name strings to callback functions
+        """
+        ...
+
+
+@runtime_checkable  
+class SettingsExtension(Protocol):
+    """Interface for plugins that have configurable settings."""
+    
+    plugin_name: str
+    
+    def get_settings_widget(self, parent: Optional["QWidget"] = None) -> Optional["QWidget"]:
+        """Get a settings widget for this plugin.
+        
+        Args:
+            parent: Parent widget for the settings widget
+            
+        Returns:
+            A widget containing settings controls, or None
+        """
+        ...
+    
+    def on_settings_changed(self, settings_dict: Dict[str, Any]) -> None:
+        """Called when plugin settings are changed."""
+        ...
+
+
+# =============================================================================
+# Legacy ABC interfaces (for 3.x compatibility)
+# =============================================================================
+# These will be removed in a future version. Use the Protocol interfaces above.
+
+from abc import ABC, abstractmethod
 
 
 class Plugin(ABC):
-    """Base class for all plugins.
+    """Legacy base class for all plugins.
     
-    This provides common metadata that all plugins should have.
-    Plugins don't inherit from this directly - they implement one or more
-    of the extension interfaces below.
+    This class is kept for backward compatibility with 3.x plugins.
     """
     
     # Required metadata
@@ -30,10 +215,10 @@ class Plugin(ABC):
     plugin_description: str = "No description provided"
     plugin_version: str = "1.0.0"
     plugin_author: str = "Unknown"
-    plugin_authors: List[str] = []  # Optional list of authors
+    plugin_authors: List[str] = []
     
-    # Platform support
-    supported_platforms: List[str] = ["Windows", "Linux"]
+    # Platform support (empty list = all platforms supported)
+    supported_platforms: List[str] = []
     
     # Optional: dependencies on other plugins (by plugin_name)
     dependencies: List[str] = []
@@ -59,10 +244,13 @@ class Plugin(ABC):
 
         author_text = ", ".join(authors_list) if authors_list else str(getattr(cls, 'plugin_author', 'Unknown'))
 
+        # If supported_platforms is empty, show all application-supported platforms
+        display_platforms = cls.supported_platforms if cls.supported_platforms else ["Windows", "Linux"]
+
         return {
             'name': getattr(cls, 'plugin_name', cls.__name__),
             'description': cls.plugin_description,
-            'supported_platforms': cls.supported_platforms,
+            'supported_platforms': display_platforms,
             'version': cls.plugin_version,
             'author': author_text,
             'authors': authors_list,
@@ -72,149 +260,9 @@ class Plugin(ABC):
         }
 
 
-class TabExtension(ABC):
-    """Interface for plugins that provide a tab widget.
-    
-    This is the primary extension point and corresponds to the existing
-    BaseTabPlugin functionality.
-    """
-    
-    # Tab-specific metadata
-    tab_name: str = "Unnamed Tab"
-    tab_description: str = "No description provided"
-    requires_admin: bool = False
-    
-    @classmethod
-    @abstractmethod
-    def create_widget(cls, parent: Optional[Any] = None) -> Any:
-        """Create and return a UI widget to be used as the tab's content.
-        
-        Args:
-            parent: The parent widget (e.g., QTabWidget for PySide6)
-            
-        Returns:
-            A UI widget appropriate for the framework being used
-        """
-        pass
-    
-    @classmethod
-    def on_tab_activated(cls, widget: Any) -> None:
-        """Called when the tab becomes active. Optional override."""
-        pass
-    
-    @classmethod
-    def on_tab_deactivated(cls, widget: Any) -> None:
-        """Called when the tab becomes inactive. Optional override."""
-        pass
-
-
-class MenuExtension(ABC):
-    """Interface for plugins that contribute menu items to the main menu bar."""
-    
-    @classmethod
-    @abstractmethod
-    def get_menu_items(cls) -> List["MenuItemDefinition"]:
-        """Return a list of menu items to add to the application menu bar.
-        
-        Returns:
-            List of MenuItemDefinition objects specifying menu, label, callback, etc.
-        """
-        pass
-
-
-class StatusExtension(ABC):
-    """Interface for plugins that contribute widgets to the status bar."""
-    
-    @classmethod
-    @abstractmethod
-    def create_status_widget(cls, parent: Optional[Any] = None) -> Any:
-        """Create and return a widget to display in the status bar.
-        
-        Args:
-            parent: The parent widget (status bar)
-            
-        Returns:
-            A UI widget to embed in the status bar
-        """
-        pass
-
-
-class ToolbarExtension(ABC):
-    """Interface for plugins that contribute actions to the main toolbar."""
-    
-    @classmethod
-    @abstractmethod
-    def get_toolbar_actions(cls) -> List["ToolbarAction"]:
-        """Return a list of actions to add to the main toolbar.
-        
-        Returns:
-            List of ToolbarAction objects
-        """
-        pass
-
-
-class ServiceExtension(ABC):
-    """Interface for plugins that provide background services with no UI.
-    
-    These plugins are initialized when the application starts and cleaned up
-    when it shuts down. They can perform background tasks, monitoring, etc.
-    """
-    
-    @classmethod
-    def on_application_start(cls, container: Any) -> None:
-        """Called when the application starts.
-        
-        Args:
-            container: The ServiceContainer for accessing other services
-        """
-        pass
-    
-    @classmethod
-    def on_application_shutdown(cls) -> None:
-        """Called when the application is shutting down."""
-        pass
-
-
-class EventSubscriberExtension(ABC):
-    """Interface for plugins that subscribe to application events.
-    
-    This enables cross-plugin communication via a publish/subscribe pattern.
-    """
-    
-    @classmethod
-    @abstractmethod
-    def get_event_subscriptions(cls) -> Dict[str, Callable]:
-        """Return a mapping of event names to callback functions.
-        
-        Returns:
-            Dict mapping event name strings to callback functions
-        """
-        pass
-
-
-class SettingsExtension(ABC):
-    """Interface for plugins that have configurable settings."""
-    
-    @classmethod
-    def get_settings_widget(cls, parent: Optional[Any] = None) -> Optional[Any]:
-        """Get a settings widget for this plugin.
-        
-        Args:
-            parent: Parent widget for the settings widget
-            
-        Returns:
-            A widget containing settings controls, or None
-        """
-        return None
-    
-    @classmethod
-    def on_settings_changed(cls, settings_dict: Dict[str, Any]) -> None:
-        """Called when plugin settings are changed."""
-        pass
-
-
 __all__ = [
-    'Plugin',
+    # New Protocol interfaces (v4.0.0)
+    'PluginProtocol',
     'TabExtension',
     'MenuExtension',
     'StatusExtension',
@@ -222,4 +270,6 @@ __all__ = [
     'ServiceExtension',
     'EventSubscriberExtension',
     'SettingsExtension',
+    # Legacy (for 3.x compatibility)
+    'Plugin',
 ]

@@ -9,31 +9,37 @@ plugin settings.
 from __future__ import annotations
 
 import inspect
+import logging
 import os
 import sys
-from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem,
-    QHeaderView, QCheckBox, QMessageBox, QLineEdit, QComboBox, QSplitter, QWidget, QFormLayout,
-    QTextEdit, QAbstractItemView, QMenu, QGroupBox
-)
-from PySide6.QtCore import Signal, Qt, QPoint
 from typing import Optional, List, Tuple, Any, Type, Dict
+
+from PySide6.QtCore import Signal, Qt, QPoint
+from PySide6.QtWidgets import (
+    QAbstractItemView, QCheckBox, QComboBox, QDialog, QFormLayout, QGroupBox,
+    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMenu, QMessageBox,
+    QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QTextEdit,
+    QVBoxLayout, QWidget
+)
+
 from ....plugin_system.base import plugin_registry, BaseTabPlugin
+
+logger = logging.getLogger(__name__)
 
 
 class PluginManagementDialog(QDialog):
     """Dialog for managing plugin lifecycle and configuration."""
     
-    pluginToggled = Signal(str, bool)
+    plugin_toggled = Signal(str, bool)  # Emitted when a plugin is toggled (name, enabled)
     
-    def __init__(self, parent: Optional[QWidget] = None, settings_service: Optional[Any] = None) -> None:
+    def __init__(self, parent: Optional[QWidget] = None, settings_service: Optional[Any] = None, plugin_controller: Optional[Any] = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Plugin Management")
         self.resize(900, 560)
         self._all_plugins = []  # List of (name, plugin_class)
         self._rejected_plugins = {}  # Dict of name -> (plugin_class, reason)
         self.settings_service = settings_service
-        self.ext_checkboxes = {}  # Store extension checkboxes
+        self.plugin_controller = plugin_controller
         self.setup_ui()
         self.load_plugins()
 
@@ -107,12 +113,12 @@ class PluginManagementDialog(QDialog):
         self.details_module = QLabel("-")
         self.details_min_gui_version = QLabel("-")
         self.details_required_gui_version = QLabel("-")
-        self.details_extensions = QLabel("-")  # Show extension types
+        self.details_types = QLabel("-")  # Show plugin types
         form.addRow("Name:", self.details_name)
         form.addRow("Version:", self.details_version)
         form.addRow("Authors:", self.details_author)
         form.addRow("Type:", self.details_type)
-        form.addRow("Extensions:", self.details_extensions)  # New row for extensions
+        form.addRow("Types:", self.details_types)  # New row for types
         form.addRow("Requires Admin:", self.details_requires_admin)
         form.addRow("Platforms:", self.details_platforms)
         form.addRow("Module:", self.details_module)
@@ -125,21 +131,24 @@ class PluginManagementDialog(QDialog):
         self.details_description.setReadOnly(True)
         self.details_description.setFixedHeight(100)
         details_layout.addWidget(self.details_description)
-
-        # Extension Types Configuration Group
-        self.extensions_group = QGroupBox("Extension Types (toggle to enable/disable)")
-        ext_layout = QHBoxLayout()
-        ext_layout.setContentsMargins(8, 4, 8, 4)
         
-        self.ext_checkboxes = {}
-        for ext_type in ["Menu", "Toolbar", "Status", "Service"]:
+        # Extension type toggles section
+        # NOTE: Keep a single checkbox group and a single handler. We always use
+        # `stateChanged(int)` so the handler receives Qt checkbox states (0/2).
+        self.extensions_group = QGroupBox("Extension Types (toggle to enable/disable)")
+        ext_layout = QHBoxLayout(self.extensions_group)
+        ext_layout.setContentsMargins(8, 4, 8, 4)
+
+        self.ext_checkboxes: Dict[str, QCheckBox] = {}
+        for ext_type in ["Tab", "Menu", "Toolbar", "Status", "Service"]:
             cb = QCheckBox(ext_type)
-            cb.clicked.connect(lambda checked, t=ext_type: self._on_extension_toggled(t, int(checked)))
+            cb.setChecked(True)  # Default enabled
+            cb.setEnabled(False)  # Disabled until a plugin is selected
+            cb.stateChanged.connect(lambda state, t=ext_type: self._on_extension_toggled(t, state))
             self.ext_checkboxes[ext_type] = cb
             ext_layout.addWidget(cb)
-        
+
         ext_layout.addStretch()
-        self.extensions_group.setLayout(ext_layout)
         details_layout.addWidget(self.extensions_group)
 
         # Action buttons for details
@@ -183,31 +192,40 @@ class PluginManagementDialog(QDialog):
 
     def _get_extension_types(self, plugin_class: type) -> str:
         """Get a string describing which extension interfaces the plugin implements."""
-        from ....plugin_system.interfaces import (
-            TabExtension,
-            MenuExtension,
-            StatusExtension,
-            ToolbarExtension,
-            ServiceExtension,
-            EventSubscriberExtension,
-            SettingsExtension,
-        )
-        
         extensions = []
-        if issubclass(plugin_class, TabExtension):
+        
+        # Check for Tab extension (has create_widget method)
+        if hasattr(plugin_class, 'create_widget'):
             extensions.append("Tab")
-        if issubclass(plugin_class, MenuExtension):
+        
+        # Check for Menu extension (has get_menu_items method)
+        if hasattr(plugin_class, 'get_menu_items'):
             extensions.append("Menu")
-        if issubclass(plugin_class, StatusExtension):
+        
+        # Check for Status extension (has create_status_widget method)
+        if hasattr(plugin_class, 'create_status_widget'):
             extensions.append("Status")
-        if issubclass(plugin_class, ToolbarExtension):
+        
+        # Check for Toolbar extension (has get_toolbar_actions method)
+        if hasattr(plugin_class, 'get_toolbar_actions'):
             extensions.append("Toolbar")
-        if issubclass(plugin_class, ServiceExtension):
+        
+        # Check for Service extension (has on_application_start OR get_event_subscriptions)
+        # Events are grouped under Service for user simplicity
+        has_service = hasattr(plugin_class, 'on_application_start')
+        has_events = hasattr(plugin_class, 'get_event_subscriptions')
+        if has_service or has_events:
             extensions.append("Service")
-        if issubclass(plugin_class, EventSubscriberExtension):
-            extensions.append("Events")
-        if issubclass(plugin_class, SettingsExtension):
-            extensions.append("Settings")
+        
+        # Check for Settings extension (has get_settings_widget method)
+        # Note: Be careful as BaseTabPlugin also has this - only count if not default
+        if hasattr(plugin_class, 'get_settings_widget'):
+            method = getattr(plugin_class, 'get_settings_widget')
+            # Check if it's overridden (not just inherited from base)
+            from ....plugin_system.base import BaseTabPlugin
+            base_method = getattr(BaseTabPlugin, 'get_settings_widget', None)
+            if method is not base_method:
+                extensions.append("Settings")
         
         return ", ".join(extensions) if extensions else ""
 
@@ -228,9 +246,10 @@ class PluginManagementDialog(QDialog):
         """
         # Don't call registry directly - let the controller handle it
         # This ensures dynamic extension integration runs for new plugins
-        self.pluginToggled.emit(name, bool(state))
+        self.plugin_toggled.emit(name, bool(state))
         
-        # If this is the currently selected plugin, refresh the details
+        # If this is the currently selected plugin, refresh the details panel
+        # to update the extension checkboxes (grey out if disabled)
         if name == self.get_selected_plugin_name():
             self.on_selection_changed()
     
@@ -238,7 +257,11 @@ class PluginManagementDialog(QDialog):
         """Force-enable a version-incompatible plugin."""
         if not state:
             # Being disabled - let the controller handle it via signal
-            self.pluginToggled.emit(name, False)
+            self.plugin_toggled.emit(name, False)
+            
+            # If this is the currently selected plugin, refresh the details panel
+            if name == self.get_selected_plugin_name():
+                self.on_selection_changed()
             return
         
         # Show warning before force-enabling
@@ -268,38 +291,25 @@ class PluginManagementDialog(QDialog):
             plugin_registry._categorize_plugin_by_interface(name, plugin_class)
             # Enable it
             plugin_registry.enable_plugin(name)
-            self.pluginToggled.emit(name, True)
+            self.plugin_toggled.emit(name, True)
             # Reload to update UI
             self.load_plugins()
-
-    def _on_extension_toggled(self, extension_type: str, state: int) -> None:
-        """Handle individual extension toggling."""
-        plugin_name = self.get_selected_plugin_name()
-        if not plugin_name or not self.settings_service:
-            return
-            
-        enabled = bool(state)
-        self.settings_service.set_extension_enabled(plugin_name, extension_type, enabled)
-        
-        # Service checkbox also controls Events (they're grouped for user simplicity)
-        if extension_type == "Service":
-            self.settings_service.set_extension_enabled(plugin_name, "Events", enabled)
-        
-        # Determine main window for refresh
-        main_window = self.parent()
-        while main_window and not hasattr(main_window, 'plugin_controller'):
-            main_window = main_window.parent()
-            
-        if main_window and hasattr(main_window, 'plugin_controller'):
-            main_window.plugin_controller.refresh_plugin_extensions(plugin_name)
 
     def reload_plugins(self) -> None:
         """Reload all plugins from the registry."""
         # Clear and re-discover plugins
-        from ...services.plugin_service import discover_and_register_all_plugins
+        # from ...services.plugin_service import discover_and_register_all_plugins
+        if not (self.plugin_controller and self.plugin_controller.plugin_service):
+            QMessageBox.warning(
+                self,
+                "Reload Unavailable",
+                "Plugin reload is unavailable because the plugin service is not initialized."
+            )
+            return
+
         plugin_registry.clear()
-        # Use the comprehensive plugin discovery that handles both external and built-in plugins
-        discover_and_register_all_plugins()
+        # Use the comprehensive plugin discovery from the service
+        self.plugin_controller.plugin_service.discover_and_register_all_plugins()
         QMessageBox.information(self, "Plugins Reloaded", "Plugins have been reloaded.")
         self.load_plugins()
 
@@ -383,6 +393,7 @@ class PluginManagementDialog(QDialog):
             if is_rejected:
                 # Create container widget with checkbox + warning label
                 container = QWidget()
+                container.setStyleSheet("background-color: transparent;")
                 container_layout = QHBoxLayout(container)
                 container_layout.setContentsMargins(4, 0, 4, 0)
                 container_layout.setSpacing(4)
@@ -461,9 +472,38 @@ class PluginManagementDialog(QDialog):
         self.details_required_gui_version.setText(info.get('required_gui_version') or "-")
         self.details_description.setPlainText(info.get('description', ''))
         
-        # Detect extension types
-        extensions = self._get_extension_types(plugin_class)
-        self.details_extensions.setText(extensions if extensions else "Tab only")
+        # Detect plugin types
+        types_str = self._get_extension_types(plugin_class)
+        self.details_types.setText(types_str if types_str else "Tab only")
+        
+        # Check if plugin is enabled
+        plugin_is_enabled = plugin_registry.is_enabled(name)
+        
+        # Update extension type checkboxes
+        detected_types = types_str.split(", ") if types_str else []
+        for ext_type, cb in self.ext_checkboxes.items():
+            has_extension = ext_type in detected_types
+            # Only enable checkbox if plugin is enabled AND has this extension type
+            cb.setEnabled(has_extension and plugin_is_enabled)
+            
+            if has_extension and self.settings_service:
+                # Load saved state from settings
+                is_enabled = self.settings_service.is_extension_enabled(name, ext_type)
+                cb.blockSignals(True)  # Prevent triggering handler during load
+                # If plugin is disabled, visually uncheck extensions (even if enabled in settings)
+                if not plugin_is_enabled:
+                    cb.setChecked(False)
+                else:
+                    cb.setChecked(is_enabled)
+                cb.blockSignals(False)
+            else:
+                cb.blockSignals(True)
+                # If disabled or no settings, uncheck/default based on existence
+                if not plugin_is_enabled:
+                    cb.setChecked(False)
+                else:
+                    cb.setChecked(has_extension)
+                cb.blockSignals(False)
 
         # Configure button availability
         has_config = any([
@@ -518,7 +558,7 @@ class PluginManagementDialog(QDialog):
         self.details_version.setText("-")
         self.details_author.setText("-")
         self.details_type.setText("-")
-        self.details_extensions.setText("-")
+        self.details_types.setText("-")
         self.details_requires_admin.setText("-")
         self.details_platforms.setText("-")
         self.details_module.setText("-")
@@ -530,9 +570,35 @@ class PluginManagementDialog(QDialog):
         
         # Reset extension checkboxes
         for cb in self.ext_checkboxes.values():
-            cb.setVisible(False)
+            cb.blockSignals(True)
             cb.setChecked(False)
-        self.extensions_group.setVisible(False)
+            cb.setEnabled(False)
+            cb.blockSignals(False)
+    
+    def _on_extension_toggled(self, extension_type: str, state: int | bool) -> None:
+        """Handle extension type checkbox toggle.
+        
+        Args:
+            extension_type: The extension type (e.g., "Tab", "Menu", "Toolbar")
+            state: Qt checkbox state (0=unchecked, 2=checked) or a bool from other signals
+        """
+        name = self.get_selected_plugin_name()
+        if not name or not self.settings_service:
+            return
+        
+        if isinstance(state, bool):
+            enabled = state
+        else:
+            enabled = (state == Qt.CheckState.Checked.value)
+        self.settings_service.set_extension_enabled(name, extension_type, enabled)
+        
+        # Service checkbox also controls Events (they're grouped for user simplicity)
+        if extension_type == "Service":
+            self.settings_service.set_extension_enabled(name, "Events", enabled)
+        
+        # Refresh extensions to apply the change
+        if self.plugin_controller:
+            self.plugin_controller.refresh_plugin_extensions(name)
 
     def update_status_label(self) -> None:
         total = len(self._all_plugins)
@@ -561,10 +627,8 @@ class PluginManagementDialog(QDialog):
                 try:
                     plugin_class.on_plugin_enabled()
                 except Exception as e:
-                    import logging
-                    logger = logging.getLogger(__name__)
                     logger.debug(f"Error calling on_plugin_enabled hook for {name}: {e}")
-            self.pluginToggled.emit(name, True)
+            self.plugin_toggled.emit(name, True)
         self.apply_filters()
         self.on_selection_changed()  # Refresh extension checkboxes
 
@@ -580,10 +644,8 @@ class PluginManagementDialog(QDialog):
             try:
                 plugin_class.on_plugin_disabled()
             except Exception as e:
-                import logging
-                logger = logging.getLogger(__name__)
                 logger.debug(f"Error calling on_plugin_disabled hook for {name}: {e}")
-        self.pluginToggled.emit(name, False)
+        self.plugin_toggled.emit(name, False)
         self.apply_filters()
         self.on_selection_changed()  # Refresh extension checkboxes
 
@@ -599,10 +661,8 @@ class PluginManagementDialog(QDialog):
                     try:
                         plugin_class.on_plugin_enabled()
                     except Exception as e:
-                        import logging
-                        logger = logging.getLogger(__name__)
                         logger.debug(f"Error calling on_plugin_enabled hook for {name}: {e}")
-                self.pluginToggled.emit(name, True)
+                self.plugin_toggled.emit(name, True)
         self.apply_filters()
         self.on_selection_changed()  # Refresh extension checkboxes
 
@@ -614,15 +674,13 @@ class PluginManagementDialog(QDialog):
                 continue
             # Emit signal FIRST so plugin controller can remove extensions
             # before the plugin is disabled in the registry
-            self.pluginToggled.emit(name, False)
+            self.plugin_toggled.emit(name, False)
             # Call lifecycle hook
             plugin_class = plugin_registry.get_plugin(name)
             if plugin_class and hasattr(plugin_class, 'on_plugin_disabled'):
                 try:
                     plugin_class.on_plugin_disabled()
                 except Exception as e:
-                    import logging
-                    logger = logging.getLogger(__name__)
                     logger.debug(f"Error calling on_plugin_disabled hook for {name}: {e}")
         self.apply_filters()
         self.on_selection_changed()  # Refresh extension checkboxes
@@ -693,10 +751,16 @@ class PluginManagementDialog(QDialog):
         if not plugin_class:
             return
         
+        plugin_target: Any = plugin_class
+        try:
+            plugin_target = plugin_registry.get_plugin_instance(name)
+        except Exception as e:
+            logger.debug(f"Using plugin class for settings (instance unavailable) '{name}': {e}")
+        
         try:
             # Try new get_settings_widget() method first
-            if hasattr(plugin_class, 'get_settings_widget') and callable(getattr(plugin_class, 'get_settings_widget')):
-                settings_widget = plugin_class.get_settings_widget(self)
+            if hasattr(plugin_target, 'get_settings_widget') and callable(getattr(plugin_target, 'get_settings_widget')):
+                settings_widget = plugin_target.get_settings_widget(self)
                 if settings_widget:
                     # Load current settings
                     current_settings = {}
@@ -734,9 +798,9 @@ class PluginManagementDialog(QDialog):
                             if self.settings_service:
                                 self.settings_service.save_plugin_settings(name, new_settings)
                             # Call settings changed hook
-                            if hasattr(plugin_class, 'on_settings_changed'):
+                            if hasattr(plugin_target, 'on_settings_changed'):
                                 try:
-                                    plugin_class.on_settings_changed(new_settings)
+                                    plugin_target.on_settings_changed(new_settings)
                                 except Exception as e:
                                     import logging
                                     logger = logging.getLogger(__name__)
@@ -744,11 +808,11 @@ class PluginManagementDialog(QDialog):
                     return
             
             # Fallback to legacy methods for backward compatibility
-            if hasattr(plugin_class, 'open_settings_dialog') and callable(getattr(plugin_class, 'open_settings_dialog')):
-                plugin_class.open_settings_dialog(self)
+            if hasattr(plugin_target, 'open_settings_dialog') and callable(getattr(plugin_target, 'open_settings_dialog')):
+                plugin_target.open_settings_dialog(self)
                 return
-            if hasattr(plugin_class, 'get_configuration_widget') and callable(getattr(plugin_class, 'get_configuration_widget')):
-                widget = plugin_class.get_configuration_widget(self)
+            if hasattr(plugin_target, 'get_configuration_widget') and callable(getattr(plugin_target, 'get_configuration_widget')):
+                widget = plugin_target.get_configuration_widget(self)
                 if widget:
                     dlg = QDialog(self)
                     dlg.setWindowTitle(f"Configure {name}")
@@ -763,8 +827,8 @@ class PluginManagementDialog(QDialog):
                     dlg.resize(480, 360)
                     dlg.exec()
                     return
-            if hasattr(plugin_class, 'configure') and callable(getattr(plugin_class, 'configure')):
-                plugin_class.configure(self)
+            if hasattr(plugin_target, 'configure') and callable(getattr(plugin_target, 'configure')):
+                plugin_target.configure(self)
                 return
             
             QMessageBox.information(self, "No Configuration", f"Plugin '{name}' has no configurable settings.")

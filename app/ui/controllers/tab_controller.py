@@ -8,7 +8,7 @@ activation/deactivation, and lifecycle management, extracted from MainWindow.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional, Callable, TYPE_CHECKING
+from typing import Any, Dict, Optional, Callable, TYPE_CHECKING, List
 
 from PySide6.QtCore import Signal, QObject
 from PySide6.QtWidgets import QTabWidget, QWidget
@@ -18,6 +18,8 @@ from ...constants import CURRENT_PLATFORM
 if TYPE_CHECKING:
     from ...services.container import ServiceContainer
     from ....plugin_system.base import BaseTabPlugin
+
+from ...services.plugin_registry_facade import PluginRegistryFacade
 
 from ..widgets.admin_required_placeholder import AdminRequiredPlaceholder
 from ..widgets.error_placeholder import ErrorPlaceholder
@@ -61,6 +63,7 @@ class TabController(QObject):
         self.admin_service = container.get(AdminService)
         # DaemonService is only relevant on Linux
         self.daemon_service = container.get(DaemonService) if CURRENT_PLATFORM == "linux" else None
+        self.registry = container.get(PluginRegistryFacade)
         
         self.loaded_tabs: Dict[str, Dict[str, Any]] = {}
         self.is_loading_tab = False
@@ -102,12 +105,13 @@ class TabController(QObject):
             # Call deactivation hook if instance exists
             tab_info = self.loaded_tabs[tab_name]
             if tab_info.get("instance"):
-                plugin_class = tab_info["plugin_class"]
-                if hasattr(plugin_class, 'on_tab_deactivated'):
-                    try:
-                        plugin_class.on_tab_deactivated(tab_info["instance"])
-                    except Exception as e:
-                        logger.debug(f"Error calling deactivation hook: {e}")
+                # Call deactivation hook
+                try:
+                    plugin_instance = self.registry.get_plugin_instance(tab_name)
+                    if hasattr(plugin_instance, 'on_tab_deactivated'):
+                        plugin_instance.on_tab_deactivated()
+                except Exception as e:
+                    logger.debug(f"Error calling deactivation hook: {e}")
             
             del self.loaded_tabs[tab_name]
             self.tab_removed.emit(tab_name)
@@ -137,11 +141,20 @@ class TabController(QObject):
         if self._previous_tab_index >= 0 and self._previous_tab_index != index:
             try:
                 prev_tab_name = self.tab_widget.tabText(self._previous_tab_index)
-                prev_tab_info = self.loaded_tabs.get(prev_tab_name)
-                if prev_tab_info and prev_tab_info["instance"]:
-                    plugin_class = prev_tab_info["plugin_class"]
-                    if hasattr(plugin_class, 'on_tab_deactivated'):
-                        plugin_class.on_tab_deactivated(prev_tab_info["instance"])
+                prev_instance_info = self.loaded_tabs.get(prev_tab_name)
+                prev_instance = prev_instance_info.get("instance") if prev_instance_info else None
+
+                # Only deactivate/emit for a real plugin tab widget (not placeholders)
+                if prev_instance and not isinstance(
+                    prev_instance, (LoadingPlaceholder, ErrorPlaceholder, AdminRequiredPlaceholder)
+                ):
+                    try:
+                        plugin_instance = self.registry.get_plugin_instance(prev_tab_name)
+                        if hasattr(plugin_instance, 'on_tab_deactivated'):
+                            plugin_instance.on_tab_deactivated()
+                    except Exception as e:
+                        logger.debug(f"Error calling deactivation hook: {e}")
+
                     self.tab_deactivated.emit(prev_tab_name)
             except Exception as e:
                 logger.debug(f"Error calling deactivation hook: {e}")
@@ -187,8 +200,9 @@ class TabController(QObject):
                     admin_widget = self._create_admin_placeholder(tab_name)
                     tab_info["instance"] = admin_widget
                 else:
-                    # Create the actual plugin widget
-                    tab_info["instance"] = plugin_class.create_widget(self.tab_widget)
+                    # Create the actual plugin widget using instance
+                    plugin_instance = self.registry.get_plugin_instance(tab_name)
+                    tab_info["instance"] = plugin_instance.create_widget(self.tab_widget)
                 
                 # Replace placeholder with actual widget
                 current_index = self.tab_widget.currentIndex()
@@ -200,13 +214,13 @@ class TabController(QObject):
                 logger.info(f"Lazy loaded plugin tab: {tab_name}")
             
             # Call activation hook for newly active tab
-            if tab_info["instance"]:
-                plugin_class = tab_info["plugin_class"]
-                if hasattr(plugin_class, 'on_tab_activated'):
-                    try:
-                        plugin_class.on_tab_activated(tab_info["instance"])
-                    except Exception as e:
-                        logger.debug(f"Error calling activation hook for {tab_name}: {e}")
+            if tab_info["instance"] and not isinstance(tab_info["instance"], (LoadingPlaceholder, ErrorPlaceholder, AdminRequiredPlaceholder)):
+                try:
+                    plugin_instance = self.registry.get_plugin_instance(tab_name)
+                    if hasattr(plugin_instance, 'on_tab_activated'):
+                        plugin_instance.on_tab_activated()
+                except Exception as e:
+                    logger.debug(f"Error calling activation hook for {tab_name}: {e}")
                 self.tab_activated.emit(tab_name)
         
         except Exception as e:
@@ -263,8 +277,9 @@ class TabController(QObject):
                 return
             
             logger.info(f"Creating widget for tab '{tab_name}' (daemon available)")
-            # Create the actual widget
-            widget = plugin_class.create_widget(self.tab_widget)
+            # Create the actual widget using instance
+            plugin_instance = self.registry.get_plugin_instance(tab_name)
+            widget = plugin_instance.create_widget(self.tab_widget)
             tab_info["instance"] = widget
             
             # Replace the tab widget
@@ -311,6 +326,17 @@ class TabController(QObject):
         """
         return self.tab_widget.count()
     
+    def get_tab_order(self) -> List[str]:
+        """Get the current order of tabs.
+        
+        Returns:
+            List of tab names in their current visual order
+        """
+        order = []
+        for i in range(self.tab_widget.count()):
+            order.append(self.tab_widget.tabText(i))
+        return order
+
     def clear_loaded_tabs(self) -> None:
         """Clear all loaded tab state.
         
@@ -321,12 +347,12 @@ class TabController(QObject):
         # Call deactivation hooks for all tabs with instances
         for tab_name, tab_info in self.loaded_tabs.items():
             if tab_info.get("instance"):
-                plugin_class = tab_info["plugin_class"]
-                if hasattr(plugin_class, 'on_tab_deactivated'):
-                    try:
-                        plugin_class.on_tab_deactivated(tab_info["instance"])
-                    except Exception as e:
-                        logger.debug(f"Error calling deactivation hook for {tab_name}: {e}")
+                try:
+                    plugin_instance = self.registry.get_plugin_instance(tab_name)
+                    if hasattr(plugin_instance, 'on_tab_deactivated'):
+                        plugin_instance.on_tab_deactivated()
+                except Exception as e:
+                    logger.debug(f"Error calling deactivation hook for {tab_name}: {e}")
         
         self.loaded_tabs.clear()
         self._previous_tab_index = -1
@@ -368,4 +394,3 @@ class TabController(QObject):
 
 
 __all__ = ['TabController']
-

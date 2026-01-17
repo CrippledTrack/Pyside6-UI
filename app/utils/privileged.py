@@ -115,24 +115,48 @@ def write_privileged_file(file_path: str, content: str) -> bool:
     try:
         import tempfile
         import os
-        
-        # Write to temp file first, then move via daemon
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, encoding='utf-8') as tmp:
+        target_dir = os.path.dirname(file_path) or "."
+
+        # Determine existing permissions/ownership if the file exists
+        mode = "644"
+        owner = None
+        group = None
+        try:
+            stat_result = run_privileged_command(
+                ["stat", "-c", "%a %u %g", file_path],
+                timeout=10
+            )
+            if stat_result.returncode == 0 and stat_result.stdout:
+                parts = stat_result.stdout.strip().split()
+                if len(parts) == 3:
+                    mode, owner, group = parts
+        except Exception:
+            pass
+
+        # Write to temp file in the target directory for atomic replace
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            delete=False,
+            encoding="utf-8",
+            dir=target_dir
+        ) as tmp:
             tmp.write(content)
             tmp_path = tmp.name
-        
+
         try:
-            # Move temp file to target via daemon
-            result = run_privileged_command(['cp', tmp_path, file_path], timeout=30)
+            # Atomic replace via daemon
+            result = run_privileged_command(["mv", tmp_path, file_path], timeout=30)
             if result.returncode != 0:
                 raise IOError(f"Failed to write {file_path}: {result.stderr}")
-            
-            # Set proper permissions
-            run_privileged_command(['chmod', '644', file_path], timeout=10)
-            
+
+            # Restore permissions and ownership if we had them
+            run_privileged_command(["chmod", mode, file_path], timeout=10)
+            if owner is not None and group is not None:
+                run_privileged_command(["chown", f"{owner}:{group}", file_path], timeout=10)
+
             return True
         finally:
-            # Clean up temp file
+            # Clean up temp file if still present
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
                 

@@ -7,34 +7,30 @@ daemon management, and the main application lifecycle.
 
 from __future__ import annotations
 
-import os
 import platform
 import sys
 from typing import List
 
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 
 from .constants import VERSION as GUI_API_VERSION
 from .services.logging_service import setup_logging, set_dev_logging_override
+from .services.app_lifecycle_service import AppLifecycleService
 from .services.container import ServiceContainer
+from .services.daemon_lifecycle_service import DaemonLifecycleService
+from .services.qt_deps_service import QtDepsService
 from .services.settings_service import SettingsService
+from .services.theme_init_service import ThemeInitService
 from .ui.main_window import MainWindow
 from .utils.console import apply_console_setting
 from .utils.admin import set_dev_mode
 from .utils.imports import get_platforms_constants
+from ..plugin_system.import_aliases import install_import_aliases
 
 # Import platform constants using the utility function
 constants = get_platforms_constants()
 VERSION = constants.VERSION
 VERSION_NAME = constants.VERSION_NAME
-
-# Linux-specific checks
-if platform.system().lower() == "linux":
-    from .daemon import set_daemon_client
-    from .utils.elevation_linux import start_daemon, stop_daemon
-    from .utils.qt_dependencies_linux import ensure_qt_xcb_dependencies_installed
-
 
 def run(argv: List[str]) -> int:
     """Application bootstrap. Mirrors previous behavior from main.py without changes."""
@@ -51,21 +47,10 @@ def run(argv: List[str]) -> int:
         set_dev_mode(True)
         set_dev_logging_override(True)
 
-    # Prevent multiple instances on Linux (check BEFORE any initialization)
-    lock_file = None
-    lock_file_path = None
-    if platform.system().lower() == "linux":
-        import fcntl
-        lock_file_path = '/tmp/cyberpatriot-ui.lock'
-        try:
-            lock_file = open(lock_file_path, 'w')
-            fcntl.lockf(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            lock_file.write(str(os.getpid()))
-            lock_file.flush()
-        except (IOError, OSError):
-            # Another instance is running
-            print("Another instance is already running.", file=sys.stderr)
-            return 1
+    app_lifecycle = AppLifecycleService()
+    if not app_lifecycle.acquire_single_instance_lock():
+        print("Another instance is already running.", file=sys.stderr)
+        return 1
     
     # Apply console visibility setting based on SHOW_CONSOLE constant
     apply_console_setting()
@@ -73,6 +58,11 @@ def run(argv: List[str]) -> int:
     logger = setup_logging()
     logger.info(f"Starting {VERSION_NAME} v{VERSION} on {platform.system().lower()}")
     logger.info(f"GUI API Version: v{GUI_API_VERSION}")
+
+    # Install legacy import aliases used by some plugin modules (best-effort).
+    installed_aliases = install_import_aliases()
+    if installed_aliases:
+        logger.debug("Installed plugin import aliases: %s", installed_aliases)
 
     # Log dev mode status now that logging is configured
     if is_dev:
@@ -91,63 +81,25 @@ def run(argv: List[str]) -> int:
     settings_service.save_gui_version(GUI_API_VERSION)
 
     # On Linux, before creating QApplication, ensure Qt xcb system dependencies are present
-    if platform.system().lower() == "linux":
-        try:
-            if not ensure_qt_xcb_dependencies_installed():
-                logger.error(
-                    "Required Qt xcb dependencies are missing and could not be installed automatically."
-                )
-                print(
-                    "Missing Qt dependencies. Please install: "
-                    "libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-image0 "
-                    "libxcb-keysyms1 libxcb-render-util0 libxkbcommon-x11-0 qtwayland5",
-                    file=sys.stderr,
-                )
-                return 1
-        except Exception as e:
-            logger.error(f"Error while ensuring Qt dependencies: {e}")
+    qt_deps_service = QtDepsService()
+    deps_ok, deps_message = qt_deps_service.ensure_dependencies()
+    if not deps_ok:
+        logger.error(
+            "Required Qt xcb dependencies are missing and could not be installed automatically."
+        )
+        if deps_message:
+            print(deps_message, file=sys.stderr)
+        return 1
 
     app = QApplication(argv)
 
-    # Set the style to Fusion on Windows by default
-    if platform.system().lower() == "windows":
-        app.setStyle("Fusion")
+    app_lifecycle.configure_qt_application(app, VERSION_NAME, GUI_API_VERSION)
 
-    app.setFont(QFont("Segoe UI", 10))
+    theme_init_service = ThemeInitService()
+    theme_manager = theme_init_service.initialize(container, settings_service)
 
-    # Now that QApplication exists, register ThemeManager in the container
-    # (ThemeManager requires QApplication for palette detection)
-    from ..themes.theme_manager import ThemeManager
-    theme_manager = ThemeManager(settings_service=settings_service)
-    container.register_singleton(ThemeManager, theme_manager)
-    logger.info("ThemeManager registered in container")
-
-    # On Linux, start privileged daemon (optional - app can run without it)
-    daemon_client = None
-    if platform.system().lower() == "linux":
-        from .constants import REQUIRE_ADMIN_BY_DEFAULT
-        from .services.daemon_service import DaemonService
-        daemon_service = container.get(DaemonService)
-        
-        # Only start daemon if admin is required by default
-        # This avoids prompting for password when REQUIRE_ADMIN_BY_DEFAULT is False
-        if not REQUIRE_ADMIN_BY_DEFAULT:
-            logger.info("REQUIRE_ADMIN_BY_DEFAULT is False - skipping privileged daemon startup")
-        else:
-            logger.info("Starting privileged daemon...")
-            daemon_client = start_daemon()
-            if not daemon_client or not daemon_client.is_connected():
-                logger.warning("Failed to start privileged daemon. Some features requiring admin privileges will be disabled.")
-                logger.warning("The application will continue in limited mode. Tabs requiring admin privileges will be disabled.")
-                daemon_client = None
-            else:
-                # Store daemon client globally for utils to use
-                set_daemon_client(daemon_client)
-                logger.info("Privileged daemon started successfully")
-
-    # Apply theme using saved preference
-    saved_theme = settings_service.get_theme_preference()
-    theme_manager.apply_auto_theme(saved_theme=saved_theme)
+    daemon_lifecycle = DaemonLifecycleService()
+    daemon_client = daemon_lifecycle.start_if_required(container)
 
     # Create MainWindow with service container
     window = MainWindow(settings_service=settings_service, container=container)
@@ -156,28 +108,10 @@ def run(argv: List[str]) -> int:
     exit_code = app.exec()
     
     # Cleanup: Stop daemon on exit (if it was started)
-    if platform.system().lower() == "linux" and daemon_client:
-        logger.info("Stopping privileged daemon...")
-        try:
-            if daemon_client.is_connected():
-                daemon_client.request('shutdown', {})
-                daemon_client.disconnect()
-        except Exception:
-            # Ignore errors during cleanup - daemon may already be stopped
-            pass
-        stop_daemon()
+    daemon_lifecycle.shutdown(daemon_client)
     
     # Cleanup: Release lock file
-    if lock_file:
-        try:
-            import fcntl
-            fcntl.lockf(lock_file, fcntl.LOCK_UN)
-            lock_file.close()
-            if lock_file_path and os.path.exists(lock_file_path):
-                os.unlink(lock_file_path)
-        except Exception:
-            # Ignore errors during cleanup - file may already be released
-            pass
+    app_lifecycle.release_single_instance_lock()
     
     logger.info(f"Application closed with code {exit_code}")
     return exit_code

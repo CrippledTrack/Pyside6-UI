@@ -1,22 +1,28 @@
 """
-Base plugin interface for Basic GUI Application tabs.
+Base plugin classes for the Basic UI Application.
 
-All tab plugins must inherit from BaseTabPlugin.
+v4.0.0 BREAKING CHANGES:
+- BaseTabPlugin is now instance-based (use `self` instead of `cls`)
+- Constructor receives ServiceContainer for dependency injection
+- Use `plugin_name` and `tab_title` instead of `tab_name`
+- Removed PluginMeta metaclass and aliasing
 
-This module provides backward-compatible base classes that implement the
-new extension interfaces defined in interfaces.py. Existing plugins using
-BaseTabPlugin will continue to work without modification.
+Legacy 3.x plugins using classmethods will continue to work via LegacyPluginAdapter.
 """
 from __future__ import annotations
 
 import platform
 import re
-from abc import ABC, ABCMeta, abstractmethod
-from typing import Optional, List, Dict, Any, Type
+from abc import abstractmethod
+from typing import Optional, List, Dict, Any, TYPE_CHECKING
 
-# Import new extension interfaces
+if TYPE_CHECKING:
+    from PySide6.QtWidgets import QWidget
+    from ..app.services.container import ServiceContainer
+    from ..app.services.settings_service import SettingsService
+
 from .interfaces import (
-    Plugin,
+    PluginProtocol,
     TabExtension,
     MenuExtension,
     StatusExtension,
@@ -24,96 +30,118 @@ from .interfaces import (
     ServiceExtension,
     EventSubscriberExtension,
     SettingsExtension,
+    Plugin,  # Legacy ABC
 )
 
 
-class PluginMeta(ABCMeta):
-    """Metaclass for BaseTabPlugin to handle plugin_name/plugin_description aliasing.
+class BaseTabPlugin:
+    """Base class for tab plugins with service injection.
     
-    This provides backward compatibility by aliasing plugin_name to tab_name
-    and plugin_description to tab_description at the class level.
+    v4.0.0: This is now an instance-based class. Plugins receive a 
+    ServiceContainer in their constructor and use instance methods.
     
-    Combines ABCMeta functionality with attribute aliasing.
+    For backward compatibility, both old (tab_name) and new (plugin_name/tab_title)
+    attribute names are supported.
+    
+    Example:
+        class MyPlugin(BaseTabPlugin):
+            plugin_name = "My Plugin"
+            tab_title = "My Tab"
+            
+            def create_widget(self, parent=None):
+                return MyWidget(parent, settings=self.settings)
     """
     
-    def __getattr__(cls, name: str) -> Any:
-        """Handle attribute access for aliased attributes."""
-        if name == 'plugin_name':
-            # Alias plugin_name to tab_name
-            return getattr(cls, 'tab_name', None)
-        elif name == 'plugin_description':
-            # Alias plugin_description to tab_description
-            return getattr(cls, 'tab_description', None)
-        raise AttributeError(f"'{cls.__name__}' has no attribute '{name}'")
-
-
-class BaseTabPlugin(Plugin, TabExtension, ABC, metaclass=PluginMeta):
-    """
-    Base class for all tab plugins in the Basic GUI Application.
-    
-    All tab plugins must inherit from this class and implement the required methods.
-    
-    This class combines the Plugin (metadata) and TabExtension (tab widget)
-    interfaces for backward compatibility with existing plugins.
-    
-    New plugins can choose to implement individual interfaces directly if they
-    don't need a tab (e.g., MenuExtension only, or ServiceExtension only).
-    """
-    
-    # Required class attributes (backward compatible with existing plugins)
-    tab_name: str = "Unnamed Tab"
-    tab_description: str = "No description provided"
-    supported_platforms: List[str] = ["Windows", "Linux"]  # Platforms this plugin supports
-    requires_admin: bool = False  # Whether this plugin requires admin privileges
+    # Required metadata (class-level)
+    plugin_name: str = "Unnamed Plugin"
+    plugin_description: str = "No description provided"
     plugin_version: str = "1.0.0"
     plugin_author: str = "Unknown"
-    plugin_authors: List[str] = []  # Optional list of authors; if provided, overrides plugin_author
-    # If True, the plugin will be disabled by default on first discovery (can be enabled by user)
-    disabled_by_default: bool = False
+    plugin_authors: List[str] = []
     
-    # Plugin dependencies (new in v3.4.0, optional)
+    # Tab-specific
+    tab_title: str = "Unnamed Tab"  # Display name in tab bar
+    requires_admin: bool = False
+    
+    # Legacy aliases (backward compatibility with 3.x)
+    tab_name: str = "Unnamed Tab"  # Alias for plugin_name/tab_title
+    tab_description: str = "No description provided"  # Alias for plugin_description
+    
+    # Platform support (empty list = all platforms supported)
+    supported_platforms: List[str] = []
+    
+    # Plugin dependencies (optional)
     dependencies: List[str] = []
     
+    # If True, plugin is disabled by default on first discovery
+    disabled_by_default: bool = False
+    
     # Version requirements (optional)
-    # Simple minimum version (e.g., "3.0.0")
     min_gui_version: Optional[str] = None
-    # Advanced range specification (e.g., ">=3.0.0,<4.0.0")
-    # Takes precedence over min_gui_version if both are specified
     required_gui_version: Optional[str] = None
     
-    # plugin_name and plugin_description are aliased to tab_name and tab_description
-    # via the PluginMeta metaclass for backward compatibility.
-    # Accessing SomePlugin.plugin_name will return SomePlugin.tab_name
-    # Accessing SomePlugin.plugin_description will return SomePlugin.tab_description
-    
-    @classmethod
-    @abstractmethod
-    def create_widget(cls, parent: Optional[Any] = None) -> Any:
-        """
-        Create and return a UI widget to be used as the tab's content.
-        
-        The specific widget type depends on the UI framework being used.
-        For PySide6 implementations, this should return a QWidget instance.
+    def __init__(self, container: "ServiceContainer") -> None:
+        """Initialize the plugin with service container.
         
         Args:
-            parent: The parent widget (framework-specific, e.g., QTabWidget for PySide6)
+            container: The application's service container for DI
+        """
+        self.container = container
+        self._widget: Optional["QWidget"] = None
+        
+        # Convenience accessors for common services
+        # Import here to avoid circular imports
+        from ..app.services.settings_service import SettingsService
+        try:
+            self.settings: Optional["SettingsService"] = container.get(SettingsService)
+        except (ValueError, KeyError):
+            self.settings = None
+    
+    @abstractmethod
+    def create_widget(self, parent: Optional["QWidget"] = None) -> "QWidget":
+        """Create and return the tab widget.
+        
+        Args:
+            parent: Parent widget (typically QTabWidget)
             
         Returns:
-            Any: A UI widget appropriate for the framework being used
+            QWidget instance for the tab content
         """
+        raise NotImplementedError("Subclasses must implement create_widget()")
+    
+    def on_tab_activated(self) -> None:
+        """Called when the tab becomes active. Override as needed."""
         pass
     
+    def on_tab_deactivated(self) -> None:
+        """Called when the tab becomes inactive. Override as needed."""
+        pass
+    
+    def on_plugin_enabled(self) -> None:
+        """Called when the plugin is enabled."""
+        pass
+    
+    def on_plugin_disabled(self) -> None:
+        """Called when the plugin is disabled."""
+        pass
+    
+    def on_settings_changed(self, settings_dict: Dict[str, Any]) -> None:
+        """Called when plugin settings are changed."""
+        pass
+    
+    def get_settings_widget(self, parent: Optional["QWidget"] = None) -> Optional["QWidget"]:
+        """Get a settings widget for this plugin. Override to provide settings UI."""
+        return None
+    
+    # Class methods that don't need instance state
     @classmethod
     def is_supported_platform(cls, platform_name: str) -> bool:
-        """
-        Check if this plugin supports the given platform.
+        """Check if this plugin supports the given platform.
         
-        Args:
-            platform_name: Name of the platform (e.g., "Windows", "Linux")
-            
-        Returns:
-            bool: True if the platform is supported, False otherwise
+        If supported_platforms is empty, all platforms are supported.
         """
+        if not cls.supported_platforms:
+            return True  # Empty = all platforms supported
         return platform_name.capitalize() in cls.supported_platforms
     
     @classmethod
@@ -123,23 +151,12 @@ class BaseTabPlugin(Plugin, TabExtension, ABC, metaclass=PluginMeta):
     
     @classmethod
     def is_compatible(cls) -> bool:
-        """
-        Check if this plugin is compatible with the current platform.
-        
-        Returns:
-            bool: True if compatible, False otherwise
-        """
+        """Check if this plugin is compatible with the current platform."""
         return cls.is_supported_platform(cls.get_current_platform())
     
     @classmethod
     def get_plugin_info(cls) -> Dict[str, Any]:
-        """
-        Get comprehensive information about this plugin.
-        
-        Returns:
-            dict: Plugin information including name, description, version, etc.
-        """
-        # Normalize authors: prefer plugin_authors if set; otherwise fallback to plugin_author
+        """Get comprehensive information about this plugin."""
         authors_list: List[str] = []
         try:
             if isinstance(getattr(cls, 'plugin_authors', []), list) and getattr(cls, 'plugin_authors'):
@@ -151,168 +168,190 @@ class BaseTabPlugin(Plugin, TabExtension, ABC, metaclass=PluginMeta):
 
         author_text = ", ".join(authors_list) if authors_list else str(getattr(cls, 'plugin_author', 'Unknown'))
 
+        # Support both new (plugin_name/tab_title) and legacy (tab_name) naming
+        name = getattr(cls, 'plugin_name', None)
+        if not name or name == "Unnamed Plugin":
+            name = getattr(cls, 'tab_name', cls.__name__)
+        
+        title = getattr(cls, 'tab_title', None)
+        if not title or title == "Unnamed Tab":
+            title = getattr(cls, 'tab_name', name)
+        
+        description = getattr(cls, 'plugin_description', None)
+        if not description or description == "No description provided":
+            description = getattr(cls, 'tab_description', "No description provided")
+
+        # If supported_platforms is empty, show all application-supported platforms
+        display_platforms = cls.supported_platforms if cls.supported_platforms else ["Windows", "Linux"]
+        
         return {
-            'name': cls.tab_name,
-            'description': cls.tab_description,
-            'supported_platforms': cls.supported_platforms,
+            'name': name,
+            'tab_title': title,
+            'description': description,
+            'supported_platforms': display_platforms,
             'requires_admin': cls.requires_admin,
             'version': cls.plugin_version,
-            'author': author_text,           # Backward-compatible single string for display
-            'authors': authors_list,         # New field for multi-author support
+            'author': author_text,
+            'authors': authors_list,
             'compatible': cls.is_compatible(),
             'current_platform': cls.get_current_platform(),
             'min_gui_version': getattr(cls, 'min_gui_version', None),
             'required_gui_version': getattr(cls, 'required_gui_version', None),
-            'dependencies': getattr(cls, 'dependencies', []),  # New in v3.4.0
+            'dependencies': getattr(cls, 'dependencies', []),
         }
     
     @classmethod
     def validate_plugin(cls) -> List[str]:
-        """
-        Validate the plugin configuration and return any error messages.
-        
-        Returns:
-            List[str]: List of validation error messages (empty if valid)
-        """
+        """Validate the plugin configuration and return any error messages."""
         errors = []
         
-        if not cls.tab_name or cls.tab_name == "Unnamed Tab":
-            errors.append("Plugin must define a valid tab_name")
+        # Support both new (plugin_name) and legacy (tab_name) naming
+        has_name = (
+            (hasattr(cls, 'plugin_name') and cls.plugin_name and cls.plugin_name != "Unnamed Plugin") or
+            (hasattr(cls, 'tab_name') and cls.tab_name and cls.tab_name != "Unnamed Tab")
+        )
+        if not has_name:
+            errors.append("Plugin must define a valid plugin_name or tab_name")
         
-        if not cls.supported_platforms:
-            errors.append("Plugin must define supported_platforms")
+        # Support both new (tab_title) and legacy (tab_name) for display title
+        has_title = (
+            (hasattr(cls, 'tab_title') and cls.tab_title and cls.tab_title != "Unnamed Tab") or
+            (hasattr(cls, 'tab_name') and cls.tab_name and cls.tab_name != "Unnamed Tab")
+        )
+        if not has_title:
+            errors.append("Plugin must define a valid tab_title or tab_name")
+        
+        # Note: supported_platforms is optional - empty means all platforms supported
         
         if not cls.plugin_version:
             errors.append("Plugin must define plugin_version")
         
-        # Validate version requirements format (basic check)
+        # Validate version requirements format
         if hasattr(cls, 'min_gui_version') and cls.min_gui_version:
             if not re.match(r'^\d+\.\d+(?:\.\d+)?', str(cls.min_gui_version)):
                 errors.append(f"Invalid min_gui_version format: {cls.min_gui_version}")
         
         if hasattr(cls, 'required_gui_version') and cls.required_gui_version:
-            # Basic format check for range specifications
-            # Should contain operators like >=, <, etc. and version numbers
-            # Note: hyphen (-) is NOT an operator - it's part of version strings like "3.4.0-dev"
             req_str = str(cls.required_gui_version)
-            if not re.search(r'[><=]+', req_str):
-                errors.append(f"Invalid required_gui_version format (must include operators): {cls.required_gui_version}")
+            if not re.search(r'[><!=]+', req_str):
+                errors.append(f"Invalid required_gui_version format: {cls.required_gui_version}")
         
         return errors
-    
-    @classmethod
-    def on_tab_activated(cls, widget: Any) -> None:
-        """
-        Called when the tab becomes active.
-        
-        This method is optional and can be overridden by plugins to perform
-        actions when their tab is activated (e.g., refresh data, update UI).
-        
-        Args:
-            widget: The widget instance for this tab
-        """
-        pass
-    
-    @classmethod
-    def on_tab_deactivated(cls, widget: Any) -> None:
-        """
-        Called when the tab becomes inactive.
-        
-        This method is optional and can be overridden by plugins to perform
-        actions when their tab is deactivated (e.g., save state, pause updates).
-        
-        Args:
-            widget: The widget instance for this tab
-        """
-        pass
-    
-    @classmethod
-    def on_plugin_enabled(cls) -> None:
-        """
-        Called when the plugin is enabled.
-        
-        This method is optional and can be overridden by plugins to perform
-        initialization when the plugin is enabled.
-        """
-        pass
-    
-    @classmethod
-    def on_plugin_disabled(cls) -> None:
-        """
-        Called when the plugin is disabled.
-        
-        This method is optional and can be overridden by plugins to perform
-        cleanup when the plugin is disabled.
-        """
-        pass
-    
-    @classmethod
-    def on_settings_changed(cls, settings_dict: Dict[str, Any]) -> None:
-        """
-        Called when plugin settings are changed.
-        
-        This method is optional and can be overridden by plugins to react
-        to settings changes.
-        
-        Args:
-            settings_dict: Dictionary containing the updated settings
-        """
-        pass
-    
-    @classmethod
-    def get_settings_widget(cls, parent: Optional[Any] = None) -> Optional[Any]:
-        """
-        Get a settings widget for this plugin.
-        
-        This method is optional and can be overridden by plugins to provide
-        a configuration widget. The widget should contain controls for all
-        plugin settings that the user can configure.
-        
-        Args:
-            parent: Parent widget for the settings widget
-            
-        Returns:
-            A widget containing settings controls, or None if the plugin
-            has no configurable settings
-        """
-        return None
 
 
 class CoreTabPlugin(BaseTabPlugin):
-    """
-    Base class for core (built-in) tab plugins.
-    
-    These are the original tabs that come with the application.
-    """
+    """Base class for core (built-in) tab plugins."""
     
     plugin_author: str = "Basic GUI Application Team"
     is_core_plugin: bool = True
 
 
-# Re-export new interfaces for convenient access
-from .interfaces import (
-    Plugin as PluginBase,
-    TabExtension,
-    MenuExtension,
-    StatusExtension,
-    ToolbarExtension,
-    ServiceExtension,
-    EventSubscriberExtension,
-    SettingsExtension,
-)
+# =============================================================================
+# Legacy 3.x support
+# =============================================================================
 
+class LegacyBaseTabPlugin(Plugin):
+    """Legacy base class for 3.x classmethod-based plugins.
+    
+    This class exists for backward compatibility with 3.x plugins.
+    It will be adapted via LegacyPluginAdapter at runtime.
+    """
+    
+    # Legacy naming (kept for 3.x compat)
+    tab_name: str = "Unnamed Tab"
+    tab_description: str = "No description provided"
+    supported_platforms: List[str] = ["Windows", "Linux"]
+    requires_admin: bool = False
+    plugin_version: str = "1.0.0"
+    plugin_author: str = "Unknown"
+    plugin_authors: List[str] = []
+    disabled_by_default: bool = False
+    dependencies: List[str] = []
+    min_gui_version: Optional[str] = None
+    required_gui_version: Optional[str] = None
+    
+    @classmethod
+    @abstractmethod
+    def create_widget(cls, parent: Optional[Any] = None) -> Any:
+        """Legacy classmethod - use instance method instead."""
+        pass
+    
+    @classmethod
+    def on_tab_activated(cls, widget: Any) -> None:
+        """Legacy classmethod - use instance method without widget param."""
+        pass
+    
+    @classmethod
+    def on_tab_deactivated(cls, widget: Any) -> None:
+        """Legacy classmethod - use instance method without widget param."""
+        pass
+    
+    @classmethod
+    def is_supported_platform(cls, platform_name: str) -> bool:
+        """Check if this plugin supports the given platform.
+        
+        If supported_platforms is empty, all platforms are supported.
+        """
+        if not cls.supported_platforms:
+            return True  # Empty = all platforms supported
+        return platform_name.capitalize() in cls.supported_platforms
+    
+    @classmethod
+    def get_current_platform(cls) -> str:
+        return platform.system()
+    
+    @classmethod
+    def is_compatible(cls) -> bool:
+        return cls.is_supported_platform(cls.get_current_platform())
+    
+    @classmethod
+    def get_plugin_info(cls) -> Dict[str, Any]:
+        """Get plugin info using legacy naming."""
+        authors_list: List[str] = []
+        try:
+            if isinstance(getattr(cls, 'plugin_authors', []), list) and getattr(cls, 'plugin_authors'):
+                authors_list = [str(a) for a in getattr(cls, 'plugin_authors') if a]
+        except Exception:
+            authors_list = []
+        if not authors_list and getattr(cls, 'plugin_author', None):
+            authors_list = [str(getattr(cls, 'plugin_author'))]
+
+        author_text = ", ".join(authors_list) if authors_list else str(getattr(cls, 'plugin_author', 'Unknown'))
+
+        # If supported_platforms is empty, show all application-supported platforms
+        display_platforms = cls.supported_platforms if cls.supported_platforms else ["Windows", "Linux"]
+
+        return {
+            'name': getattr(cls, 'tab_name', cls.__name__),
+            'description': getattr(cls, 'tab_description', ''),
+            'supported_platforms': display_platforms,
+            'requires_admin': cls.requires_admin,
+            'version': cls.plugin_version,
+            'author': author_text,
+            'authors': authors_list,
+            'compatible': cls.is_compatible(),
+            'current_platform': cls.get_current_platform(),
+            'min_gui_version': getattr(cls, 'min_gui_version', None),
+            'required_gui_version': getattr(cls, 'required_gui_version', None),
+            'dependencies': getattr(cls, 'dependencies', []),
+        }
+
+
+# Re-exports
+from .registry import PluginRegistry, plugin_registry
 from .types import MenuItemDefinition, ToolbarAction, PluginEvent
 
-from .registry import PluginRegistry, plugin_registry  # re-export
-
 __all__ = [
-    # Backward compatible exports
+    # v4.0.0 classes
     'BaseTabPlugin',
     'CoreTabPlugin',
+    # Legacy (for 3.x compatibility)
+    'LegacyBaseTabPlugin',
+    # Registry
     'PluginRegistry',
     'plugin_registry',
-    # New extension interfaces (v3.4.0)
-    'PluginBase',
+    # Interfaces
+    'PluginProtocol',
     'TabExtension',
     'MenuExtension',
     'StatusExtension',
@@ -320,7 +359,7 @@ __all__ = [
     'ServiceExtension',
     'EventSubscriberExtension',
     'SettingsExtension',
-    # New types (v3.4.0)
+    # Types
     'MenuItemDefinition',
     'ToolbarAction',
     'PluginEvent',

@@ -87,11 +87,18 @@ class ServiceContainer:
         from .daemon_service import DaemonService
         from .admin_service import AdminService
         from .plugin_service import PluginService
+        from .plugin_registry_facade import PluginRegistryFacade
+        from .notification_service import NotificationService
         
         # 1. Settings service (no dependencies)
         if SettingsService not in self._services:
             settings_service = SettingsService()
             self.register_singleton(SettingsService, settings_service)
+            try:
+                from ..utils.admin import configure_settings_service
+                configure_settings_service(settings_service)
+            except Exception as e:
+                logger.debug("Failed to configure admin settings: %s", e)
         
         # 2. Daemon service (no dependencies)
         if DaemonService not in self._services:
@@ -109,6 +116,16 @@ class ServiceContainer:
             settings_service = self.get(SettingsService)
             plugin_service = PluginService(settings_service=settings_service)
             self.register_singleton(PluginService, plugin_service)
+
+        # 4b. Plugin registry facade (depends on container to set registry container)
+        if PluginRegistryFacade not in self._services:
+            registry_facade = PluginRegistryFacade(self)
+            self.register_singleton(PluginRegistryFacade, registry_facade)
+
+        # 5. Notification service (no dependencies)
+        if NotificationService not in self._services:
+            notification_service = NotificationService()
+            self.register_singleton(NotificationService, notification_service)
         
         self._initialized = True
         logger.info("Services initialized successfully")

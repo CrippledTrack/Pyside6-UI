@@ -10,9 +10,14 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional, Callable, TYPE_CHECKING
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal, Qt
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QToolBar
 
-from ....plugin_system.registry import plugin_registry
+from ...services.plugin_service import PluginService
+from ...services.settings_service import SettingsService
+from ...services.plugin_registry_facade import PluginRegistryFacade
+
 from ....plugin_system.interfaces import (
     MenuExtension,
     StatusExtension,
@@ -60,11 +65,10 @@ class PluginController(QObject):
         self._service_extensions_started: bool = False  # Track if service extensions have been started
         
         # Retrieve services from container
-        from ...services.settings_service import SettingsService
-        from ...services.plugin_service import PluginService
         
         self.settings_service = container.get(SettingsService)
         self.plugin_service = container.get(PluginService)
+        self.registry = container.get(PluginRegistryFacade)
     
     def toggle_plugin(self, plugin_name: str, enabled: bool) -> bool:
         """Toggle a plugin on or off.
@@ -88,7 +92,7 @@ class PluginController(QObject):
                 self.plugin_service.enable_plugin(plugin_name)
                 logger.info(f"Enabled plugin: {plugin_name}")
                 # Publish event for EventSubscriberExtension plugins
-                plugin_registry.publish_event("plugin_enabled", {"plugin_name": plugin_name})
+                self.registry.publish_event("plugin_enabled", {"plugin_name": plugin_name})
             
             # Always try to integrate extensions (handles re-enable case)
             # Only integrates if not already integrated (tracking dicts are empty for this plugin)
@@ -110,11 +114,12 @@ class PluginController(QObject):
                 self.plugin_service.disable_plugin(plugin_name)
                 logger.info(f"Disabled plugin: {plugin_name}")
                 # Publish event for EventSubscriberExtension plugins
-                plugin_registry.publish_event("plugin_disabled", {"plugin_name": plugin_name})
-                
-                # Remove dynamically integrated extensions
-                if self._main_window is not None:
-                    self._remove_plugin_extensions_dynamic(plugin_name, plugin_class)
+                self.registry.publish_event("plugin_disabled", {"plugin_name": plugin_name})
+            
+            # Always try to remove extensions when disabling, even if already disabled in registry
+            # This handles cases where the dialog disabled it first but we still need UI cleanup
+            if self._main_window is not None:
+                self._remove_plugin_extensions_dynamic(plugin_name, plugin_class)
         
         self._save_plugin_states()
         self.plugin_toggled.emit(plugin_name, enabled)
@@ -131,34 +136,36 @@ class PluginController(QObject):
         """
         
         try:
-            # Integrate Menu Extension
-            if issubclass(plugin_class, MenuExtension):
+            # Integrate Menu Extension (has get_menu_items method)
+            if hasattr(plugin_class, 'get_menu_items'):
                 if self.settings_service.is_extension_enabled(plugin_name, "Menu"):
                     self._integrate_menu_extension(plugin_name, plugin_class)
                     logger.info(f"Dynamically integrated menu extension for '{plugin_name}'")
                 else:
                     logger.debug(f"Menu extension disabled for '{plugin_name}'")
             
-            # Integrate Status Extension
-            if issubclass(plugin_class, StatusExtension):
+            # Integrate Status Extension (has create_status_widget method)
+            if hasattr(plugin_class, 'create_status_widget'):
                 if self.settings_service.is_extension_enabled(plugin_name, "Status"):
                     self._integrate_status_extension(plugin_name, plugin_class)
                     logger.info(f"Dynamically integrated status extension for '{plugin_name}'")
                 else:
                     logger.debug(f"Status extension disabled for '{plugin_name}'")
             
-            # Integrate Toolbar Extension (adds to Plugins menu)
-            if issubclass(plugin_class, ToolbarExtension):
+            # Integrate Toolbar Extension (has get_toolbar_actions method)
+            if hasattr(plugin_class, 'get_toolbar_actions'):
                 if self.settings_service.is_extension_enabled(plugin_name, "Toolbar"):
                     self._integrate_toolbar_extension(plugin_name, plugin_class)
                     logger.info(f"Dynamically integrated toolbar extension for '{plugin_name}'")
                 else:
                     logger.debug(f"Toolbar extension disabled for '{plugin_name}'")
             
-            # Start Service Extension
-            if issubclass(plugin_class, ServiceExtension):
+            # Start Service Extension (has on_application_start method)
+            if hasattr(plugin_class, 'on_application_start'):
                 if self.settings_service.is_extension_enabled(plugin_name, "Service"):
-                    plugin_class.on_application_start(self.container)
+                    # Get instance for v4.0.0 support
+                    instance = self.registry.get_plugin_instance(plugin_name)
+                    instance.on_application_start(self.container)
                     logger.info(f"Dynamically started service extension for '{plugin_name}'")
                 else:
                     logger.debug(f"Service extension disabled for '{plugin_name}'")
@@ -209,12 +216,11 @@ class PluginController(QObject):
                     except Exception as e:
                         logger.debug(f"Error removing toolbar action: {e}")
                 del self._plugin_toolbar_actions[plugin_name]
+                logger.info(f"Removed toolbar actions for '{plugin_name}'")
                 
                 # Hide toolbar if empty
                 if self._plugin_toolbar and not self._plugin_toolbar.actions():
                     self._plugin_toolbar.hide()
-                    
-                logger.info(f"Removed toolbar extensions for '{plugin_name}'")
             
             # Remove status widgets
             if plugin_name in self._plugin_status_widgets:
@@ -227,11 +233,20 @@ class PluginController(QObject):
                 del self._plugin_status_widgets[plugin_name]
                 logger.info(f"Removed status extensions for '{plugin_name}'")
             
-            # Shutdown Service Extension
-            if issubclass(plugin_class, ServiceExtension):
+            # Shutdown Service Extension (has on_application_shutdown method)
+            if hasattr(plugin_class, 'on_application_shutdown'):
                 try:
-                    plugin_class.on_application_shutdown()
-                    logger.info(f"Shutdown service extension for '{plugin_name}'")
+                    # Get instance for v4.0.0 support
+                    # If it was running, instance should exist
+                    if self.registry.has_plugin_instance(plugin_name):
+                        instance = self.registry.get_plugin_instance(plugin_name)
+                        instance.on_application_shutdown()
+                        logger.info(f"Shutdown service extension for '{plugin_name}'")
+                    else:
+                        logger.debug(
+                            "Skipping service shutdown for '%s' - instance not created",
+                            plugin_name
+                        )
                 except Exception as e:
                     logger.error(f"Error shutting down service extension '{plugin_name}': {e}")
                     
@@ -276,6 +291,20 @@ class PluginController(QObject):
         
         # Re-integrate with current settings
         self._integrate_plugin_extensions_dynamic(plugin_name, plugin_class)
+        
+        # Handle Dynamic Tab Extension Toggle
+        # We need to manually handle this because tabs are normally managed by MainWindow via plugin_toggled
+        if hasattr(plugin_class, 'create_widget') and self._main_window and hasattr(self._main_window, 'tab_controller'):
+            should_have_tab = self.settings_service.is_extension_enabled(plugin_name, "Tab")
+            # Check if tab is currently loaded
+            tab_exists = plugin_name in self._main_window.tab_controller.loaded_tabs
+            
+            if should_have_tab and not tab_exists:
+                self._main_window.tab_controller.add_tab(plugin_name, plugin_class)
+                logger.info(f"Dynamically added tab for '{plugin_name}'")
+            elif not should_have_tab and tab_exists:
+                self._main_window.tab_controller.remove_tab(plugin_name)
+                logger.info(f"Dynamically removed tab for '{plugin_name}'")
         
         logger.info(f"Refreshed extensions for '{plugin_name}'")
     
@@ -393,7 +422,7 @@ class PluginController(QObject):
             logger.warning(f"Failed to load plugin states: {e}")
     
     # =========================================================================
-    # v3.4.0 Extension Integration
+    # Extension Integration
     # =========================================================================
     
     def cleanup_all_extensions(self) -> None:
@@ -449,6 +478,10 @@ class PluginController(QObject):
                         logger.debug(f"Error removing toolbar action: {e}")
                 del self._plugin_toolbar_actions[plugin_name]
             
+            # Hide toolbar if empty
+            if self._plugin_toolbar and not self._plugin_toolbar.actions():
+                self._plugin_toolbar.hide()
+            
             # Remove all status widgets
             for plugin_name in list(self._plugin_status_widgets.keys()):
                 for widget in self._plugin_status_widgets[plugin_name]:
@@ -458,17 +491,13 @@ class PluginController(QObject):
                     except Exception as e:
                         logger.debug(f"Error removing status widget: {e}")
                 del self._plugin_status_widgets[plugin_name]
-
-            # Hide toolbar if empty
-            if self._plugin_toolbar and not self._plugin_toolbar.actions():
-                self._plugin_toolbar.hide()
             
             logger.info("Cleaned up all plugin extensions")
         except Exception as e:
             logger.error(f"Error cleaning up extensions: {e}")
     
     def integrate_extensions(self, main_window: Any) -> None:
-        """Integrate all v3.4.0 plugin extensions into the main window.
+        """Integrate all plugin extensions into the main window.
         
         Args:
             main_window: The MainWindow instance to integrate into
@@ -481,7 +510,7 @@ class PluginController(QObject):
         
         try:
             # Integrate Menu Extensions
-            menu_plugins = plugin_registry.get_menu_extensions(enabled_only=True)
+            menu_plugins = self.registry.get_menu_extensions(enabled_only=True)
             for name, plugin_class in menu_plugins.items():
                 try:
                     if self.settings_service.is_extension_enabled(name, "Menu"):
@@ -492,7 +521,7 @@ class PluginController(QObject):
                     logger.error(f"Failed to integrate menu extension '{name}': {e}")
             
             # Integrate Status Extensions
-            status_plugins = plugin_registry.get_status_extensions(enabled_only=True)
+            status_plugins = self.registry.get_status_extensions(enabled_only=True)
             for name, plugin_class in status_plugins.items():
                 try:
                     if self.settings_service.is_extension_enabled(name, "Status"):
@@ -502,8 +531,8 @@ class PluginController(QObject):
                 except Exception as e:
                     logger.error(f"Failed to integrate status extension '{name}': {e}")
             
-            # Integrate Toolbar Extensions (now adds to Plugins menu)
-            toolbar_plugins = plugin_registry.get_toolbar_extensions(enabled_only=True)
+            # Integrate Toolbar Extensions
+            toolbar_plugins = self.registry.get_toolbar_extensions(enabled_only=True)
             for name, plugin_class in toolbar_plugins.items():
                 try:
                     if self.settings_service.is_extension_enabled(name, "Toolbar"):
@@ -523,9 +552,11 @@ class PluginController(QObject):
     
     def _integrate_menu_extension(self, name: str, plugin_class: type) -> None:
         """Add menu items from a MenuExtension plugin."""
-        from PySide6.QtGui import QAction
+
         
-        menu_items = plugin_class.get_menu_items()
+        # Get plugin instance
+        instance = self.registry.get_plugin_instance(name)
+        menu_items = instance.get_menu_items()
         menu_bar = self._main_window.menuBar()
         
         # Track actions for this plugin as (action, target_menu) tuples
@@ -574,7 +605,9 @@ class PluginController(QObject):
     
     def _integrate_status_extension(self, name: str, plugin_class: type) -> None:
         """Add status bar widget from a StatusExtension plugin."""
-        widget = plugin_class.create_status_widget(self._main_window.statusBar())
+        # Get plugin instance
+        instance = self.registry.get_plugin_instance(name)
+        widget = instance.create_status_widget(self._main_window.statusBar())
         if widget:
             self._main_window.statusBar().addPermanentWidget(widget)
             # Track widget for removal on disable
@@ -585,8 +618,7 @@ class PluginController(QObject):
     
     def _get_or_create_plugin_toolbar(self):
         """Get or create the plugin toolbar."""
-        from PySide6.QtWidgets import QToolBar
-        from PySide6.QtCore import Qt
+
         
         # Return cached toolbar if exists
         if self._plugin_toolbar is not None:
@@ -607,9 +639,11 @@ class PluginController(QObject):
     
     def _integrate_toolbar_extension(self, name: str, plugin_class: type) -> None:
         """Add toolbar actions from a ToolbarExtension plugin to the plugin toolbar."""
-        from PySide6.QtGui import QAction
+
         
-        actions = plugin_class.get_toolbar_actions()
+        # Get plugin instance
+        instance = self.registry.get_plugin_instance(name)
+        actions = instance.get_toolbar_actions()
         
         # Track actions for this plugin
         if name not in self._plugin_toolbar_actions:
@@ -636,19 +670,20 @@ class PluginController(QObject):
         # Ensure toolbar is visible when actions are added
         if toolbar.actions():
             toolbar.show()
-
     
     def start_service_extensions(self) -> None:
         """Start all ServiceExtension plugins."""
-        from ....plugin_system.registry import plugin_registry
+
         
         try:
-            service_plugins = plugin_registry.get_service_extensions(enabled_only=True)
+            service_plugins = self.registry.get_service_extensions(enabled_only=True)
             for name, plugin_class in service_plugins.items():
                 try:
                     if self.settings_service.is_extension_enabled(name, "Service"):
+                        # Get plugin instance and start service
+                        instance = self.registry.get_plugin_instance(name)
                         logger.info(f"Starting service extension: {name}")
-                        plugin_class.on_application_start(self.container)
+                        instance.on_application_start(self.container)
                     else:
                         logger.debug(f"Service extension disabled for '{name}'")
                 except Exception as e:
@@ -660,14 +695,19 @@ class PluginController(QObject):
     
     def shutdown_service_extensions(self) -> None:
         """Shutdown all ServiceExtension plugins."""
-        from ....plugin_system.registry import plugin_registry
+
         
         try:
-            service_plugins = plugin_registry.get_service_extensions(enabled_only=True)
+            service_plugins = self.registry.get_service_extensions(enabled_only=True)
             for name, plugin_class in service_plugins.items():
                 try:
-                    logger.info(f"Shutting down service extension: {name}")
-                    plugin_class.on_application_shutdown()
+                    # Get plugin instance and shutdown service
+                    # Note: We need the instance to be created/cached even if we are shutting down
+                    # But typically if it was running, it should be in cache
+                    if self.registry.has_plugin_instance(name):
+                        instance = self.registry.get_plugin_instance(name)
+                        logger.info(f"Shutting down service extension: {name}")
+                        instance.on_application_shutdown()
                 except Exception as e:
                     logger.error(f"Error shutting down service extension '{name}': {e}")
             # Mark that service extensions have been shut down

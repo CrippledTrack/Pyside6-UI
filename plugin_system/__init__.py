@@ -1,15 +1,17 @@
 """
-Plugin system for Basic GUI Application
+Plugin system for Basic UI Application
 
-This package contains the plugin system for the Basic GUI Application.
-
-New in v3.4.0: Multiple extension interfaces for flexible plugin architecture.
+v4.0.0 BREAKING CHANGES:
+- Instance-based plugins with ServiceContainer injection
+- Protocol-based interfaces (duck typing support)
+- Use plugin_name + tab_title instead of tab_name
+- LegacyPluginAdapter for 3.x compatibility
 """
 
-from .base import BaseTabPlugin, CoreTabPlugin
+from .base import BaseTabPlugin, CoreTabPlugin, LegacyBaseTabPlugin
 from .registry import PluginRegistry, plugin_registry
 from .interfaces import (
-    Plugin,
+    PluginProtocol,
     TabExtension,
     MenuExtension,
     StatusExtension,
@@ -17,17 +19,20 @@ from .interfaces import (
     ServiceExtension,
     EventSubscriberExtension,
     SettingsExtension,
+    Plugin,  # Legacy ABC
 )
 from .types import MenuItemDefinition, ToolbarAction, PluginEvent
+from .compatibility import LegacyPluginAdapter, wrap_legacy_plugin
 
 __all__ = [
-    # Backward compatible
+    # v4.0.0 base classes
     "BaseTabPlugin",
     "CoreTabPlugin",
+    # Registry
     "PluginRegistry",
     "plugin_registry",
-    # New extension interfaces (v3.4.0)
-    "Plugin",
+    # Protocol interfaces (v4.0.0)
+    "PluginProtocol",
     "TabExtension",
     "MenuExtension",
     "StatusExtension",
@@ -35,8 +40,14 @@ __all__ = [
     "ServiceExtension",
     "EventSubscriberExtension",
     "SettingsExtension",
-    # New types (v3.4.0)
+    # Types
     "MenuItemDefinition",
     "ToolbarAction",
     "PluginEvent",
+    # Migration utilities
+    "LegacyPluginAdapter",
+    "wrap_legacy_plugin",
+    # Legacy (for 3.x compatibility)
+    "LegacyBaseTabPlugin",
+    "Plugin",
 ]
