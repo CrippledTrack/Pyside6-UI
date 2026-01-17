@@ -299,10 +299,17 @@ class PluginManagementDialog(QDialog):
         """Reload all plugins from the registry."""
         # Clear and re-discover plugins
         # from ...services.plugin_service import discover_and_register_all_plugins
+        if not (self.plugin_controller and self.plugin_controller.plugin_service):
+            QMessageBox.warning(
+                self,
+                "Reload Unavailable",
+                "Plugin reload is unavailable because the plugin service is not initialized."
+            )
+            return
+
         plugin_registry.clear()
         # Use the comprehensive plugin discovery from the service
-        if self.plugin_controller and self.plugin_controller.plugin_service:
-            self.plugin_controller.plugin_service.discover_and_register_all_plugins()
+        self.plugin_controller.plugin_service.discover_and_register_all_plugins()
         QMessageBox.information(self, "Plugins Reloaded", "Plugins have been reloaded.")
         self.load_plugins()
 
@@ -744,10 +751,16 @@ class PluginManagementDialog(QDialog):
         if not plugin_class:
             return
         
+        plugin_target: Any = plugin_class
+        try:
+            plugin_target = plugin_registry.get_plugin_instance(name)
+        except Exception as e:
+            logger.debug(f"Using plugin class for settings (instance unavailable) '{name}': {e}")
+        
         try:
             # Try new get_settings_widget() method first
-            if hasattr(plugin_class, 'get_settings_widget') and callable(getattr(plugin_class, 'get_settings_widget')):
-                settings_widget = plugin_class.get_settings_widget(self)
+            if hasattr(plugin_target, 'get_settings_widget') and callable(getattr(plugin_target, 'get_settings_widget')):
+                settings_widget = plugin_target.get_settings_widget(self)
                 if settings_widget:
                     # Load current settings
                     current_settings = {}
@@ -785,9 +798,9 @@ class PluginManagementDialog(QDialog):
                             if self.settings_service:
                                 self.settings_service.save_plugin_settings(name, new_settings)
                             # Call settings changed hook
-                            if hasattr(plugin_class, 'on_settings_changed'):
+                            if hasattr(plugin_target, 'on_settings_changed'):
                                 try:
-                                    plugin_class.on_settings_changed(new_settings)
+                                    plugin_target.on_settings_changed(new_settings)
                                 except Exception as e:
                                     import logging
                                     logger = logging.getLogger(__name__)
@@ -795,11 +808,11 @@ class PluginManagementDialog(QDialog):
                     return
             
             # Fallback to legacy methods for backward compatibility
-            if hasattr(plugin_class, 'open_settings_dialog') and callable(getattr(plugin_class, 'open_settings_dialog')):
-                plugin_class.open_settings_dialog(self)
+            if hasattr(plugin_target, 'open_settings_dialog') and callable(getattr(plugin_target, 'open_settings_dialog')):
+                plugin_target.open_settings_dialog(self)
                 return
-            if hasattr(plugin_class, 'get_configuration_widget') and callable(getattr(plugin_class, 'get_configuration_widget')):
-                widget = plugin_class.get_configuration_widget(self)
+            if hasattr(plugin_target, 'get_configuration_widget') and callable(getattr(plugin_target, 'get_configuration_widget')):
+                widget = plugin_target.get_configuration_widget(self)
                 if widget:
                     dlg = QDialog(self)
                     dlg.setWindowTitle(f"Configure {name}")
@@ -814,8 +827,8 @@ class PluginManagementDialog(QDialog):
                     dlg.resize(480, 360)
                     dlg.exec()
                     return
-            if hasattr(plugin_class, 'configure') and callable(getattr(plugin_class, 'configure')):
-                plugin_class.configure(self)
+            if hasattr(plugin_target, 'configure') and callable(getattr(plugin_target, 'configure')):
+                plugin_target.configure(self)
                 return
             
             QMessageBox.information(self, "No Configuration", f"Plugin '{name}' has no configurable settings.")
