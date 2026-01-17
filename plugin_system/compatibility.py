@@ -122,6 +122,40 @@ class LegacyPluginAdapter:
         if hasattr(self._legacy_class, 'get_settings_widget'):
             return self._legacy_class.get_settings_widget(parent)
         return None
+
+    def get_menu_items(self) -> List[Any]:
+        """Call legacy get_menu_items if available."""
+        if hasattr(self._legacy_class, 'get_menu_items'):
+            return self._legacy_class.get_menu_items()
+        return []
+
+    def create_status_widget(self, parent: Optional["QWidget"] = None) -> Optional["QWidget"]:
+        """Call legacy create_status_widget if available."""
+        if hasattr(self._legacy_class, 'create_status_widget'):
+            return self._legacy_class.create_status_widget(parent)
+        return None
+
+    def get_toolbar_actions(self) -> List[Any]:
+        """Call legacy get_toolbar_actions if available."""
+        if hasattr(self._legacy_class, 'get_toolbar_actions'):
+            return self._legacy_class.get_toolbar_actions()
+        return []
+
+    def on_application_start(self, container: "ServiceContainer") -> None:
+        """Call legacy on_application_start if available."""
+        if hasattr(self._legacy_class, 'on_application_start'):
+            self._legacy_class.on_application_start(container)
+
+    def on_application_shutdown(self) -> None:
+        """Call legacy on_application_shutdown if available."""
+        if hasattr(self._legacy_class, 'on_application_shutdown'):
+            self._legacy_class.on_application_shutdown()
+
+    def get_event_subscriptions(self) -> Dict[str, Any]:
+        """Call legacy get_event_subscriptions if available."""
+        if hasattr(self._legacy_class, 'get_event_subscriptions'):
+            return self._legacy_class.get_event_subscriptions()
+        return {}
     
     # Class method proxies (these don't need instance state)
     @classmethod

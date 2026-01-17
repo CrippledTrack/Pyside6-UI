@@ -100,6 +100,11 @@ class TabLoaderThread(QThread):
     def _emit_enabled_plugins(self) -> None:
         """Emit add_tab signals for all enabled plugins, respecting saved order."""
         enabled_plugins = self._plugin_service.get_enabled_plugins()
+
+        def _is_tab_enabled(plugin_name: str) -> bool:
+            if not self._settings_service:
+                return True
+            return self._settings_service.is_extension_enabled(plugin_name, "Tab")
         
         # Get saved tab order if available
         saved_order = []
@@ -111,6 +116,9 @@ class TabLoaderThread(QThread):
             if self._should_cancel():
                 return
             if tab_name in enabled_plugins:
+                if not _is_tab_enabled(tab_name):
+                    del enabled_plugins[tab_name]
+                    continue
                 plugin_class = enabled_plugins[tab_name]
                 self.add_tab.emit(tab_name, plugin_class)
                 # Remove from dict to track what's left
@@ -120,6 +128,8 @@ class TabLoaderThread(QThread):
         for tab_name in sorted(enabled_plugins.keys()):
             if self._should_cancel():
                 return
+            if not _is_tab_enabled(tab_name):
+                continue
             plugin_class = enabled_plugins[tab_name]
             self.add_tab.emit(tab_name, plugin_class)
 
