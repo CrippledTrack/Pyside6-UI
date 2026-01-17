@@ -204,7 +204,9 @@ class PluginService:
                     ),
                 ]
 
-                discovery = PluginDiscovery(plugins_dir=None)
+                from ..utils.paths import get_plugins_dir
+                plugins_dir = get_plugins_dir()
+                discovery = PluginDiscovery(plugins_dir=str(plugins_dir))
                 total_registered = 0
                 builtin_registered = 0
 
@@ -236,8 +238,25 @@ class PluginService:
                                 e,
                             )
 
-                summary["total_discovered"] = summary.get("total_discovered", 0) + total_registered
+                # Discover and register external plugins from the plugins directory.
+                local_discovered = discovery.discover_local_plugins()
+                local_registered = 0
+                for plugin_name, plugin_class, _src in local_discovered:
+                    if plugin_registry.get_plugin(plugin_name) is not None:
+                        logger.debug(
+                            "Skipping local plugin '%s' due to higher-priority registration",
+                            plugin_name,
+                        )
+                        continue
+                    try:
+                        plugin_registry.register_plugin(plugin_class, is_core=False)
+                        local_registered += 1
+                    except Exception as e:
+                        logger.warning("Failed to register local plugin '%s': %s", plugin_name, e)
+
+                summary["total_discovered"] = summary.get("total_discovered", 0) + total_registered + local_registered
                 summary["builtin_plugins"] = builtin_registered
+                summary["local_plugins"] = local_registered
             except Exception as e:  # pragma: no cover - optional discovery
                 logger.warning("Plugin discovery failed: %s", e)
         except Exception as e:

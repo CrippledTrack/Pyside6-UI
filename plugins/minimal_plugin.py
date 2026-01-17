@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Optional
 from PySide6.QtWidgets import QWidget, QLabel
-from GUI.plugins.base import BaseTabPlugin
+from GUI.plugin_system.base import BaseTabPlugin
 
 
 class MinimalPlugin(BaseTabPlugin):

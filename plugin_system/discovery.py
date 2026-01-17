@@ -210,6 +210,13 @@ class PluginDiscovery:
         module_name = self._module_name_for_path(py_file)
         logger.debug(f"Attempting to load local plugin module: {module_name}")
         
+        # Ensure legacy import aliases are installed before executing plugin code.
+        try:
+            from .import_aliases import install_import_aliases
+            install_import_aliases()
+        except Exception:
+            pass
+        
         spec = importlib.util.spec_from_file_location(module_name, py_file)
         if spec is None or spec.loader is None:
             logger.warning(f"Could not create spec for {py_file}")
