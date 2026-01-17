@@ -133,10 +133,12 @@ class PluginManagementDialog(QDialog):
         details_layout.addWidget(self.details_description)
         
         # Extension type toggles section
-        extension_group = QGroupBox("Extension Types (toggle to enable/disable)")
-        extension_layout = QHBoxLayout(extension_group)
-        extension_layout.setContentsMargins(8, 4, 8, 4)
-        
+        # NOTE: Keep a single checkbox group and a single handler. We always use
+        # `stateChanged(int)` so the handler receives Qt checkbox states (0/2).
+        self.extensions_group = QGroupBox("Extension Types (toggle to enable/disable)")
+        ext_layout = QHBoxLayout(self.extensions_group)
+        ext_layout.setContentsMargins(8, 4, 8, 4)
+
         self.ext_checkboxes: Dict[str, QCheckBox] = {}
         for ext_type in ["Tab", "Menu", "Toolbar", "Status", "Service"]:
             cb = QCheckBox(ext_type)
@@ -144,25 +146,9 @@ class PluginManagementDialog(QDialog):
             cb.setEnabled(False)  # Disabled until a plugin is selected
             cb.stateChanged.connect(lambda state, t=ext_type: self._on_extension_toggled(t, state))
             self.ext_checkboxes[ext_type] = cb
-            extension_layout.addWidget(cb)
-        extension_layout.addStretch()
-        
-        details_layout.addWidget(extension_group)
-
-        # Extension Types Configuration Group
-        self.extensions_group = QGroupBox("Extension Types (toggle to enable/disable)")
-        ext_layout = QHBoxLayout()
-        ext_layout.setContentsMargins(8, 4, 8, 4)
-        
-        self.ext_checkboxes = {}
-        for ext_type in ["Menu", "Toolbar", "Status", "Service"]:
-            cb = QCheckBox(ext_type)
-            cb.clicked.connect(lambda checked, t=ext_type: self._on_extension_toggled(t, int(checked)))
-            self.ext_checkboxes[ext_type] = cb
             ext_layout.addWidget(cb)
-        
+
         ext_layout.addStretch()
-        self.extensions_group.setLayout(ext_layout)
         details_layout.addWidget(self.extensions_group)
 
         # Action buttons for details
@@ -308,27 +294,6 @@ class PluginManagementDialog(QDialog):
             self.plugin_toggled.emit(name, True)
             # Reload to update UI
             self.load_plugins()
-
-    def _on_extension_toggled(self, extension_type: str, state: int) -> None:
-        """Handle individual extension toggling."""
-        plugin_name = self.get_selected_plugin_name()
-        if not plugin_name or not self.settings_service:
-            return
-            
-        enabled = bool(state)
-        self.settings_service.set_extension_enabled(plugin_name, extension_type, enabled)
-        
-        # Service checkbox also controls Events (they're grouped for user simplicity)
-        if extension_type == "Service":
-            self.settings_service.set_extension_enabled(plugin_name, "Events", enabled)
-        
-        # Determine main window for refresh
-        main_window = self.parent()
-        while main_window and not hasattr(main_window, 'plugin_controller'):
-            main_window = main_window.parent()
-            
-        if main_window and hasattr(main_window, 'plugin_controller'):
-            main_window.plugin_controller.refresh_plugin_extensions(plugin_name)
 
     def reload_plugins(self) -> None:
         """Reload all plugins from the registry."""
@@ -603,18 +568,21 @@ class PluginManagementDialog(QDialog):
             cb.setEnabled(False)
             cb.blockSignals(False)
     
-    def _on_extension_toggled(self, extension_type: str, state: int) -> None:
+    def _on_extension_toggled(self, extension_type: str, state: int | bool) -> None:
         """Handle extension type checkbox toggle.
         
         Args:
             extension_type: The extension type (e.g., "Tab", "Menu", "Toolbar")
-            state: Qt checkbox state (0=unchecked, 2=checked)
+            state: Qt checkbox state (0=unchecked, 2=checked) or a bool from other signals
         """
         name = self.get_selected_plugin_name()
         if not name or not self.settings_service:
             return
         
-        enabled = (state == Qt.CheckState.Checked.value)
+        if isinstance(state, bool):
+            enabled = state
+        else:
+            enabled = (state == Qt.CheckState.Checked.value)
         self.settings_service.set_extension_enabled(name, extension_type, enabled)
         
         # Service checkbox also controls Events (they're grouped for user simplicity)
