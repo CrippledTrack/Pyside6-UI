@@ -238,9 +238,15 @@ class PluginController(QObject):
                 try:
                     # Get instance for v4.0.0 support
                     # If it was running, instance should exist
-                    instance = self.registry.get_plugin_instance(plugin_name)
-                    instance.on_application_shutdown()
-                    logger.info(f"Shutdown service extension for '{plugin_name}'")
+                    if self.registry.has_plugin_instance(plugin_name):
+                        instance = self.registry.get_plugin_instance(plugin_name)
+                        instance.on_application_shutdown()
+                        logger.info(f"Shutdown service extension for '{plugin_name}'")
+                    else:
+                        logger.debug(
+                            "Skipping service shutdown for '%s' - instance not created",
+                            plugin_name
+                        )
                 except Exception as e:
                     logger.error(f"Error shutting down service extension '{plugin_name}': {e}")
                     
