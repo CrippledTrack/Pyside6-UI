@@ -477,12 +477,11 @@ class PluginController(QObject):
                 self._plugin_toolbar.hide()
             
             # Remove all status widgets
-            status_bar = self._main_window.statusBar()
             for plugin_name in list(self._plugin_status_widgets.keys()):
                 for widget in self._plugin_status_widgets[plugin_name]:
                     try:
-                        status_bar.removeWidget(widget)
-                        widget.hide()  # Hide instead of delete to avoid corruption
+                        self._main_window.statusBar().removeWidget(widget)
+                        widget.hide()
                     except Exception as e:
                         logger.debug(f"Error removing status widget: {e}")
                 del self._plugin_status_widgets[plugin_name]
