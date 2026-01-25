@@ -7,13 +7,15 @@ import logging
 import platform
 from typing import Optional, Tuple
 
+from ..utils.qt_dependencies_linux import APT_PACKAGES
+
 
 logger = logging.getLogger(__name__)
 
 _MISSING_DEPS_MESSAGE = (
-    "Missing Qt dependencies. Please install: "
-    "libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-image0 "
-    "libxcb-keysyms1 libxcb-render-util0 libxkbcommon-x11-0 qtwayland5"
+    "Missing Qt dependencies. Please install with: "
+    "sudo apt-get update && sudo apt-get install -y --no-install-recommends "
+    + " ".join(APT_PACKAGES)
 )
 
 

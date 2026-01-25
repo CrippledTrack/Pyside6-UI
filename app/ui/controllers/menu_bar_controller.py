@@ -147,6 +147,21 @@ class MenuBarController(QObject):
             On Windows: Shows when not running as administrator.
             On Linux: Always shows to allow starting the daemon.
         """
+        # Allow hiding the Admin menu/button (e.g., kiosk/demo mode)
+        try:
+            # In dev mode, always show the Admin menu (temporary override)
+            from ...utils.admin import is_dev_mode
+            dev_mode_active = bool(is_dev_mode())
+
+            if self.settings_service and self.settings_service.get_hide_admin_menu() and not dev_mode_active:
+                logger.debug("Admin menu hidden by settings (hide_admin_menu=true)")
+                return
+            if self.settings_service and self.settings_service.get_hide_admin_menu() and dev_mode_active:
+                logger.debug("Dev mode active - overriding hide_admin_menu to show Admin menu")
+        except Exception:
+            # Fail open: if settings are unavailable, keep existing behavior
+            pass
+
         should_show = False
         if CURRENT_PLATFORM == "windows":
             if self.admin_service:

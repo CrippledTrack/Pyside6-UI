@@ -26,6 +26,15 @@ try:
 except (ImportError, AttributeError):
     from ..constants import NEW_UI_ENABLED_BY_DEFAULT
 
+# Try to get HIDE_ADMIN_MENU_BY_DEFAULT from platform constants first, fallback to GUI constants
+try:
+    platform_constants = get_platforms_constants()
+    HIDE_ADMIN_MENU_BY_DEFAULT = getattr(platform_constants, 'HIDE_ADMIN_MENU_BY_DEFAULT', None)
+    if HIDE_ADMIN_MENU_BY_DEFAULT is None:
+        from ..constants import HIDE_ADMIN_MENU_BY_DEFAULT
+except (ImportError, AttributeError):
+    from ..constants import HIDE_ADMIN_MENU_BY_DEFAULT
+
 logger = logging.getLogger(__name__)
 
 SETTINGS_SCHEMA_VERSION = 1
@@ -52,6 +61,8 @@ class AppSettings:
     window_geometry: WindowGeometry = None
     # UI/UX settings
     show_tooltips: bool = True
+    # Hide the Admin menu/button (useful for demos/kiosk mode)
+    hide_admin_menu: bool = HIDE_ADMIN_MENU_BY_DEFAULT
     # Keyboard shortcuts
     shortcuts_enabled: bool = True
     # Toast notifications
@@ -138,6 +149,10 @@ class SettingsService:
             # Load UI/UX settings
             if 'show_tooltips' in data:
                 self._settings.show_tooltips = bool(data['show_tooltips'])
+
+            # Load Admin menu visibility
+            if 'hide_admin_menu' in data:
+                self._settings.hide_admin_menu = bool(data['hide_admin_menu'])
             
             # Load keyboard shortcuts
             if 'shortcuts_enabled' in data:
@@ -201,6 +216,7 @@ class SettingsService:
                     'fullscreen': self._settings.window_geometry.fullscreen
                 },
                 'show_tooltips': self._settings.show_tooltips,
+                'hide_admin_menu': self._settings.hide_admin_menu,
                 'shortcuts_enabled': self._settings.shortcuts_enabled,
                 'toast_notifications_enabled': self._settings.toast_notifications_enabled,
                 'toast_duration': self._settings.toast_duration,
@@ -299,6 +315,16 @@ class SettingsService:
     def get_show_tooltips(self) -> bool:
         """Get show tooltips setting"""
         return self._settings.show_tooltips
+
+    def save_hide_admin_menu(self, hide: bool) -> None:
+        """Save hide admin menu setting."""
+        self._settings.hide_admin_menu = bool(hide)
+        self._save_settings()
+        logger.debug("Hide admin menu saved: %s", hide)
+
+    def get_hide_admin_menu(self) -> bool:
+        """Get hide admin menu setting."""
+        return bool(getattr(self._settings, "hide_admin_menu", False))
     
     # Keyboard shortcuts methods
     def save_shortcuts_enabled(self, enabled: bool) -> None:

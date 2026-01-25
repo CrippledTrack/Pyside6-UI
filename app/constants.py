@@ -12,7 +12,7 @@ import platform
 # =============================================================================
 # Version Information (can be overridden by app_plugins/constants.py)
 # =============================================================================
-VERSION = "4.0.0"
+VERSION = "4.0.1"
 VERSION_NAME = "Basic UI Application"
 
 VERSION_INFO = {
@@ -37,6 +37,8 @@ SHOW_CONSOLE = False
 
 # UI configuration
 NEW_UI_ENABLED_BY_DEFAULT = True
+# Hide the Admin menu/button by default (can be overridden by app_plugins/constants.py)
+HIDE_ADMIN_MENU_BY_DEFAULT = False
 
 # =============================================================================
 # GUI Internal (app_plugins will NOT override these)
@@ -56,6 +58,7 @@ __all__ = [
     'LOG_TO_FILE',
     'SHOW_CONSOLE',
     'NEW_UI_ENABLED_BY_DEFAULT',
+    'HIDE_ADMIN_MENU_BY_DEFAULT',
     # GUI internal
     'CURRENT_PLATFORM',
 ]

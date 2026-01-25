@@ -9,9 +9,19 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
-import sys
 
 logger = logging.getLogger(__name__)
+
+APT_PACKAGES = [
+    'libxcb-cursor0',
+    'libxcb-xinerama0',
+    'libxcb-icccm4',
+    'libxcb-image0',
+    'libxcb-keysyms1',
+    'libxcb-render-util0',
+    'libxkbcommon-x11-0',
+    'qtwayland5',
+]
 
 
 def _detect_distribution_id() -> str:
@@ -60,41 +70,36 @@ def _run(cmd: list[str], env: dict[str, str] | None = None, timeout: int = 600) 
         return '', str(e), -1
 
 
-def _probe_qt_xcb_in_subprocess() -> tuple[bool, str]:
-    """Attempt to initialize a minimal QApplication forcing the xcb platform in a subprocess.
-    
-    Returns (ok: bool, stderr: str)
-    """
-    python_exe = sys.executable or 'python3'
-    code = (
-        'import os; os.environ["QT_QPA_PLATFORM"] = "xcb"; '
-        'from PySide6.QtWidgets import QApplication; '
-        'app = QApplication([]); print("OK")'
+def _is_package_installed_debian(package: str) -> bool:
+    stdout, stderr, rc = _run(
+        ['dpkg-query', '-W', '-f=${Status}', package],
+        timeout=15,
     )
-    env = os.environ.copy()
-    env.setdefault('QT_DEBUG_PLUGINS', '0')
-    stdout, stderr, rc = _run([python_exe, '-c', code], env=env, timeout=30)
-    ok = (rc == 0 and 'OK' in (stdout or ''))
-    return ok, stderr
+    if rc != 0:
+        logger.debug(
+            "dpkg-query failed for %s: %s",
+            package,
+            stderr.strip() or stdout.strip(),
+        )
+        return False
+    return 'install ok installed' in (stdout or '').lower()
 
 
-def _install_qt_xcb_dependencies_debian() -> bool:
+def _get_missing_packages_debian(packages: list[str]) -> list[str]:
+    missing = []
+    for package in packages:
+        if not _is_package_installed_debian(package):
+            missing.append(package)
+    return missing
+
+
+def _install_qt_xcb_dependencies_debian(packages: list[str] | None = None) -> bool:
     """Install required Qt xcb dependencies on Debian/Ubuntu systems.
     
     Returns:
         True if installation succeeded, False otherwise
     """
-    # Minimal set known to be required by Qt 6.5+ for xcb
-    apt_packages = [
-        'libxcb-cursor0',
-        'libxcb-xinerama0',
-        'libxcb-icccm4',
-        'libxcb-image0',
-        'libxcb-keysyms1',
-        'libxcb-render-util0',
-        'libxkbcommon-x11-0',
-        'qtwayland5',
-    ]
+    apt_packages = packages or APT_PACKAGES
 
     try:
         # Use interactive=True so password prompt can display
@@ -133,18 +138,16 @@ def ensure_qt_xcb_dependencies_installed() -> bool:
     
     Returns True if Qt can initialize with xcb after this call, False otherwise.
     """
-    ok, stderr = _probe_qt_xcb_in_subprocess()
-    if ok:
-        return True
-
-    logger.warning('Qt xcb platform initialization failed; attempting to install required system libraries...')
-    if stderr:
-        logger.debug(f"Initial Qt error: {stderr}")
-
     distro = _detect_distribution_id()
-    installed = False
     if distro in ('debian', 'ubuntu', 'linuxmint'):
-        installed = _install_qt_xcb_dependencies_debian()
+        missing = _get_missing_packages_debian(APT_PACKAGES)
+        if not missing:
+            return True
+        logger.warning(
+            "Qt xcb dependencies missing: %s",
+            ", ".join(missing),
+        )
+        installed = _install_qt_xcb_dependencies_debian(missing)
     else:
         # Skip dependency check on non-Debian distros for now - assume Qt deps are available
         logger.warning(f"Qt dependency check skipped for distribution '{distro}'. If the app fails to start, please install Qt xcb dependencies manually.")
@@ -153,11 +156,14 @@ def ensure_qt_xcb_dependencies_installed() -> bool:
     if not installed:
         return False
 
-    # Re-probe after install
-    ok, stderr = _probe_qt_xcb_in_subprocess()
-    if not ok and stderr:
-        logger.error(f"Qt still failed to initialize xcb after installation: {stderr}")
-    return ok
+    missing = _get_missing_packages_debian(APT_PACKAGES)
+    if missing:
+        logger.error(
+            "Qt dependencies still missing after installation: %s",
+            ", ".join(missing),
+        )
+        return False
+    return True
 
 
-__all__ = ['ensure_qt_xcb_dependencies_installed']
+__all__ = ['ensure_qt_xcb_dependencies_installed', 'APT_PACKAGES']
