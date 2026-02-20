@@ -13,8 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Optional, TYPE_CHECKING
 
-from PySide6.QtCore import QThread, Signal
-from PySide6.QtWidgets import QWidget
+from ..qt_bindings import QThread, Signal, QWidget
 
 if TYPE_CHECKING:
     from .plugin_service import PluginService

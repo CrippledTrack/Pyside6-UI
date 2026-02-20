@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Protocol, Optional, Dict, Any, List, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from PySide6.QtWidgets import QWidget
+    from ..qt_bindings import QWidget
     from .settings_service import WindowGeometry
 
 

@@ -13,7 +13,7 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 from ..constants import CURRENT_PLATFORM
 
 if TYPE_CHECKING:
-    from PySide6.QtWidgets import QWidget
+    from ..qt_bindings import QWidget
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +133,7 @@ class AdminService:
         Returns:
             True if admin is available, False otherwise
         """
-        from PySide6.QtWidgets import QMessageBox
+        from ..qt_bindings import QMessageBox
         
         if CURRENT_PLATFORM == "windows":
             if self.is_admin():

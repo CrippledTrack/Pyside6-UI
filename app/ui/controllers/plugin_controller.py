@@ -10,24 +10,32 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional, Callable, TYPE_CHECKING
 
-from PySide6.QtCore import QObject, Signal, Qt
-from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QToolBar
+from ...qt_bindings import QObject, Signal, Qt, QAction, QToolBar
+
+try:
+    from shiboken6 import isValid as _qt_is_valid
+except Exception:  # pragma: no cover - shiboken6 unavailable (PyQt6 path)
+    try:
+        from PyQt6 import sip as _sip
+
+        def _qt_is_valid(obj: object) -> bool:
+            if obj is None:
+                return False
+            try:
+                return not _sip.isdeleted(obj)
+            except TypeError:
+                # obj is not a wrapped C++ object; treat as valid.
+                return True
+    except Exception:
+        def _qt_is_valid(obj: object) -> bool:  # type: ignore[misc]
+            return obj is not None
 
 from ...services.plugin_service import PluginService
 from ...services.settings_service import SettingsService
 from ...services.plugin_registry_facade import PluginRegistryFacade
 
-from ....plugin_system.interfaces import (
-    MenuExtension,
-    StatusExtension,
-    ToolbarExtension,
-    ServiceExtension,
-)
-
 if TYPE_CHECKING:
     from ...services.container import ServiceContainer
-    from ....plugin_system.base import BaseTabPlugin
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +193,7 @@ class PluginController(QObject):
             if plugin_name in self._plugin_menu_actions:
                 for action, target_menu in self._plugin_menu_actions[plugin_name]:
                     try:
-                        if target_menu:
+                        if target_menu and _qt_is_valid(target_menu):
                             target_menu.removeAction(action)
                     except Exception as e:
                         logger.debug(f"Error removing menu action: {e}")
@@ -197,9 +205,15 @@ class PluginController(QObject):
                 menu_bar = self._main_window.menuBar()
                 for menu in self._plugin_created_menus[plugin_name]:
                     try:
+                        if not _qt_is_valid(menu):
+                            continue
                         # Find and remove the menu's action from the menu bar
                         for action in menu_bar.actions():
-                            if action.menu() == menu:
+                            try:
+                                action_menu = action.menu()
+                            except Exception:
+                                continue
+                            if action_menu == menu:
                                 menu_bar.removeAction(action)
                                 logger.debug(f"Removed created menu '{menu.title()}' for '{plugin_name}'")
                                 break
@@ -447,7 +461,7 @@ class PluginController(QObject):
             for plugin_name in list(self._plugin_menu_actions.keys()):
                 for action, target_menu in self._plugin_menu_actions[plugin_name]:
                     try:
-                        if target_menu:
+                        if target_menu and _qt_is_valid(target_menu):
                             target_menu.removeAction(action)
                     except Exception as e:
                         logger.debug(f"Error removing menu action: {e}")
@@ -458,9 +472,15 @@ class PluginController(QObject):
             for plugin_name in list(self._plugin_created_menus.keys()):
                 for menu in self._plugin_created_menus[plugin_name]:
                     try:
+                        if not _qt_is_valid(menu):
+                            continue
                         # Find and remove the menu's action from the menu bar
                         for action in menu_bar.actions():
-                            if action.menu() == menu:
+                            try:
+                                action_menu = action.menu()
+                            except Exception:
+                                continue
+                            if action_menu == menu:
                                 menu_bar.removeAction(action)
                                 logger.debug(f"Removed created menu '{menu.title()}' for '{plugin_name}'")
                                 break
@@ -568,17 +588,21 @@ class PluginController(QObject):
         for item in menu_items:
             # Find or create the target menu
             target_menu = None
-            menu_was_created = False
             for action in menu_bar.actions():
+                try:
+                    menu = action.menu()
+                except Exception:
+                    continue
+                if not _qt_is_valid(menu):
+                    continue
                 if action.text().replace("&", "") == item.menu:
-                    target_menu = action.menu()
+                    target_menu = menu
                     break
             
             if target_menu is None:
                 # Create new menu - track that we created it
                 target_menu = menu_bar.addMenu(item.menu)
                 self._plugin_created_menus[name].append(target_menu)
-                menu_was_created = True
             
             # Add separator before if requested
             if item.separator_before:

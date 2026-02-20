@@ -10,8 +10,7 @@ from __future__ import annotations
 import platform
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
+from ...qt_bindings import Qt, Signal, QLabel, QPushButton, QVBoxLayout, QWidget
 
 
 class AdminRequiredPlaceholder(QWidget):

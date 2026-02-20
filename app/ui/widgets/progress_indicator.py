@@ -9,8 +9,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QProgressBar, QVBoxLayout, QWidget
+from ...qt_bindings import Qt, QLabel, QProgressBar, QVBoxLayout, QWidget
 
 
 class ProgressIndicator(QWidget):

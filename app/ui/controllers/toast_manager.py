@@ -9,8 +9,8 @@ import logging
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from PySide6.QtWidgets import QWidget
-    from ...themes.theme_manager import ThemeManager
+    from ...qt_bindings import QWidget
+    from ....themes.theme_manager import ThemeManager
     from ..widgets.toast_notification import ToastNotification
     from ...services.notification_service import NotificationService
 

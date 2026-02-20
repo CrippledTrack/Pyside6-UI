@@ -6,11 +6,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-    QScrollArea, QPushButton, QFrame
+from ...qt_bindings import (
+    Qt,
+    QColor,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QScrollArea,
+    QPushButton,
+    QFrame,
 )
 
 if TYPE_CHECKING:
@@ -259,7 +264,7 @@ class NotificationCenterWidget(QWidget):
                 self.setFixedHeight(420)  # 400 + shadow margin
                 self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
                 
-                from PySide6.QtWidgets import QGraphicsDropShadowEffect
+                from ...qt_bindings import QGraphicsDropShadowEffect
                 shadow = QGraphicsDropShadowEffect(self)
                 shadow.setBlurRadius(15)
                 shadow.setOffset(0, 3)
@@ -500,7 +505,7 @@ class NotificationCenterWidget(QWidget):
         
         # If UI mode changed, update widget properties
         if ui_mode_changed:
-            from PySide6.QtWidgets import QGraphicsDropShadowEffect
+            from ...qt_bindings import QGraphicsDropShadowEffect
             
             if self._use_new_ui:
                 # Switch to new UI
@@ -516,7 +521,7 @@ class NotificationCenterWidget(QWidget):
                     self.setFixedHeight(420)
                     self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
                     
-                    from PySide6.QtWidgets import QGraphicsDropShadowEffect
+                    from ...qt_bindings import QGraphicsDropShadowEffect
                     shadow = QGraphicsDropShadowEffect(self)
                     shadow.setBlurRadius(15)
                     shadow.setOffset(0, 3)

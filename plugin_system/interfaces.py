@@ -21,7 +21,7 @@ from typing import (
 )
 
 if TYPE_CHECKING:
-    from PySide6.QtWidgets import QWidget
+    from ..app.qt_bindings import QWidget
     from .types import MenuItemDefinition, ToolbarAction
     from ..app.services.container import ServiceContainer
 
@@ -196,68 +196,7 @@ class SettingsExtension(Protocol):
         ...
 
 
-# =============================================================================
-# Legacy ABC interfaces (for 3.x compatibility)
-# =============================================================================
-# These will be removed in a future version. Use the Protocol interfaces above.
-
-from abc import ABC, abstractmethod
-
-
-class Plugin(ABC):
-    """Legacy base class for all plugins.
-    
-    This class is kept for backward compatibility with 3.x plugins.
-    """
-    
-    # Required metadata
-    plugin_name: str = "Unnamed Plugin"
-    plugin_description: str = "No description provided"
-    plugin_version: str = "1.0.0"
-    plugin_author: str = "Unknown"
-    plugin_authors: List[str] = []
-    
-    # Platform support (empty list = all platforms supported)
-    supported_platforms: List[str] = []
-    
-    # Optional: dependencies on other plugins (by plugin_name)
-    dependencies: List[str] = []
-    
-    # If True, the plugin will be disabled by default on first discovery
-    disabled_by_default: bool = False
-    
-    # Version requirements (optional)
-    min_gui_version: Optional[str] = None
-    required_gui_version: Optional[str] = None
-    
-    @classmethod
-    def get_plugin_info(cls) -> Dict[str, Any]:
-        """Get comprehensive information about this plugin."""
-        authors_list: List[str] = []
-        try:
-            if isinstance(getattr(cls, 'plugin_authors', []), list) and getattr(cls, 'plugin_authors'):
-                authors_list = [str(a) for a in getattr(cls, 'plugin_authors') if a]
-        except Exception:
-            authors_list = []
-        if not authors_list and getattr(cls, 'plugin_author', None):
-            authors_list = [str(getattr(cls, 'plugin_author'))]
-
-        author_text = ", ".join(authors_list) if authors_list else str(getattr(cls, 'plugin_author', 'Unknown'))
-
-        # If supported_platforms is empty, show all application-supported platforms
-        display_platforms = cls.supported_platforms if cls.supported_platforms else ["Windows", "Linux"]
-
-        return {
-            'name': getattr(cls, 'plugin_name', cls.__name__),
-            'description': cls.plugin_description,
-            'supported_platforms': display_platforms,
-            'version': cls.plugin_version,
-            'author': author_text,
-            'authors': authors_list,
-            'dependencies': getattr(cls, 'dependencies', []),
-            'min_gui_version': getattr(cls, 'min_gui_version', None),
-            'required_gui_version': getattr(cls, 'required_gui_version', None)
-        }
+from .compatibility import Plugin  # Legacy ABC kept in compatibility module
 
 
 __all__ = [

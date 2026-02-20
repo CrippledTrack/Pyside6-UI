@@ -14,9 +14,7 @@ import logging
 import platform
 from pathlib import Path
 from typing import Dict, List, Optional, Any, TYPE_CHECKING
-from PySide6.QtWidgets import QApplication
-from PySide6.QtGui import QPalette, QColor
-from PySide6.QtCore import Qt
+from ..app.qt_bindings import QApplication, QPalette, QColor, Qt
 
 # Try to get NEW_UI_ENABLED_BY_DEFAULT from platform constants first, fallback to GUI constants
 try:
@@ -89,6 +87,7 @@ class ThemeManager:
         self.builtin_theme_names: set = set()  # Track built-in theme names
         self.settings_service = settings_service
         self.current_theme = ""  # Initialize current theme
+        self._last_stylesheet = ""  # Track last applied stylesheet for refreshes
         # Capture initial system palette before any theme is applied
         self._initial_palette = QApplication.style().standardPalette()
         
@@ -355,7 +354,31 @@ class ThemeManager:
         If stylesheet is empty, clears any existing stylesheet to reset to system defaults.
         """
         # Always set the stylesheet (empty string clears previous styles)
-        QApplication.instance().setStyleSheet(stylesheet if stylesheet else "")
+        app = QApplication.instance()
+        normalized = stylesheet if stylesheet else ""
+        was_empty = not self._last_stylesheet
+        app.setStyleSheet(normalized)
+        if not normalized and not was_empty:
+            self._refresh_menus_after_stylesheet_clear(app)
+        self._last_stylesheet = normalized
+
+    def _refresh_menus_after_stylesheet_clear(self, app: QApplication) -> None:
+        """Force menu bars to re-polish after clearing stylesheet."""
+        try:
+            from ..app.qt_bindings import QMenuBar
+        except Exception:
+            return
+        
+        for widget in app.allWidgets():
+            if isinstance(widget, QMenuBar):
+                try:
+                    style = widget.style()
+                    style.unpolish(widget)
+                    style.polish(widget)
+                    widget.updateGeometry()
+                    widget.update()
+                except Exception:
+                    continue
     
     def _apply_palette(self, palette_data: Dict[str, Any]):
         """Apply color palette to the application.

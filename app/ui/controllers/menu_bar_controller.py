@@ -10,9 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Optional, Callable, TYPE_CHECKING, Any
 
-from PySide6.QtCore import QObject, Signal
-from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QMenuBar, QMenu, QWidget
+from ...qt_bindings import QObject, Signal, QAction, QMenuBar, QMenu, QWidget
 
 from ...constants import CURRENT_PLATFORM
 
@@ -148,6 +146,7 @@ class MenuBarController(QObject):
             On Linux: Always shows to allow starting the daemon.
         """
         # Allow hiding the Admin menu/button (e.g., kiosk/demo mode)
+        force_show_for_dev = False
         try:
             # In dev mode, always show the Admin menu (temporary override)
             from ...utils.admin import is_dev_mode
@@ -158,6 +157,7 @@ class MenuBarController(QObject):
                 return
             if self.settings_service and self.settings_service.get_hide_admin_menu() and dev_mode_active:
                 logger.debug("Dev mode active - overriding hide_admin_menu to show Admin menu")
+                force_show_for_dev = True
         except Exception:
             # Fail open: if settings are unavailable, keep existing behavior
             pass
@@ -171,7 +171,10 @@ class MenuBarController(QObject):
         elif CURRENT_PLATFORM == "linux":
             # On Linux, always show the menu to allow starting the daemon
             should_show = True
-        
+
+        if force_show_for_dev:
+            should_show = True
+
         if should_show:
             admin_menu = QMenu("Admin", self.parent_widget)
             self.menu_bar.addMenu(admin_menu)
@@ -302,6 +305,20 @@ class MenuBarController(QObject):
                 self.restart_admin_action.setToolTip(
                     "Restart the application with administrator privileges"
                 )
+
+    def refresh_for_theme_change(self) -> None:
+        """Force menu bar widgets to re-polish after theme changes."""
+        if not self.menu_bar:
+            return
+        
+        try:
+            style = self.menu_bar.style()
+            style.unpolish(self.menu_bar)
+            style.polish(self.menu_bar)
+            self.menu_bar.updateGeometry()
+            self.menu_bar.update()
+        except Exception:
+            pass
     
     def update_admin_menu(self) -> None:
         """Update the admin menu based on current state.

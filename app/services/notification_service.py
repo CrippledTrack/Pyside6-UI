@@ -13,7 +13,7 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Optional
 
-from PySide6.QtCore import QObject, Signal
+from ..qt_bindings import QObject, Signal
 
 logger = logging.getLogger(__name__)
 

@@ -17,7 +17,7 @@ from abc import abstractmethod
 from typing import Optional, List, Dict, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from PySide6.QtWidgets import QWidget
+    from ..app.qt_bindings import QWidget
     from ..app.services.container import ServiceContainer
     from ..app.services.settings_service import SettingsService
 

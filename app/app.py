@@ -11,8 +11,6 @@ import platform
 import sys
 from typing import List
 
-from PySide6.QtWidgets import QApplication
-
 from .constants import VERSION as GUI_API_VERSION
 from .services.logging_service import setup_logging, set_dev_logging_override
 from .services.app_lifecycle_service import AppLifecycleService
@@ -21,7 +19,6 @@ from .services.daemon_lifecycle_service import DaemonLifecycleService
 from .services.qt_deps_service import QtDepsService
 from .services.settings_service import SettingsService
 from .services.theme_init_service import ThemeInitService
-from .ui.main_window import MainWindow
 from .utils.console import apply_console_setting
 from .utils.admin import set_dev_mode
 from .utils.imports import get_platforms_constants
@@ -68,7 +65,26 @@ def run(argv: List[str]) -> int:
     if is_dev:
         logger.warning("DEV MODE ENABLED - admin requirements bypassed, Dev menu available")
 
-    # Initialize service container
+    # On Linux, ensure Qt system dependencies are present BEFORE anything
+    # imports qt_bindings.  Many services (NotificationService, etc.)
+    # import Qt at module level, so this must happen before the service
+    # container is initialised.
+    qt_deps_service = QtDepsService()
+    deps_ok, deps_message = qt_deps_service.ensure_dependencies()
+    if not deps_ok:
+        logger.error(
+            "Required Qt xcb dependencies are missing and could not be installed automatically."
+        )
+        if deps_message:
+            print(deps_message, file=sys.stderr)
+        return 1
+
+    # Import Qt bindings AFTER the dependency check so missing native
+    # libraries have a chance to be installed first.
+    from .qt_bindings import QApplication
+    from .ui.main_window import MainWindow
+
+    # Initialize service container (safe now -- Qt libs are available)
     container = ServiceContainer()
     container.initialize_services()
     logger.info("Service container initialized")
@@ -79,17 +95,6 @@ def run(argv: List[str]) -> int:
     
     # Save current GUI version to settings for future reference
     settings_service.save_gui_version(GUI_API_VERSION)
-
-    # On Linux, before creating QApplication, ensure Qt xcb system dependencies are present
-    qt_deps_service = QtDepsService()
-    deps_ok, deps_message = qt_deps_service.ensure_dependencies()
-    if not deps_ok:
-        logger.error(
-            "Required Qt xcb dependencies are missing and could not be installed automatically."
-        )
-        if deps_message:
-            print(deps_message, file=sys.stderr)
-        return 1
 
     app = QApplication(argv)
 

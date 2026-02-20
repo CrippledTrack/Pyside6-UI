@@ -7,9 +7,7 @@ from __future__ import annotations
 
 import logging
 from typing import Dict, Callable, Optional
-from PySide6.QtCore import QObject, Signal
-from PySide6.QtGui import QShortcut, QKeySequence
-from PySide6.QtWidgets import QWidget
+from ...qt_bindings import QObject, Signal, QShortcut, QKeySequence, QWidget
 
 logger = logging.getLogger(__name__)
 

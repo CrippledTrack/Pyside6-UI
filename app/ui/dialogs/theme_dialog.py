@@ -11,12 +11,19 @@ import json
 import logging
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
-from PySide6.QtCore import Qt, Signal, QPoint
-from PySide6.QtGui import QAction, QColor, QFont, QPalette
+from ...qt_bindings import (
+    Qt,
+    Signal,
+    QPoint,
+    QAction,
+    QColor,
+    QFont,
+    QPalette,
+)
 
 if TYPE_CHECKING:
     from ...services.interfaces import ISettingsService
-from PySide6.QtWidgets import (
+from ...qt_bindings import (
     QCheckBox,
     QComboBox,
     QDialog,

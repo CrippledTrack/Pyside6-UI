@@ -11,7 +11,7 @@ import logging
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from PySide6.QtWidgets import QMainWindow
+    from ...qt_bindings import QMainWindow
     from .tab_controller import TabController
 
 from ...constants import CURRENT_PLATFORM

@@ -55,7 +55,7 @@ class AppLifecycleService:
 
     def configure_qt_application(self, app, version_name: str, gui_api_version: str) -> None:
         """Configure Qt application style, fonts, and Windows AppUserModelID."""
-        from PySide6.QtGui import QFont
+        from ..qt_bindings import QFont
 
         if platform.system().lower() == "windows":
             app.setStyle("Fusion")

@@ -60,12 +60,11 @@ deactivate
 Run these commands from the directory that contains `main.py` and the `GUI/` folder.
 
 ### Packaging note (PyInstaller)
-- Do **not** build/target PyInstaller using `GUI/run.py`. It is a standalone/dev shim that manipulates import state to make `import GUI...` work.
-- For packaging, use an external launcher script at the project root (for example `main.py`) as your entry point.
+- Do **not** build/target PyInstaller using `GUI/run.py`. It is a standalone/dev shim that manipulates import state; PyInstaller cannot trace its imports.
+- Standalone builds use `standalone_entry.py`, which imports `app.app` directly so PyInstaller can discover all modules.
+- Non-standalone builds use `main.py` at the project root as the entry point.
 
 ### Troubleshooting
 - If you see `ModuleNotFoundError: No module named 'GUI'`:
   - Ensure you are running the command from the directory that contains both `main.py` and the `GUI/` folder.
   - Confirm `main.py` is not inside the `GUI/` directory.
-
-

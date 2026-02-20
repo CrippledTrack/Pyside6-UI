@@ -7,11 +7,25 @@ from __future__ import annotations
 
 import logging
 from typing import Optional, TYPE_CHECKING
-from PySide6.QtWidgets import (
-    QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QFrame, QMainWindow
+from ...qt_bindings import (
+    QWidget,
+    QLabel,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QFrame,
+    QMainWindow,
+    Qt,
+    QTimer,
+    QPropertyAnimation,
+    QEasingCurve,
+    QRect,
+    QEvent,
+    QFont,
+    QPalette,
+    QColor,
+    QMouseEvent,
 )
-from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QRect, QEvent
-from PySide6.QtGui import QFont, QPalette, QColor, QMouseEvent
 
 if TYPE_CHECKING:
     from ...themes.theme_manager import ThemeManager
@@ -261,7 +275,7 @@ class ToastNotification(QFrame):
     
     def show_toast(self, parent_widget: Optional[QWidget] = None):
         """Show the toast notification with animation."""
-        from PySide6.QtCore import QPoint
+        from ...qt_bindings import QPoint
         
         # Use stored parent_window if no parent_widget provided
         target_parent = parent_widget or self.parent_window
@@ -289,7 +303,7 @@ class ToastNotification(QFrame):
                 self.move(x, y)
         else:
             # No parent available, use screen positioning
-            from PySide6.QtWidgets import QApplication
+            from ...qt_bindings import QApplication
             screen = QApplication.primaryScreen().geometry()
             x = screen.width() - self.width() - 15
             y = 60  # Move down to clear top menu areas

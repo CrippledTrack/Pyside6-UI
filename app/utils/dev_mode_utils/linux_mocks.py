@@ -72,6 +72,10 @@ class MockCallable:
     
     def __len__(self) -> int:
         return 0
+    
+    def __getitem__(self, key: Any) -> "MockCallable":
+        """Allow subscript access (e.g., result[0], result['key'])."""
+        return MockCallable(f"{self._name}[{key!r}]")
 
 
 # Mock passwd entry (struct_passwd)

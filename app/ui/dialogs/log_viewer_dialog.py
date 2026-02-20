@@ -11,9 +11,14 @@ import logging
 from pathlib import Path
 from typing import Optional, List
 
-from PySide6.QtCore import Qt, Signal, QObject
-from PySide6.QtGui import QFont, QTextCharFormat, QColor, QTextCursor
-from PySide6.QtWidgets import (
+from ...qt_bindings import (
+    Qt,
+    Signal,
+    QObject,
+    QFont,
+    QTextCharFormat,
+    QColor,
+    QTextCursor,
     QDialog,
     QVBoxLayout,
     QHBoxLayout,
@@ -194,7 +199,7 @@ class LogViewerDialog(QDialog):
     
     def _font_exists(self, font_name: str) -> bool:
         """Check if a font exists on the system."""
-        from PySide6.QtGui import QFontDatabase
+        from ...qt_bindings import QFontDatabase
         return font_name in QFontDatabase.families()
     
     def _refresh_log_files(self) -> None:

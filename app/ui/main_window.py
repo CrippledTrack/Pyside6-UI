@@ -16,9 +16,13 @@ if TYPE_CHECKING:
     from ..services.settings_service import SettingsService
     from ...themes.theme_manager import ThemeManager
 
-from PySide6.QtCore import QPoint, Qt, Slot
-from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
-from PySide6.QtWidgets import (
+from ..qt_bindings import (
+    QPoint,
+    Qt,
+    Slot,
+    QAction,
+    QCloseEvent,
+    QKeySequence,
     QApplication,
     QMainWindow,
     QMenu,
@@ -45,7 +49,6 @@ from .controllers.toast_manager import ToastManager
 from .dialogs.plugin_dialog import PluginManagementDialog
 from .dialogs.theme_dialog import ThemeDialog
 from .dialogs.log_viewer_dialog import LogViewerDialog
-from .widgets.loading_placeholder import LoadingPlaceholder
 from ..utils.display_utils import build_version_details
 from ..utils.imports import get_platforms_constants
 
@@ -285,7 +288,7 @@ class MainWindow(QMainWindow):
         
         # Fix for table header resizing issues (only in new UI)
         if self.settings_service and self.settings_service.get_new_ui_enabled():
-            from PySide6.QtWidgets import QTableView, QHeaderView, QTreeWidget
+            from ..qt_bindings import QTableView, QHeaderView, QTreeWidget
             for i in range(self.tab_widget.count()):
                 widget = self.tab_widget.widget(i)
                 # Recursively find all QTableViews and QTreeWidgets
@@ -448,6 +451,7 @@ class MainWindow(QMainWindow):
     def show_about_dialog(self) -> None:
         """Show the About dialog without blocking the main window."""
         from ..constants import VERSION as GUI_VERSION, VERSION_NAME as DEFAULT_VERSION_NAME
+        from ..utils.about_info import create_about_dialog
         
         if self._about_dialog and self._about_dialog.isVisible():
             self._about_dialog.raise_()
@@ -455,21 +459,13 @@ class MainWindow(QMainWindow):
             return
 
         has_external_constants = VERSION_NAME != DEFAULT_VERSION_NAME
-        version_line = f"<p><b>Version:</b> {VERSION}</p>" if has_external_constants else ""
-        about_text = (
-            f"<h2>{VERSION_NAME}</h2>"
-            f"{version_line}"
-            f"<p><b>GUI API Version:</b> {GUI_VERSION}</p>"
-            f"<p><b>Platform:</b> {CURRENT_PLATFORM.title()}</p>"
+        msg = create_about_dialog(
+            self,
+            app_name=VERSION_NAME,
+            app_version=VERSION if has_external_constants else None,
+            gui_api_version=GUI_VERSION,
+            platform_name=CURRENT_PLATFORM,
         )
-
-        msg = QMessageBox(self)
-        msg.setWindowTitle(f"About {VERSION_NAME}")
-        msg.setText(about_text)
-        msg.setTextFormat(Qt.TextFormat.RichText)
-        msg.setStandardButtons(QMessageBox.StandardButton.Close)
-        msg.setWindowModality(Qt.WindowModality.NonModal)
-        msg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         msg.destroyed.connect(lambda: setattr(self, "_about_dialog", None))
 
         self._about_dialog = msg
@@ -498,6 +494,10 @@ class MainWindow(QMainWindow):
         # Refresh status bar notifications with new theme
         if hasattr(self, 'status_bar_manager') and self.status_bar_manager:
             self.status_bar_manager.refresh_theme()
+
+        # Refresh menu bar styling (especially for blank/default stylesheets)
+        if self.menu_controller:
+            self.menu_controller.refresh_for_theme_change()
         
         # Publish event for subscribers
         self.plugin_registry.publish_event("theme_changed", {"theme": theme_name})

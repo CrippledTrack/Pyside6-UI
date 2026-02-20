@@ -9,16 +9,14 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import (
+from ...qt_bindings import (
     Property,
     QEasingCurve,
     QPropertyAnimation,
     QSequentialAnimationGroup,
     Qt,
     QTimer,
-)
-from PySide6.QtGui import QFont
-from PySide6.QtWidgets import (
+    QFont,
     QFrame,
     QHBoxLayout,
     QLabel,

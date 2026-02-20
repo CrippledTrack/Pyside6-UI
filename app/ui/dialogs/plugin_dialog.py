@@ -14,8 +14,10 @@ import os
 import sys
 from typing import Optional, List, Tuple, Any, Type, Dict
 
-from PySide6.QtCore import Signal, Qt, QPoint
-from PySide6.QtWidgets import (
+from ...qt_bindings import (
+    Signal,
+    Qt,
+    QPoint,
     QAbstractItemView, QCheckBox, QComboBox, QDialog, QFormLayout, QGroupBox,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMenu, QMessageBox,
     QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QTextEdit,
@@ -724,10 +726,10 @@ class PluginManagementDialog(QDialog):
         elif chosen == configure_action:
             self.configure_selected()
         elif chosen == copy_name_action:
-            from PySide6.QtWidgets import QApplication
+            from ...qt_bindings import QApplication
             QApplication.clipboard().setText(name)
         elif chosen == copy_info_action:
-            from PySide6.QtWidgets import QApplication
+            from ...qt_bindings import QApplication
             lines = [
                 f"Name: {info['name']}",
                 f"Version: {info['version']}",
