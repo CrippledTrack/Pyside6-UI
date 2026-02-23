@@ -11,6 +11,26 @@ import sys
 from pathlib import Path
 
 
+def parent_has_gui_plugin_dirs(parent_dir: Path) -> bool:
+    """Return True if parent_dir contains app_plugins or platforms that look like this GUI's plugin trees.
+
+    Used in standalone mode to decide whether to add the parent to sys.path for
+    constants and plugin loading. We require at least one expected file or
+    directory (constants.py, core_plugins.py, or linux/ / windows/) so that an
+    unrelated folder named app_plugins or platforms (e.g. from another project)
+    is not used, which could cause wrong constants, wrong plugins, or import errors.
+    """
+    for name in ("app_plugins", "platforms"):
+        d = parent_dir / name
+        if not d.is_dir():
+            continue
+        if (d / "constants.py").exists() or (d / "core_plugins.py").exists():
+            return True
+        if (d / "linux").is_dir() or (d / "windows").is_dir():
+            return True
+    return False
+
+
 def get_base_path() -> Path:
     """Get base path whether running from source or PyInstaller bundle."""
     if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
@@ -44,13 +64,14 @@ def get_base_path() -> Path:
 def get_plugins_dir() -> Path:
     """Get the external plugins directory path."""
     base = get_base_path()
-    # In standalone mode, use a separate directory name to avoid confusion
-    # with built-in `GUI/plugins`.
+    # Frozen (binary): always use ./plugins next to the executable for 4.x compatibility.
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return base / "plugins"
+    # Standalone from source (run.py from GUI/): use user_plugins to avoid confusion with GUI/plugins.
     if os.environ.get("GUI_STANDALONE_MODE") == "1":
         return base / "user_plugins"
-    # Both PyInstaller and source: look for ./plugins relative to base
-    plugins_path = base / "plugins"
-    return plugins_path
+    # Non-standalone (main.py or -m GUI): look for ./plugins relative to project root.
+    return base / "plugins"
 
 
 def app_root() -> Path:
@@ -68,6 +89,7 @@ __all__ = [
     'get_plugins_dir',
     'app_root',
     'logs_dir',
+    'parent_has_gui_plugin_dirs',
 ]
 
 

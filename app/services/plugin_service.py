@@ -14,6 +14,8 @@ but all access should go through this service when using dependency injection.
 from __future__ import annotations
 
 import logging
+import os
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Type, TYPE_CHECKING
 
@@ -22,11 +24,34 @@ from ...plugin_system.base import BaseTabPlugin
 from ...plugin_system.discovery import PluginDiscovery
 from ...plugin_system.sources import PluginSource
 from ...plugin_system.import_aliases import install_import_aliases
+from ..utils.paths import parent_has_gui_plugin_dirs
 
 if TYPE_CHECKING:
     from .settings_service import SettingsService
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_parent_project_on_path() -> None:
+    """Ensure the parent project root (sibling to GUI/) is on sys.path so app_plugins/platforms can be imported.
+
+    Main plugin loading uses 'from app_plugins.core_plugins import ...' and
+    'from platforms.core_plugins import ...', which require the repo root on path.
+    - When not standalone: always add parent so plugins work regardless of cwd.
+    - When standalone: add parent only if app_plugins or platforms exists there,
+      so that running from GUI/ (run.py) with the full repo layout still loads
+      native plugins (e.g. Linux app_plugins core), not just cross-platform dev tabs.
+    """
+    # This file is at GUI/app/services/plugin_service.py -> 4 levels up = repo root
+    current_file = Path(__file__).resolve()
+    parent_project = current_file.parent.parent.parent.parent
+    if os.environ.get("GUI_STANDALONE_MODE") == "1":
+        # In standalone, only add path if the parent has our plugin trees (not an unrelated folder)
+        if not parent_has_gui_plugin_dirs(parent_project):
+            return
+    parent_str = str(parent_project)
+    if parent_str not in sys.path:
+        sys.path.insert(0, parent_str)
 
 
 class PluginService:
@@ -276,6 +301,8 @@ class PluginService:
             List of plugin classes, empty list on error
         """
         try:
+            if source in ("app_plugins", "platforms"):
+                _ensure_parent_project_on_path()
             if source == "app_plugins":
                 from app_plugins.core_plugins import get_core_plugins  # type: ignore
                 plugins = get_core_plugins()

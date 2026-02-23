@@ -295,11 +295,7 @@ def _collect_hidden_imports() -> List[str]:
 
     Most of the application is reachable through the normal import graph:
     - Non-standalone: main.py -> GUI.app.app -> services, ui, themes, ...
-    - Standalone: standalone_entry.py -> app.app -> services, ui, themes, ...
-
-    Standalone uses standalone_entry.py (not run.py) because run.py relies on
-    runtime sys.modules patching for ``GUI``; PyInstaller does not execute that
-    shim, so ``GUI.app.*`` imports would not be discovered.
+    - Standalone: run.py -> GUI.app.app -> services, ui, themes, ...
 
     Plugin modules are pulled in via their respective ``core_plugins.py``
     which uses explicit static imports specifically so PyInstaller can
@@ -312,7 +308,11 @@ def _collect_hidden_imports() -> List[str]:
         "app._build_info_generated" if IS_STANDALONE else "GUI.app._build_info_generated",
     ]
 
-    if not IS_STANDALONE:
+    if IS_STANDALONE:
+        # Dynamically loaded via import_aliases and plugin discovery; not
+        # reachable by static analysis from run.py.
+        imports.extend(["GUI.plugins", "GUI.themes"])
+    else:
         # app_plugins.core_plugins is imported at runtime by the plugin
         # service; ensure PyInstaller can see the top-level package.
         imports.append("app_plugins")
@@ -339,15 +339,15 @@ def build_pyinstaller_args(opts: argparse.Namespace, consts: dict[str, object]) 
     """Assemble the ``pyinstaller`` CLI arguments from parsed options."""
     # Determine the entry point
     if IS_STANDALONE:
-        entry = str(GUI_ROOT / "standalone_entry.py")
+        entry = str(GUI_ROOT / "run.py")
     else:
         entry = str(PROJECT_ROOT / "main.py")
 
     args: List[str] = ["pyinstaller"]
 
-    # Standalone: add GUI root to module search path so "app" package is found.
+    # Standalone: add parent of GUI so PyInstaller sees "GUI" as a real package.
     if IS_STANDALONE:
-        args.extend(["--paths", str(GUI_ROOT)])
+        args.extend(["--paths", str(GUI_ROOT.parent)])
 
     # -- One-file vs one-dir ---------------------------------------------------
     if opts.onedir:
