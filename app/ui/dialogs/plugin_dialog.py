@@ -24,7 +24,7 @@ from ...qt_bindings import (
     QVBoxLayout, QWidget
 )
 
-from ....plugin_system.base import plugin_registry, BaseTabPlugin
+from ....plugin_system import plugin_registry, BaseTabPlugin
 
 logger = logging.getLogger(__name__)
 
@@ -283,24 +283,14 @@ class PluginManagementDialog(QDialog):
             self.apply_filters()
             return
         
-        # Force-register the plugin
         if name in self._rejected_plugins:
             plugin_class, reason = self._rejected_plugins[name]
-            # Add to main registry (bypass version check)
-            plugin_registry._plugins[name] = plugin_class
-            plugin_registry._external_plugins[name] = plugin_class
-            # Categorize by interface so extension methods work properly
-            plugin_registry._categorize_plugin_by_interface(name, plugin_class)
-            # Enable it
-            plugin_registry.enable_plugin(name)
+            plugin_registry.register_plugin_force(name, plugin_class)
             self.plugin_toggled.emit(name, True)
-            # Reload to update UI
             self.load_plugins()
 
     def reload_plugins(self) -> None:
         """Reload all plugins from the registry."""
-        # Clear and re-discover plugins
-        # from ...services.plugin_service import discover_and_register_all_plugins
         if not (self.plugin_controller and self.plugin_controller.plugin_service):
             QMessageBox.warning(
                 self,

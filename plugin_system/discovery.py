@@ -17,7 +17,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Type
 
-from .base import BaseTabPlugin, plugin_registry
+from .base import BaseTabPlugin
+from .registry import plugin_registry
 from .sources import PluginSource
 
 # Try to import entry_points (Python 3.8+)
@@ -327,19 +328,19 @@ class PluginDiscovery:
             try:
                 pkg = importlib.import_module(source.package)
             except Exception as e:
-                logger.debug("Package source not importable (%s): %s", source.package, e)
+                logger.debug(f"Package source not importable ({source.package}): {e}")
                 continue
 
             pkg_path = getattr(pkg, "__path__", None)
             if not pkg_path:
-                logger.debug("Package source has no __path__ (%s), skipping", source.package)
+                logger.debug(f"Package source has no __path__ ({source.package}), skipping")
                 continue
 
             for modinfo in pkgutil.iter_modules(pkg.__path__, prefix=f"{source.package}."):
                 try:
                     module = importlib.import_module(modinfo.name)
                 except Exception as e:
-                    logger.warning("Failed to import plugin module %s: %s", modinfo.name, e)
+                    logger.warning(f"Failed to import plugin module {modinfo.name}: {e}")
                     continue
 
                 for plugin_class in self._find_plugin_classes_in_module(module):

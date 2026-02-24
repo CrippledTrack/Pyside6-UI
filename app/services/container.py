@@ -98,7 +98,7 @@ class ServiceContainer:
                 from ..utils.admin import configure_settings_service
                 configure_settings_service(settings_service)
             except Exception as e:
-                logger.debug("Failed to configure admin settings: %s", e)
+                logger.debug(f"Failed to configure admin settings: {e}")
         
         # 2. Daemon service (no dependencies)
         if DaemonService not in self._services:

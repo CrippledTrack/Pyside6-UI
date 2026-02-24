@@ -8,7 +8,7 @@ This module provides backward compatibility for plugins that import from
 
 from __future__ import annotations
 
-from GUI.plugin_system.base import BaseTabPlugin, CoreTabPlugin, PluginRegistry, plugin_registry
+from GUI.plugin_system import BaseTabPlugin, CoreTabPlugin, PluginRegistry, plugin_registry
 
 __all__ = [
     "BaseTabPlugin",

@@ -33,7 +33,7 @@ class QtDepsService:
                 logger.error("Required Qt xcb dependencies are missing.")
                 return False, _MISSING_DEPS_MESSAGE
         except Exception as e:
-            logger.error("Error while ensuring Qt dependencies: %s", e)
+            logger.error(f"Error while ensuring Qt dependencies: {e}")
 
         return True, None
 
