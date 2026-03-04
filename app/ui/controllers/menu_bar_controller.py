@@ -290,6 +290,7 @@ class MenuBarController(QObject):
         # About action
         self.about_action = QAction("About...", self.parent_widget)
         self.about_action.setToolTip("Show information about this application")
+
         if on_about:
             self.about_action.triggered.connect(on_about)
         help_menu.addAction(self.about_action)

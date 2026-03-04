@@ -557,46 +557,39 @@ class MainWindow(QMainWindow):
         Args:
             enabled: True if cross-platform tabs should be shown
         """
-        other_platform = "Windows" if CURRENT_PLATFORM == "linux" else "Linux"
+        # Human-readable names for known platforms, used in toast messages.
+        platform_labels = {
+            "windows": "Windows",
+            "linux": "Linux",
+            "darwin": "macOS",
+        }
+        all_platform_keys = ["windows", "linux", "darwin"]
+        current_key = CURRENT_PLATFORM
+        other_platforms = [
+            platform_labels[p]
+            for p in all_platform_keys
+            if p != current_key and p in platform_labels
+        ]
+        other_text = ", ".join(other_platforms) if other_platforms else "other platforms"
+        
+        # Always clear the cross-platform plugin cache so that any subsequent
+        # discovery run reflects the new toggle state and (for dev mode) the
+        # correct mock modules installed by PluginService.
+        try:
+            from ..utils.dev_mode_utils.cross_platform_plugins import clear_cross_platform_cache
+            clear_cross_platform_cache()
+        except ImportError:
+            logger.warning("Could not clear cross-platform plugin cache")
+        
+        # Reload plugins with the new cross-platform setting applied.
+        self._reload_all_plugins()
         
         if enabled:
-            # Install mock modules for cross-platform dependencies
-            if CURRENT_PLATFORM == "linux":
-                try:
-                    from ..utils.dev_mode_utils.win32_mocks import install_win32_mocks
-                    install_win32_mocks()
-                except Exception as e:
-                    logger.warning(f"Could not install win32 mocks: {e}")
-            elif CURRENT_PLATFORM == "windows":
-                try:
-                    from ..utils.dev_mode_utils.linux_mocks import install_linux_mocks
-                    install_linux_mocks()
-                except Exception as e:
-                    logger.warning(f"Could not install linux mocks: {e}")
-            
-            # Clear the cross-platform plugin cache so they get re-imported with mocks
-            try:
-                from ..utils.dev_mode_utils.cross_platform_plugins import clear_cross_platform_cache
-                clear_cross_platform_cache()
-            except ImportError:
-                logger.warning("Could not clear cross-platform plugin cache")
-            
-            # Clear existing plugins and reload with cross-platform enabled
-            self._reload_all_plugins()
             self.toast_manager.show_info(
-                f"Loading {other_platform} tabs... Some features may not work on this platform."
+                f"Loading tabs from {other_text}... Some features may not work on this platform."
             )
         else:
-            # Clear the cross-platform plugin cache
-            try:
-                from ..utils.dev_mode_utils.cross_platform_plugins import clear_cross_platform_cache
-                clear_cross_platform_cache()
-            except ImportError:
-                pass
-            
-            # Reload without cross-platform tabs
-            self._reload_all_plugins()
-            self.toast_manager.show_info(f"Removed {other_platform} tabs")
+            self.toast_manager.show_info(f"Removed tabs from {other_text}")
     
     def _reload_all_plugins(self) -> None:
         """Reload all plugins and tabs.

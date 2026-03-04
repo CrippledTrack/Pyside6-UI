@@ -143,11 +143,15 @@ def build_about_info(
     build_distro_line = _build_distro_line(str(platform_name))
     python_line = _python_version_line()
 
+    # Use a human-friendly platform label (e.g., map 'darwin' -> 'macOS').
+    from .display_utils import _format_platform_name
+    pretty_platform = _format_platform_name(platform_name)
+
     return (
         f"<h2>{app_name}</h2>"
         f"{version_line}"
         f"<p><b>GUI API Version:</b> {gui_api_version}</p>"
-        f"<p><b>Platform:</b> {str(platform_name).title()}</p>"
+        f"<p><b>Platform:</b> {pretty_platform}</p>"
         f"{distro_line}"
         f"{build_distro_line}"
         f"{python_line}"

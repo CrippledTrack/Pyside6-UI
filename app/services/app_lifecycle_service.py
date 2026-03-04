@@ -57,8 +57,13 @@ class AppLifecycleService:
         """Configure Qt application style, fonts, and Windows AppUserModelID."""
         from ..qt_bindings import QFont
 
-        if platform.system().lower() == "windows":
+        sysname = platform.system().lower()
+
+        # Use the built-in Fusion style on Windows and macOS for consistent theming.
+        if sysname in ("windows", "darwin"):
             app.setStyle("Fusion")
+
+        if sysname == "windows":
             try:
                 import ctypes
 
@@ -67,7 +72,9 @@ class AppLifecycleService:
             except Exception as e:
                 print(f"Failed to set AppUserModelID: {e}", file=sys.stderr)  # type: ignore[name-defined]
 
-        app.setFont(QFont("Segoe UI", 10))
+            # Only force Segoe UI on Windows; other platforms keep their
+            # native default UI font for better integration.
+            app.setFont(QFont("Segoe UI", 10))
 
 
 __all__ = ["AppLifecycleService"]
