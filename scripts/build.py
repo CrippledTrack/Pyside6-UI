@@ -350,10 +350,31 @@ def build_pyinstaller_args(opts: argparse.Namespace, consts: dict[str, object]) 
         args.extend(["--paths", str(GUI_ROOT.parent)])
 
     # -- One-file vs one-dir ---------------------------------------------------
+    # NOTE (macOS): PyInstaller is deprecating one-file mode for windowed
+    # .app bundles. To avoid deprecation warnings (and future errors), prefer
+    # onedir on macOS unless the user explicitly forces --onefile in a
+    # non-windowed build.
+    sysname = platform.system().lower()
     if opts.onedir:
         args.append("--onedir")
     else:
-        args.append("--onefile")
+        if sysname == "darwin":
+            # If the user requested a console build, onefile is still
+            # acceptable; otherwise, default to onedir for GUI apps.
+            wants_console = bool(opts.console)
+            wants_windowed = bool(opts.windowed)
+            if wants_console and not wants_windowed:
+                args.append("--onefile")
+            else:
+                print(
+                    "  Note: Using --onedir on macOS to avoid deprecated "
+                    "onefile .app bundles. Pass --onedir explicitly to silence "
+                    "this message.",
+                    file=sys.stderr,
+                )
+                args.append("--onedir")
+        else:
+            args.append("--onefile")
 
     # -- Name ------------------------------------------------------------------
     name = opts.name

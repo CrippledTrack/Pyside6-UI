@@ -34,6 +34,23 @@ from .interfaces import (
 )
 
 
+def _normalize_platform_name_for_matching(name: str) -> str:
+    """Normalize platform names for matching against supported_platforms.
+
+    This allows plugins to declare user-friendly labels like "macOS" while
+    Python's platform.system() returns identifiers such as "Darwin".
+    """
+    s = str(name).strip().lower()
+    if s in ("windows", "win32"):
+        return "Windows"
+    if s == "linux":
+        return "Linux"
+    if s in ("darwin", "macos", "mac os", "osx", "mac os x"):
+        return "macOS"
+    # Fallback: capitalize the original for best-effort matching.
+    return str(name).capitalize()
+
+
 class BaseTabPlugin:
     """Base class for tab plugins with service injection.
     
@@ -142,7 +159,12 @@ class BaseTabPlugin:
         """
         if not cls.supported_platforms:
             return True  # Empty = all platforms supported
-        return platform_name.capitalize() in cls.supported_platforms
+
+        target = _normalize_platform_name_for_matching(platform_name)
+        supported_normalized = {
+            _normalize_platform_name_for_matching(p) for p in cls.supported_platforms
+        }
+        return target in supported_normalized
     
     @classmethod
     def get_current_platform(cls) -> str:
@@ -294,7 +316,12 @@ class LegacyBaseTabPlugin(Plugin):
         """
         if not cls.supported_platforms:
             return True  # Empty = all platforms supported
-        return platform_name.capitalize() in cls.supported_platforms
+
+        target = _normalize_platform_name_for_matching(platform_name)
+        supported_normalized = {
+            _normalize_platform_name_for_matching(p) for p in cls.supported_platforms
+        }
+        return target in supported_normalized
     
     @classmethod
     def get_current_platform(cls) -> str:
