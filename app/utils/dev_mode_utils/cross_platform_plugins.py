@@ -37,15 +37,18 @@ def clear_cross_platform_cache() -> None:
 
 
 def load_cross_platform_plugins() -> List[Type[Any]]:
-    """Load plugins from the other platform for dev mode testing.
+    """Load plugins from all *other* platforms for dev mode testing.
     
-    On Linux: loads Windows plugins (requires win32 mocks to be installed first)
-    On Windows: loads Linux plugins
+    Examples:
+        - On Linux: loads Windows and macOS (darwin) plugins
+        - On Windows: loads Linux and macOS (darwin) plugins
+        - On macOS (darwin): loads Windows and Linux plugins
     
-    Dynamically discovers plugins by scanning the other platform's tabs directory.
+    Dynamically discovers plugins by scanning each other platform's ``tabs``
+    directory under ``app_plugins/<platform>/tabs``.
     
     Returns:
-        List of plugin classes from the other platform
+        List of plugin classes from other platforms
     """
     global _cross_platform_plugins, _cache_valid
     
@@ -54,12 +57,23 @@ def load_cross_platform_plugins() -> List[Type[Any]]:
     
     plugins: List[Type[Any]] = []
     
-    if CURRENT_PLATFORM == "linux":
-        # Load Windows plugins
-        plugins = _discover_platform_plugins("windows")
-    elif CURRENT_PLATFORM == "windows":
-        # Load Linux plugins
-        plugins = _discover_platform_plugins("linux")
+    # Normalise known platform identifiers used in app_plugins layout.
+    # We currently support 'windows', 'linux', and 'darwin' (macOS).
+    all_platforms = ["windows", "linux", "darwin"]
+    current = CURRENT_PLATFORM
+    
+    # Derive target platforms as "all others" besides the current one.
+    target_platforms = [p for p in all_platforms if p != current]
+    
+    # If CURRENT_PLATFORM is something unexpected, we still try all known
+    # targets for best-effort cross-platform loading.
+    if current not in all_platforms:
+        target_platforms = all_platforms
+    
+    for target in target_platforms:
+        discovered = _discover_platform_plugins(target)
+        if discovered:
+            plugins.extend(discovered)
     
     _cross_platform_plugins = plugins
     _cache_valid = True
@@ -131,7 +145,7 @@ def _discover_platform_plugins(target_platform: str) -> List[Type[Any]]:
     """Discover and load plugins from a specific platform's directory.
     
     Args:
-        target_platform: 'windows' or 'linux'
+        target_platform: One of 'windows', 'linux', or 'darwin'
         
     Returns:
         List of discovered plugin classes (with prefixed tab names)
@@ -163,7 +177,14 @@ def _discover_platform_plugins(target_platform: str) -> List[Type[Any]]:
         sys.path.insert(0, app_plugins_parent)
     
     # Determine the platform prefix for tab names
-    platform_prefix = "[Win]" if target_platform == "windows" else "[Linux]"
+    if target_platform == "windows":
+        platform_prefix = "[Win]"
+    elif target_platform == "linux":
+        platform_prefix = "[Linux]"
+    elif target_platform == "darwin":
+        platform_prefix = "[macOS]"
+    else:
+        platform_prefix = f"[{target_platform.capitalize()}]"
     
     # Scan for Python files in the tabs directory
     for py_file in tabs_dir.glob("*_tab.py"):

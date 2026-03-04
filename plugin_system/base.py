@@ -182,7 +182,7 @@ class BaseTabPlugin:
             description = getattr(cls, 'tab_description', "No description provided")
 
         # If supported_platforms is empty, show all application-supported platforms
-        display_platforms = cls.supported_platforms if cls.supported_platforms else ["Windows", "Linux"]
+        display_platforms = cls.supported_platforms if cls.supported_platforms else ["Windows", "Linux", "macOS"]
         
         return {
             'name': name,
@@ -319,7 +319,7 @@ class LegacyBaseTabPlugin(Plugin):
         author_text = ", ".join(authors_list) if authors_list else str(getattr(cls, 'plugin_author', 'Unknown'))
 
         # If supported_platforms is empty, show all application-supported platforms
-        display_platforms = cls.supported_platforms if cls.supported_platforms else ["Windows", "Linux"]
+        display_platforms = cls.supported_platforms if cls.supported_platforms else ["Windows", "Linux", "macOS"]
 
         return {
             'name': getattr(cls, 'tab_name', cls.__name__),

@@ -20,7 +20,7 @@ class MinimalTabPlugin(BaseTabPlugin):
     plugin_name = "Minimal Plugin"
     tab_title = "Minimal Plugin"
     plugin_description = "A minimal plugin with only required components"
-    supported_platforms = ["Windows", "Linux"]
+    supported_platforms = ["Windows", "Linux", "MacOS"]
     requires_admin = False
     plugin_version = "1.0.1"
     plugin_author = "Plugin Creator"

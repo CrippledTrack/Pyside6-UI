@@ -40,7 +40,7 @@ class ExampleTabPlugin(BaseTabPlugin):
     plugin_name = "Example Plugin"
     tab_title = "Example Plugin"
     plugin_description = "A comprehensive example plugin showing all extension points"
-    supported_platforms = ["Windows", "Linux"]
+    supported_platforms = ["Windows", "Linux", "MacOS"]
     requires_admin = False
     plugin_version = "2.0.1"
     plugin_author = "Example Author"

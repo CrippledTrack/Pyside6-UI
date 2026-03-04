@@ -147,10 +147,22 @@ class PluginService:
                     from ..constants import CURRENT_PLATFORM
                     try:
                         if CURRENT_PLATFORM == "linux":
+                            # Linux host: load Windows and macOS plugins.
+                            # Only Windows plugins need special mocks.
                             from ..utils.dev_mode_utils.win32_mocks import install_win32_mocks
                             install_win32_mocks()
                         elif CURRENT_PLATFORM == "windows":
+                            # Windows host: load Linux and macOS plugins.
+                            # Linux-style APIs are mocked for safety.
                             from ..utils.dev_mode_utils.linux_mocks import install_linux_mocks
+                            install_linux_mocks()
+                        elif CURRENT_PLATFORM == "darwin":
+                            # macOS host: load both Windows and Linux plugins.
+                            # Install both sets of mocks so platform-specific
+                            # imports for either OS won't fail at import time.
+                            from ..utils.dev_mode_utils.win32_mocks import install_win32_mocks
+                            from ..utils.dev_mode_utils.linux_mocks import install_linux_mocks
+                            install_win32_mocks()
                             install_linux_mocks()
                     except Exception as e:
                         logger.warning("Could not install cross-platform mocks: %s", e)
