@@ -34,7 +34,7 @@ def configure_settings_service(settings_service: "SettingsService") -> None:
             _show_all_platforms = settings_service.get_show_all_platforms()
         _persist_flags()
     except Exception as e:
-        logger.debug("Failed to sync dev flags from settings: %s", e)
+        logger.debug(f"Failed to sync dev flags from settings: {e}")
 
 
 def _persist_flags() -> None:

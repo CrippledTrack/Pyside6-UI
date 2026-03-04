@@ -90,9 +90,7 @@ class StatusBarManager(QObject):
             unread_count: Number of unread notifications
         """
         if self.theme_manager:
-            current_theme = self.theme_manager.get_current_theme()
-            theme_data = self.theme_manager.themes.get(current_theme, {})
-            palette = theme_data.get('palette', {})
+            palette = self.theme_manager.get_theme_data().get('palette', {})
             
             muted_text_color = palette.get('text', '#888888')
             text_color = palette.get('window_text', '#ffffff')
@@ -227,9 +225,6 @@ class StatusBarManager(QObject):
     
     def refresh_theme(self) -> None:
         """Refresh notification UI elements with current theme."""
-        import logging
-        logger = logging.getLogger(__name__)
-        
         # Refresh notification button styling
         if hasattr(self, 'notif_btn') and self.notification_service:
             count = self.notification_service.get_unread_count()
@@ -238,8 +233,7 @@ class StatusBarManager(QObject):
         # Always destroy notification widget on theme refresh so it gets recreated
         # with correct UI mode (new UI vs classic) on next open
         if self._notification_widget:
-            # Get current UI mode from theme manager
-            is_legacy = getattr(self.theme_manager, '_use_legacy', True)
+            is_legacy = self.theme_manager.is_legacy_ui()
             widget_uses_new_ui = getattr(self._notification_widget, '_use_new_ui', False)
             
             logger.debug(f"refresh_theme: is_legacy={is_legacy}, widget_uses_new_ui={widget_uses_new_ui}")

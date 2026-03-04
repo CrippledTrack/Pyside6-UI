@@ -44,10 +44,13 @@ def _format_build_time(raw: str) -> str:
 
 
 def _build_distro_line(platform_name: str) -> str:
+    """Build distro/time line for About dialog. Only shown when running from a frozen binary."""
     try:
         from .admin import is_dev_mode
         from ..build_info import BUILD_DISTRO, BUILD_TIME_UTC
 
+        if not getattr(sys, "frozen", False):
+            return ""
         if not is_dev_mode():
             return ""
 

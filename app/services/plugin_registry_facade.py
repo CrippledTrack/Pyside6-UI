@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Type
 
-from ...plugin_system.registry import plugin_registry
+from ...plugin_system import plugin_registry
 
 
 class PluginRegistryFacade:

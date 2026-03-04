@@ -18,12 +18,8 @@ from typing import List, Type
 
 from .base import BaseTabPlugin
 
-# Example (uncomment and replace with real imports):
-# from app.ui.some_core_tab import SomeCoreTabPlugin
-
 
 CORE_PLUGINS: List[Type[BaseTabPlugin]] = [
-    # SomeCoreTabPlugin,
 ]
 
 

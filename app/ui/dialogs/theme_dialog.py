@@ -299,7 +299,7 @@ class ThemeDialog(QDialog):
             return
         
         theme_name = current.text().replace(" (Current)", "")
-        theme_data = self.theme_manager.themes.get(theme_name)
+        theme_data = self.theme_manager.get_theme_data(theme_name)
         
         if theme_data:
             # Update preview
@@ -388,7 +388,7 @@ class ThemeDialog(QDialog):
             return
         
         theme_name = current_item.text().replace(" (Current)", "")
-        theme_data = self.theme_manager.themes.get(theme_name)
+        theme_data = self.theme_manager.get_theme_data(theme_name)
         
         if not theme_data:
             QMessageBox.warning(self, "Warning", "No theme data to export")

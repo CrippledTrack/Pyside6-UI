@@ -106,18 +106,10 @@ class ToastNotification(QFrame):
     def apply_theme(self) -> None:
         """Apply theme styling based on notification type and current theme."""
         if self.theme_manager:
-            # Get current theme colors
-            current_theme = self.theme_manager.get_current_theme()
-            theme_data = self.theme_manager.themes.get(current_theme, {})
+            theme_data = self.theme_manager.get_theme_data()
             palette = theme_data.get('palette', {})
-            
-            # Extract theme colors
             window_color = palette.get('window', '#ffffff')
-            window_text_color = palette.get('window_text', '#000000')
-            base_color = palette.get('base', '#ffffff')
-            highlight_color = palette.get('highlight', '#0078d4')
-            
-            # Determine if theme is dark
+
             is_dark = self._is_dark_theme(window_color)
             
             # Get notification-specific colors
@@ -171,12 +163,9 @@ class ToastNotification(QFrame):
         Now derives colors from the theme's palette rather than using hardcoded values.
         """
         if not self.theme_manager:
-            # Fallback to default colors if no theme manager
             return self._get_default_notification_colors(notification_type)
         
-        # Get current theme colors
-        current_theme = self.theme_manager.get_current_theme()
-        theme_data = self.theme_manager.themes.get(current_theme, {})
+        theme_data = self.theme_manager.get_theme_data()
         palette = theme_data.get('palette', {})
         
         # Extract theme colors

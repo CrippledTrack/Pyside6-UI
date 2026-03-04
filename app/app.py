@@ -59,7 +59,7 @@ def run(argv: List[str]) -> int:
     # Install legacy import aliases used by some plugin modules (best-effort).
     installed_aliases = install_import_aliases()
     if installed_aliases:
-        logger.debug("Installed plugin import aliases: %s", installed_aliases)
+        logger.debug(f"Installed plugin import aliases: {installed_aliases}")
 
     # Log dev mode status now that logging is configured
     if is_dev:

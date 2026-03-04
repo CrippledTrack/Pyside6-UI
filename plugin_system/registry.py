@@ -490,6 +490,28 @@ class PluginRegistry:
         """Get plugins that were rejected during registration."""
         return self._rejected_plugins.copy()
 
+    def register_plugin_force(self, name: str, plugin_class: Type[Any]) -> None:
+        """Force-register a previously rejected plugin, bypassing version checks.
+
+        Intended for user-initiated overrides (e.g. the plugin management dialog).
+        The plugin is added as an external plugin and enabled immediately.
+
+        Args:
+            name: Plugin name (must exist in the rejected plugins dict).
+            plugin_class: The plugin class to register.
+
+        Raises:
+            KeyError: If *name* is not in the rejected plugins list.
+        """
+        if name not in self._rejected_plugins:
+            raise KeyError(f"Plugin '{name}' is not in the rejected plugins list")
+
+        self._add_plugin_to_registry(name, plugin_class, is_core=False)
+        self.enable_plugin(name)
+        del self._rejected_plugins[name]
+        self._version_incompatibilities.pop(name, None)
+        logger.info(f"Force-registered rejected plugin: {name}")
+
     # =========================================================================
     # Enable/Disable
     # =========================================================================
@@ -617,11 +639,11 @@ class PluginRegistry:
                     try:
                         cb(data)
                     except Exception as e:
-                        logger.error("Error delivering async event '%s' to '%s': %s", ev, name, e)
+                        logger.error(f"Error delivering async event '{ev}' to '{name}': {e}")
 
                 futures.append(executor.submit(_run))
             except Exception as e:
-                logger.error("Error scheduling event '%s' to '%s': %s", event_name, plugin_name, e)
+                logger.error(f"Error scheduling event '{event_name}' to '{plugin_name}': {e}")
 
         return futures
 

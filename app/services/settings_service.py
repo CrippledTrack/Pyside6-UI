@@ -320,7 +320,7 @@ class SettingsService:
         """Save hide admin menu setting."""
         self._settings.hide_admin_menu = bool(hide)
         self._save_settings()
-        logger.debug("Hide admin menu saved: %s", hide)
+        logger.debug(f"Hide admin menu saved: {hide}")
 
     def get_hide_admin_menu(self) -> bool:
         """Get hide admin menu setting."""
@@ -402,7 +402,7 @@ class SettingsService:
         """Persist dev mode flag."""
         self._settings.dev_mode = enabled
         self._save_settings()
-        logger.debug("Dev mode saved: %s", enabled)
+        logger.debug(f"Dev mode saved: {enabled}")
 
     def get_dev_mode(self) -> bool:
         """Get persisted dev mode flag."""
@@ -412,7 +412,7 @@ class SettingsService:
         """Persist show-all-platforms flag."""
         self._settings.show_all_platforms = enabled
         self._save_settings()
-        logger.debug("Show all platforms saved: %s", enabled)
+        logger.debug(f"Show all platforms saved: {enabled}")
 
     def get_show_all_platforms(self) -> bool:
         """Get persisted show-all-platforms flag."""

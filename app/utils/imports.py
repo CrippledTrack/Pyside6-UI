@@ -6,10 +6,13 @@ sources with a defined priority order.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace, ModuleType
 from typing import Any
+
+from .paths import parent_has_gui_plugin_dirs
 
 
 def get_platforms_constants() -> Any:
@@ -30,9 +33,13 @@ def get_platforms_constants() -> Any:
     # Parent project root is 4 levels up
     current_file = Path(__file__).resolve()
     parent_dir = current_file.parent.parent.parent.parent
-    
-    # Ensure parent directory is in sys.path for imports
-    if str(parent_dir) not in sys.path:
+
+    # Add parent to sys.path so we can merge constants from app_plugins/platforms.
+    # When not standalone: always add. When standalone: add only if the parent
+    # has our plugin trees (constants.py / core_plugins.py / linux|windows/), so we
+    # don't pull in an unrelated app_plugins or platforms folder from another project.
+    add_parent = os.environ.get("GUI_STANDALONE_MODE") != "1" or parent_has_gui_plugin_dirs(parent_dir)
+    if add_parent and str(parent_dir) not in sys.path:
         sys.path.insert(0, str(parent_dir))
     
     def is_constant(name: str, value: Any) -> bool:

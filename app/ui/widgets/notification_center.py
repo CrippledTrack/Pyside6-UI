@@ -95,8 +95,7 @@ class NotificationItemWidget(QFrame):
         
         # Get theme colors for border
         if self.theme_manager:
-            current_theme = self.theme_manager.get_current_theme()
-            theme_data = self.theme_manager.themes.get(current_theme, {})
+            theme_data = self.theme_manager.get_theme_data()
             palette = theme_data.get('palette', {})
             button_color = palette.get('button', '#3d3d3d')
             base_color = palette.get('base', '#1e1e1e')
@@ -104,7 +103,6 @@ class NotificationItemWidget(QFrame):
             button_color = '#3d3d3d'
             base_color = '#1e1e1e'
         
-        # Apply subtle border styling
         self.setStyleSheet(f"""
             NotificationItemWidget {{
                 background-color: {base_color};
@@ -117,30 +115,21 @@ class NotificationItemWidget(QFrame):
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(6)
         
-        # Header: Type and Timestamp
         header_layout = QHBoxLayout()
         header_layout.setSpacing(8)
         
-        # Type indicator (colored dot or text)
         type_label = QLabel(self.notification.type.value.upper())
         font = type_label.font()
         font.setBold(True)
         font.setPointSize(8)
         type_label.setFont(font)
         
-        # Get theme colors
         if self.theme_manager:
-            current_theme = self.theme_manager.get_current_theme()
-            theme_data = self.theme_manager.themes.get(current_theme, {})
-            palette = theme_data.get('palette', {})
-            
-            # Get base colors from theme
+            palette = self.theme_manager.get_theme_data().get('palette', {})
             highlight_color = palette.get('highlight', '#0078d4')
             text_color = palette.get('window_text', '#ffffff')
             muted_text_color = palette.get('text', '#888888')
-            
             type_color = _parse_and_adjust_notification_color(highlight_color, self.notification.type)
-
         else:
             # Fallback to hardcoded colors if no theme manager
             color_map = {
@@ -196,8 +185,7 @@ class NotificationItemWidget(QFrame):
         if not self.theme_manager:
             return
         
-        current_theme = self.theme_manager.get_current_theme()
-        theme_data = self.theme_manager.themes.get(current_theme, {})
+        theme_data = self.theme_manager.get_theme_data()
         palette = theme_data.get('palette', {})
         
         # Get base colors from theme
@@ -245,8 +233,7 @@ class NotificationCenterWidget(QWidget):
         self.notification_service = notification_service
         self.theme_manager = theme_manager
         
-        # Detect if using new UI or classic mode
-        self._use_new_ui = not getattr(theme_manager, '_use_legacy', True)
+        self._use_new_ui = not theme_manager.is_legacy_ui()
         
         if self._use_new_ui:
             # New UI: Modern styling with rounded corners
@@ -294,12 +281,8 @@ class NotificationCenterWidget(QWidget):
         
         layout.setSpacing(0)
         
-        # Get theme colors
-        current_theme = self.theme_manager.get_current_theme()
-        theme_data = self.theme_manager.themes.get(current_theme, {})
+        theme_data = self.theme_manager.get_theme_data()
         palette = theme_data.get('palette', {})
-        
-        # Extract theme colors with fallbacks
         window_color = palette.get('window', '#2d2d2d')
         base_color = palette.get('base', '#1e1e1e')
         text_color = palette.get('window_text', '#ffffff')
@@ -498,8 +481,7 @@ class NotificationCenterWidget(QWidget):
     
     def apply_theme(self) -> None:
         """Reapply theme colors when theme changes."""
-        # Check if UI mode has changed
-        new_ui_mode = not getattr(self.theme_manager, '_use_legacy', True)
+        new_ui_mode = not self.theme_manager.is_legacy_ui()
         ui_mode_changed = new_ui_mode != self._use_new_ui
         self._use_new_ui = new_ui_mode
         
@@ -548,17 +530,12 @@ class NotificationCenterWidget(QWidget):
                 self.layout().setContentsMargins(0, 0, 0, 0)
                 self.scroll_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Get theme colors
-        current_theme = self.theme_manager.get_current_theme()
-        theme_data = self.theme_manager.themes.get(current_theme, {})
+        theme_data = self.theme_manager.get_theme_data()
         palette = theme_data.get('palette', {})
-        
-        # Extract theme colors with fallbacks
         window_color = palette.get('window', '#2d2d2d')
         base_color = palette.get('base', '#1e1e1e')
         text_color = palette.get('window_text', '#ffffff')
         button_color = palette.get('button', '#3d3d3d')
-
         
         # Update container styling
         if self._use_new_ui:
@@ -711,11 +688,7 @@ class NotificationCenterWidget(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         
-        # Get theme colors for empty state
-        current_theme = self.theme_manager.get_current_theme()
-        theme_data = self.theme_manager.themes.get(current_theme, {})
-        palette = theme_data.get('palette', {})
-        # Use window_text for better visibility in all themes (light and dark)
+        palette = self.theme_manager.get_theme_data().get('palette', {})
         empty_text_color = palette.get('window_text', '#ffffff')
         
         # Add items
