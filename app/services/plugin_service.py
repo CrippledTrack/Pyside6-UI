@@ -23,7 +23,6 @@ from ...plugin_system import plugin_registry
 from ...plugin_system.base import BaseTabPlugin
 from ...plugin_system.discovery import PluginDiscovery
 from ...plugin_system.sources import PluginSource
-from ...plugin_system.import_aliases import install_import_aliases
 from ..utils.paths import parent_has_gui_plugin_dirs
 
 if TYPE_CHECKING:
@@ -147,9 +146,6 @@ class PluginService:
         summary: Dict[str, Any] = {"total_discovered": 0}
 
         try:
-            # Ensure legacy imports used by some plugin modules resolve consistently.
-            install_import_aliases()
-
             # Load core plugins from all three sources in priority order
             logger.info("Attempting to load core plugins from all sources...")
             app_plugins = self._load_core_plugins_from_source("app_plugins")

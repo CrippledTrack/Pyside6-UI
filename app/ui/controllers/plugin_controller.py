@@ -171,7 +171,7 @@ class PluginController(QObject):
             # Start Service Extension (has on_application_start method)
             if hasattr(plugin_class, 'on_application_start'):
                 if self.settings_service.is_extension_enabled(plugin_name, "Service"):
-                    # Get instance for v4.0.0 support
+                    # Get instance
                     instance = self.registry.get_plugin_instance(plugin_name)
                     instance.on_application_start(self.container)
                     logger.info(f"Dynamically started service extension for '{plugin_name}'")
@@ -250,7 +250,7 @@ class PluginController(QObject):
             # Shutdown Service Extension (has on_application_shutdown method)
             if hasattr(plugin_class, 'on_application_shutdown'):
                 try:
-                    # Get instance for v4.0.0 support
+                    # Get instance
                     # If it was running, instance should exist
                     if self.registry.has_plugin_instance(plugin_name):
                         instance = self.registry.get_plugin_instance(plugin_name)

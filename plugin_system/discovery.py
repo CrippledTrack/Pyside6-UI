@@ -211,13 +211,6 @@ class PluginDiscovery:
         module_name = self._module_name_for_path(py_file)
         logger.debug(f"Attempting to load local plugin module: {module_name}")
         
-        # Ensure legacy import aliases are installed before executing plugin code.
-        try:
-            from .import_aliases import install_import_aliases
-            install_import_aliases()
-        except Exception:
-            pass
-        
         spec = importlib.util.spec_from_file_location(module_name, py_file)
         if spec is None or spec.loader is None:
             logger.warning(f"Could not create spec for {py_file}")
@@ -228,7 +221,7 @@ class PluginDiscovery:
         
         plugin_classes = self._find_plugin_classes_in_module(module)
         for plugin_class in plugin_classes:
-            # v4.0.0: Prefer plugin_name, fall back to tab_name
+            # Prefer plugin_name, fall back to tab_name
             plugin_name = getattr(plugin_class, 'plugin_name', None)
             if not plugin_name or plugin_name == "Unnamed Plugin":
                 plugin_name = getattr(plugin_class, 'tab_name', "Unknown Plugin")
@@ -281,7 +274,7 @@ class PluginDiscovery:
                 return False
 
             # Must have a valid identifier (plugin_name OR tab_name)
-            # v4.0.0: plugin_name is preferred, legacy uses tab_name
+            # plugin_name is preferred, legacy uses tab_name
             has_plugin_name = bool(getattr(cls, 'plugin_name', None)) and getattr(cls, 'plugin_name') != "Unnamed Plugin"
             has_tab_name = bool(getattr(cls, 'tab_name', None)) and getattr(cls, 'tab_name') != "Unnamed Tab"
             if not has_plugin_name and not has_tab_name:
@@ -316,13 +309,6 @@ class PluginDiscovery:
         This is the default discovery mechanism for in-repo plugin packages.
         It avoids sys.path mutation by importing packages/modules normally.
         """
-        # Ensure legacy imports like `from plugins.base import ...` still work.
-        try:
-            from .import_aliases import install_import_aliases
-            install_import_aliases()
-        except Exception:
-            pass
-
         discovered: List[Tuple[str, Type[Any], str]] = []
         for source in sources:
             try:

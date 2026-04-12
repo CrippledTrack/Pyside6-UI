@@ -1,12 +1,6 @@
 """
 Plugin registry system for managing discovered and loaded plugins.
 
-v4.0.0 BREAKING CHANGES:
-- Registry now accepts ServiceContainer for plugin instantiation
-- Plugins are instantiated on-demand via get_plugin_instance()
-- Legacy 3.x plugins are wrapped via LegacyPluginAdapter
-- Interface checking uses Protocol-based isinstance()
-
 The registry maintains both plugin classes (for compatibility) and 
 plugin instances (for the new instance-based architecture).
 """
@@ -32,7 +26,6 @@ from .interfaces import (
     ServiceExtension,
     EventSubscriberExtension,
     SettingsExtension,
-    Plugin,  # Legacy ABC
 )
 from .version_utils import check_version_compatibility, get_gui_version
 
@@ -113,7 +106,7 @@ def _check_implements_interface(plugin_class: Type[Any], interface: Type) -> boo
 class PluginRegistry:
     """Registry for managing discovered plugins.
     
-    v4.0.0: Now supports instance-based plugins with ServiceContainer injection.
+    Now supports instance-based plugins with ServiceContainer injection.
     Plugin classes are still registered, but instances are created on-demand.
     
     Supports multiple extension interfaces:
@@ -129,7 +122,7 @@ class PluginRegistry:
         """Initialize the registry.
         
         Args:
-            container: Optional ServiceContainer for instantiating v4.0.0 plugins.
+            container: Optional ServiceContainer for instantiating plugins.
                       Can be set later via set_container().
         """
         self._container = container
@@ -140,7 +133,7 @@ class PluginRegistry:
         self._external_plugins: Dict[str, Type[Any]] = {}
         self._disabled_plugins: set = set()
         
-        # Plugin instances cache (v4.0.0)
+        # Plugin instances cache
         self._plugin_instances: Dict[str, Any] = {}
 
         # Optional async event delivery executor (opt-in)
@@ -242,14 +235,14 @@ class PluginRegistry:
     def get_plugin_instance(self, name: str) -> Any:
         """Get or create a plugin instance by name.
         
-        v4.0.0: Creates instances on first access, caches them for reuse.
+        Creates instances on first access, caches them for reuse.
         Legacy plugins are wrapped via LegacyPluginAdapter.
         
         Args:
             name: Plugin name
             
         Returns:
-            Plugin instance (either v4.0.0 instance or LegacyPluginAdapter)
+            Plugin instance
             
         Raises:
             ValueError: If plugin not found or container not set
@@ -263,10 +256,8 @@ class PluginRegistry:
         
         if not self._container:
             raise ValueError("ServiceContainer not set - call set_container() first")
-        
-        # Use compatibility utility to wrap legacy or instantiate new
-        from .compatibility import wrap_legacy_plugin
-        instance = wrap_legacy_plugin(plugin_class, self._container)
+        # Instantiate strict new-architecture plugin directly
+        instance = plugin_class(self._container)
         self._plugin_instances[name] = instance
         
         logger.debug(f"Created instance for plugin: {name}")
@@ -595,7 +586,7 @@ class PluginRegistry:
         
         for plugin_name, plugin_class in subscribers.items():
             try:
-                # Try to get instance first (v4.0.0)
+                # Try to get instance first
                 try:
                     instance = self.get_plugin_instance(plugin_name)
                     subscriptions = instance.get_event_subscriptions()

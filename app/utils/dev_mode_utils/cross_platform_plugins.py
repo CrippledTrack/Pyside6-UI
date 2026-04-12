@@ -124,15 +124,16 @@ def _create_prefixed_plugin(original_class: Type[Any], platform_prefix: str) -> 
     Returns:
         A new class with prefixed tab_name
     """
-    original_tab_name = getattr(original_class, 'tab_name', 'Unknown')
+    original_tab_name = getattr(original_class, 'tab_title', getattr(original_class, 'plugin_name', 'Unknown'))
     prefixed_name = f"{platform_prefix} {original_tab_name}"
     
-    # Create a new class that inherits from the original but with modified tab_name
+    # Create a new class that inherits from the original but with modified plugin_name/tab_title
     new_class = type(
         f"CrossPlatform_{original_class.__name__}",
         (original_class,),
         {
-            'tab_name': prefixed_name,
+            'plugin_name': prefixed_name,
+            'tab_title': prefixed_name,
             '_original_tab_name': original_tab_name,
             '_is_cross_platform': True,
         }
@@ -202,11 +203,11 @@ def _discover_platform_plugins(target_platform: str) -> List[Type[Any]]:
                 # Check if it's a plugin class (inherits from BaseTabPlugin)
                 if (obj is not BaseTabPlugin and 
                     issubclass(obj, BaseTabPlugin) and
-                    hasattr(obj, 'tab_name')):
+                    (hasattr(obj, 'plugin_name') or hasattr(obj, 'tab_title'))):
                     # Create a prefixed version to avoid name conflicts
                     prefixed_plugin = _create_prefixed_plugin(obj, platform_prefix)
                     plugins.append(prefixed_plugin)
-                    logger.debug(f"Discovered {target_platform} plugin: {prefixed_plugin.tab_name}")
+                    logger.debug(f"Discovered {target_platform} plugin: {prefixed_plugin.tab_title}")
                     
         except Exception as e:
             logger.warning(f"Could not load module {module_name}: {e}")

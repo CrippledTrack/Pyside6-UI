@@ -1,14 +1,8 @@
 """
 Plugin system for Basic UI Application
-
-v4.0.0 BREAKING CHANGES:
-- Instance-based plugins with ServiceContainer injection
-- Protocol-based interfaces (duck typing support)
-- Use plugin_name + tab_title instead of tab_name
-- LegacyPluginAdapter for 3.x compatibility
 """
 
-from .base import BaseTabPlugin, CoreTabPlugin, LegacyBaseTabPlugin
+from .base import BaseTabPlugin, CoreTabPlugin
 from .registry import PluginRegistry, plugin_registry
 from .interfaces import (
     PluginProtocol,
@@ -19,19 +13,17 @@ from .interfaces import (
     ServiceExtension,
     EventSubscriberExtension,
     SettingsExtension,
-    Plugin,  # Legacy ABC
 )
 from .types import MenuItemDefinition, ToolbarAction, PluginEvent
-from .compatibility import LegacyPluginAdapter, wrap_legacy_plugin
 
 __all__ = [
-    # v4.0.0 base classes
+    # Base classes
     "BaseTabPlugin",
     "CoreTabPlugin",
     # Registry
     "PluginRegistry",
     "plugin_registry",
-    # Protocol interfaces (v4.0.0)
+    # Protocol interfaces
     "PluginProtocol",
     "TabExtension",
     "MenuExtension",
@@ -44,10 +36,4 @@ __all__ = [
     "MenuItemDefinition",
     "ToolbarAction",
     "PluginEvent",
-    # Migration utilities
-    "LegacyPluginAdapter",
-    "wrap_legacy_plugin",
-    # Legacy (for 3.x compatibility)
-    "LegacyBaseTabPlugin",
-    "Plugin",
 ]

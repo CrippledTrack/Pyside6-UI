@@ -12,7 +12,7 @@ import platform
 # =============================================================================
 # Version Information (can be overridden by app_plugins/constants.py)
 # =============================================================================
-VERSION = "4.1.1-dev-macOS-3"
+VERSION = "5.0.0-dev-1"
 VERSION_NAME = "Basic UI Application"
 
 VERSION_INFO = {
