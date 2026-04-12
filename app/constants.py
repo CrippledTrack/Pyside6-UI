@@ -12,7 +12,7 @@ import platform
 # =============================================================================
 # Version Information (can be overridden by app_plugins/constants.py)
 # =============================================================================
-VERSION = "5.0.0-dev-1"
+VERSION = "5.0.0-dev-2"
 VERSION_NAME = "Basic UI Application"
 
 VERSION_INFO = {
@@ -38,7 +38,7 @@ SHOW_CONSOLE = False
 # UI configuration
 NEW_UI_ENABLED_BY_DEFAULT = True
 # Hide the Admin menu/button by default (can be overridden by app_plugins/constants.py)
-HIDE_ADMIN_MENU_BY_DEFAULT = False
+HIDE_ADMIN_MENU_BY_DEFAULT = True
 
 # =============================================================================
 # GUI Internal (app_plugins will NOT override these)
