@@ -1,14 +1,14 @@
 """
 Plugin service for managing plugin discovery and registry access.
 
-This module provides the PluginService class which wraps the plugin_registry
-singleton, enabling dependency injection and easier testing. It handles:
+This module provides the PluginService class which wraps a PluginRegistry
+instance, enabling dependency injection and easier testing. It handles:
 - Plugin discovery from multiple sources
 - Plugin registration and state management
 - Access to plugin registry methods
 
-The underlying plugin_registry singleton is still used for compatibility,
-but all access should go through this service when using dependency injection.
+The PluginRegistry instance is injected by the ServiceContainer.
+All access should go through this service when using dependency injection.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Type, TYPE_CHECKING
 
-from ...plugin_system import plugin_registry
+from ...plugin_system.registry import PluginRegistry
 from ...plugin_system.base import BaseTabPlugin
 from ...plugin_system.discovery import PluginDiscovery
 from ...plugin_system.sources import PluginSource
@@ -56,72 +56,74 @@ def _ensure_parent_project_on_path() -> None:
 class PluginService:
     """Service for plugin discovery and registry management.
     
-    This service wraps the global plugin_registry singleton to enable
-    dependency injection and easier testing. All plugin registry operations
-    should go through this service when using the ServiceContainer.
+    Wraps an injected PluginRegistry instance to enable dependency injection
+    and easier testing. All plugin registry operations should go through
+    this service when using the ServiceContainer.
     """
     
-    def __init__(self, settings_service: Optional["SettingsService"] = None) -> None:
+    def __init__(self, settings_service: Optional["SettingsService"] = None, registry: Optional[PluginRegistry] = None) -> None:
         """Initialize the plugin service.
         
         Args:
             settings_service: Optional settings service for plugin state persistence
+            registry: Optional PluginRegistry instance (injected by ServiceContainer)
         """
         self.settings_service = settings_service
+        self._registry = registry or PluginRegistry()
         self._discovery_complete = False
     
     # =========================================================================
-    # Registry Access Methods (delegating to plugin_registry)
+    # Registry Access Methods (delegating to injected registry)
     # =========================================================================
     
     def get_all_plugins(self) -> Dict[str, Type[BaseTabPlugin]]:
         """Get all registered plugins."""
-        return plugin_registry.get_all_plugins()
+        return self._registry.get_all_plugins()
     
     def get_core_plugins(self) -> Dict[str, Type[BaseTabPlugin]]:
         """Get core plugins only."""
-        return plugin_registry.get_core_plugins()
+        return self._registry.get_core_plugins()
     
     def get_external_plugins(self) -> Dict[str, Type[BaseTabPlugin]]:
         """Get external plugins only."""
-        return plugin_registry.get_external_plugins()
+        return self._registry.get_external_plugins()
     
     def get_plugin(self, name: str) -> Optional[Type[BaseTabPlugin]]:
         """Get a specific plugin by name."""
-        return plugin_registry.get_plugin(name)
+        return self._registry.get_plugin(name)
     
     def list_plugin_names(self) -> List[str]:
         """Get list of all plugin names."""
-        return plugin_registry.list_plugin_names()
+        return self._registry.list_plugin_names()
     
     def register_plugin(self, plugin_class: Type[BaseTabPlugin], is_core: bool = False) -> None:
         """Register a plugin in the registry."""
-        plugin_registry.register_plugin(plugin_class, is_core=is_core)
+        self._registry.register_plugin(plugin_class, is_core=is_core)
     
     def clear(self) -> None:
         """Clear all registered plugins."""
-        plugin_registry.clear()
+        self._registry.clear()
         self._discovery_complete = False
     
     def disable_plugin(self, name: str) -> None:
         """Disable a plugin by name."""
-        plugin_registry.disable_plugin(name)
+        self._registry.disable_plugin(name)
     
     def enable_plugin(self, name: str) -> None:
         """Enable a plugin by name."""
-        plugin_registry.enable_plugin(name)
+        self._registry.enable_plugin(name)
     
     def is_enabled(self, name: str) -> bool:
         """Check if a plugin is enabled."""
-        return plugin_registry.is_enabled(name)
+        return self._registry.is_enabled(name)
     
     def get_enabled_plugins(self) -> Dict[str, Type[BaseTabPlugin]]:
         """Get all enabled plugins."""
-        return plugin_registry.get_enabled_plugins()
+        return self._registry.get_enabled_plugins()
     
     def get_version_incompatibility(self, name: str) -> Optional[str]:
         """Get the version incompatibility reason for a plugin, if any."""
-        return plugin_registry.get_version_incompatibility(name)
+        return self._registry.get_version_incompatibility(name)
     
     # =========================================================================
     # Discovery Methods
@@ -251,11 +253,11 @@ class PluginService:
 
                     for plugin_name, plugin_class, _src in discovered:
                         # Preserve priority: if already registered, don't override.
-                        if plugin_registry.get_plugin(plugin_name) is not None:
+                        if self._registry.get_plugin(plugin_name) is not None:
                             logger.debug(f"Skipping plugin '{plugin_name}' from {source.source_id} due to higher-priority registration")
                             continue
                         try:
-                            plugin_registry.register_plugin(plugin_class, is_core=False)
+                            self._registry.register_plugin(plugin_class, is_core=False)
                             total_registered += 1
                             if source.package == "GUI.plugins":
                                 builtin_registered += 1
@@ -266,11 +268,11 @@ class PluginService:
                 local_discovered = discovery.discover_local_plugins()
                 local_registered = 0
                 for plugin_name, plugin_class, _src in local_discovered:
-                    if plugin_registry.get_plugin(plugin_name) is not None:
+                    if self._registry.get_plugin(plugin_name) is not None:
                         logger.debug(f"Skipping local plugin '{plugin_name}' due to higher-priority registration")
                         continue
                     try:
-                        plugin_registry.register_plugin(plugin_class, is_core=False)
+                        self._registry.register_plugin(plugin_class, is_core=False)
                         local_registered += 1
                     except Exception as e:
                         logger.warning(f"Failed to register local plugin '{plugin_name}': {e}")

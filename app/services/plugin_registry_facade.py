@@ -5,16 +5,20 @@ This keeps UI controllers insulated from registry internals.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Type
+from typing import Any, Dict, Optional, Type, TYPE_CHECKING
 
-from ...plugin_system import plugin_registry
+if TYPE_CHECKING:
+    from ...plugin_system.registry import PluginRegistry
 
 
 class PluginRegistryFacade:
-    """GUI-facing facade over the global plugin registry."""
+    """GUI-facing facade over the injected plugin registry."""
 
-    def __init__(self, container: Any) -> None:
-        self._registry = plugin_registry
+    def __init__(self, container: Any, registry: Optional["PluginRegistry"] = None) -> None:
+        if registry is None:
+            from ...plugin_system.registry import PluginRegistry as _PR
+            registry = _PR()
+        self._registry = registry
         self._registry.set_container(container)
 
     def publish_event(self, event_name: str, event_data: Dict[str, Any] | None = None) -> None:

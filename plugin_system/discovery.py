@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Type
 
 from .base import BaseTabPlugin
-from .registry import plugin_registry
+from .registry import PluginRegistry
 from .sources import PluginSource
 
 # Try to import entry_points (Python 3.8+)

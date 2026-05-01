@@ -89,16 +89,28 @@ class ServiceContainer:
         from .plugin_service import PluginService
         from .plugin_registry_facade import PluginRegistryFacade
         from .notification_service import NotificationService
+        from .dev_mode_service import DevModeService
         
+        # 0. Dev mode service (no dependencies, needed before settings)
+        if DevModeService not in self._services:
+            dev_mode_service = DevModeService()
+            self.register_singleton(DevModeService, dev_mode_service)
+            # Wire into admin.py backward-compat shim
+            try:
+                from ..utils.admin import set_dev_mode_service
+                set_dev_mode_service(dev_mode_service)
+            except Exception as e:
+                logger.debug(f"Failed to wire DevModeService into admin shim: {e}")
+
         # 1. Settings service (no dependencies)
         if SettingsService not in self._services:
             settings_service = SettingsService()
             self.register_singleton(SettingsService, settings_service)
             try:
-                from ..utils.admin import configure_settings_service
-                configure_settings_service(settings_service)
+                dev_svc = self.get(DevModeService)
+                dev_svc.configure_settings_service(settings_service)
             except Exception as e:
-                logger.debug(f"Failed to configure admin settings: {e}")
+                logger.debug(f"Failed to configure dev mode settings: {e}")
         
         # 2. Daemon service (no dependencies)
         if DaemonService not in self._services:
@@ -111,15 +123,26 @@ class ServiceContainer:
             admin_service = AdminService(daemon_service)
             self.register_singleton(AdminService, admin_service)
         
-        # 4. Plugin service (depends on settings service, wraps plugin_registry)
+        # 4. Plugin registry (no dependencies initially, container set below)
+        from ...plugin_system.registry import PluginRegistry
+        if PluginRegistry not in self._services:
+            registry = PluginRegistry()
+            self.register_singleton(PluginRegistry, registry)
+
+        # 4a. Plugin service (depends on settings service + registry)
         if PluginService not in self._services:
             settings_service = self.get(SettingsService)
-            plugin_service = PluginService(settings_service=settings_service)
+            registry = self.get(PluginRegistry)
+            plugin_service = PluginService(
+                settings_service=settings_service,
+                registry=registry,
+            )
             self.register_singleton(PluginService, plugin_service)
 
-        # 4b. Plugin registry facade (depends on container to set registry container)
+        # 4b. Plugin registry facade (depends on registry + container)
         if PluginRegistryFacade not in self._services:
-            registry_facade = PluginRegistryFacade(self)
+            registry = self.get(PluginRegistry)
+            registry_facade = PluginRegistryFacade(self, registry=registry)
             self.register_singleton(PluginRegistryFacade, registry_facade)
 
         # 5. Notification service (no dependencies)

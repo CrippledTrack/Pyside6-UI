@@ -639,9 +639,4 @@ class PluginRegistry:
         return futures
 
 
-# Global plugin registry instance
-# Note: Container should be set via set_container() before instantiating plugins
-plugin_registry = PluginRegistry()
-
-
-__all__ = ['PluginRegistry', 'plugin_registry']
+__all__ = ['PluginRegistry']

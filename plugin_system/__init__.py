@@ -3,7 +3,7 @@ Plugin system for Basic UI Application
 """
 
 from .base import BaseTabPlugin, CoreTabPlugin
-from .registry import PluginRegistry, plugin_registry
+from .registry import PluginRegistry
 from .interfaces import (
     PluginProtocol,
     TabExtension,
@@ -22,7 +22,6 @@ __all__ = [
     "CoreTabPlugin",
     # Registry
     "PluginRegistry",
-    "plugin_registry",
     # Protocol interfaces
     "PluginProtocol",
     "TabExtension",

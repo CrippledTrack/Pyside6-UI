@@ -1,4 +1,4 @@
-"""
+﻿"""
 Plugin management dialog for enabling, disabling, and configuring plugins.
 
 This module provides a GUI interface for managing plugin lifecycle, including
@@ -24,7 +24,7 @@ from ...qt_bindings import (
     QVBoxLayout, QWidget
 )
 
-from ....plugin_system import plugin_registry, BaseTabPlugin
+from ....plugin_system.base import BaseTabPlugin
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,13 @@ class PluginManagementDialog(QDialog):
         self._rejected_plugins = {}  # Dict of name -> (plugin_class, reason)
         self.settings_service = settings_service
         self.plugin_controller = plugin_controller
+        # Get registry from plugin controller's service (injected)
+        if plugin_controller and hasattr(plugin_controller, 'plugin_service'):
+            self._registry = plugin_controller.plugin_service._registry
+        else:
+            # Fallback: create a standalone registry (should not happen in practice)
+            from ....plugin_system.registry import PluginRegistry
+            self._registry = PluginRegistry()
         self.setup_ui()
         self.load_plugins()
 
@@ -233,10 +240,10 @@ class PluginManagementDialog(QDialog):
 
     def load_plugins(self) -> None:
         """Load all plugins from the registry, including rejected ones."""
-        plugins = plugin_registry.get_all_plugins()
+        plugins = self._registry.get_all_plugins()
         self._all_plugins = list(plugins.items())
         # Also load rejected (version-incompatible) plugins
-        self._rejected_plugins = plugin_registry.get_rejected_plugins()
+        self._rejected_plugins = self._registry.get_rejected_plugins()
         self.apply_filters()
 
     def toggle_plugin(self, name: str, state: int) -> None:
@@ -285,7 +292,7 @@ class PluginManagementDialog(QDialog):
         
         if name in self._rejected_plugins:
             plugin_class, reason = self._rejected_plugins[name]
-            plugin_registry.register_plugin_force(name, plugin_class)
+            self._registry.register_plugin_force(name, plugin_class)
             self.plugin_toggled.emit(name, True)
             self.load_plugins()
 
@@ -299,7 +306,7 @@ class PluginManagementDialog(QDialog):
             )
             return
 
-        plugin_registry.clear()
+        self._registry.clear()
         # Use the comprehensive plugin discovery from the service
         self.plugin_controller.plugin_service.discover_and_register_all_plugins()
         QMessageBox.information(self, "Plugins Reloaded", "Plugins have been reloaded.")
@@ -315,7 +322,7 @@ class PluginManagementDialog(QDialog):
         selected_name = self.get_selected_plugin_name()
 
         filtered = []
-        core_names = set(plugin_registry.get_core_plugins().keys())
+        core_names = set(self._registry.get_core_plugins().keys())
         
         # Combine registered plugins with rejected plugins
         all_plugins_combined = list(self._all_plugins)
@@ -340,7 +347,7 @@ class PluginManagementDialog(QDialog):
                 continue
 
             # Status filter
-            is_enabled = plugin_registry.is_enabled(name)
+            is_enabled = self._registry.is_enabled(name)
             if status_sel == "Enabled" and (not is_enabled or is_rejected):
                 continue
             if status_sel == "Disabled" and (is_enabled or is_rejected):
@@ -374,10 +381,10 @@ class PluginManagementDialog(QDialog):
 
     def populate_table(self, data: List[Tuple[str, Type[BaseTabPlugin]]]) -> None:
         self.table.setRowCount(len(data))
-        core_names = set(plugin_registry.get_core_plugins().keys())
+        core_names = set(self._registry.get_core_plugins().keys())
         for row, (name, plugin_class) in enumerate(data):
             info = plugin_class.get_plugin_info()
-            is_enabled = plugin_registry.is_enabled(name)
+            is_enabled = self._registry.is_enabled(name)
             is_core = name in core_names
             is_rejected = name in self._rejected_plugins
 
@@ -397,12 +404,12 @@ class PluginManagementDialog(QDialog):
                 is_loaded = name in dict(self._all_plugins)
                 cb.setChecked(is_enabled and is_loaded)  # Only check if actually loaded
                 cb.setEnabled(True)   # But can be enabled
-                cb.setToolTip(f"⚠ Incompatible: {rejection_reason}\nClick to force-enable anyway")
+                cb.setToolTip(f"âš  Incompatible: {rejection_reason}\nClick to force-enable anyway")
                 cb.stateChanged.connect(lambda state, n=name: self._force_enable_plugin(n, state))
                 container_layout.addWidget(cb)
                 
                 # Add warning label
-                warn_label = QLabel("⚠")
+                warn_label = QLabel("âš ")
                 warn_label.setToolTip(f"Incompatible: {rejection_reason}")
                 warn_label.setStyleSheet("color: #FFA500; font-weight: bold;")  # Orange warning
                 container_layout.addWidget(warn_label)
@@ -439,7 +446,7 @@ class PluginManagementDialog(QDialog):
             return
         
         # Try to get plugin from registry first, then from rejected plugins
-        plugin_class = plugin_registry.get_plugin(name)
+        plugin_class = self._registry.get_plugin(name)
         is_rejected = False
         if not plugin_class:
             # Check if it's a rejected plugin
@@ -456,7 +463,7 @@ class PluginManagementDialog(QDialog):
         authors_list = info.get('authors') or []
         authors_text = ", ".join(authors_list) if authors_list else info.get('author', '')
         self.details_author.setText(authors_text)
-        self.details_type.setText("Core" if name in plugin_registry.get_core_plugins() else "External")
+        self.details_type.setText("Core" if name in self._registry.get_core_plugins() else "External")
         self.details_platforms.setText(', '.join(info['supported_platforms']))
         self.details_requires_admin.setText("Yes" if info.get('requires_admin') else "No")
         self.details_module.setText(plugin_class.__module__)
@@ -469,7 +476,7 @@ class PluginManagementDialog(QDialog):
         self.details_types.setText(types_str if types_str else "Tab only")
         
         # Check if plugin is enabled
-        plugin_is_enabled = plugin_registry.is_enabled(name)
+        plugin_is_enabled = self._registry.is_enabled(name)
         
         # Update extension type checkboxes
         detected_types = types_str.split(", ") if types_str else []
@@ -509,7 +516,7 @@ class PluginManagementDialog(QDialog):
         # Update extension checkboxes
         extension_types = self._get_extension_types(plugin_class).split(", ")
         detected_types = [t.strip() for t in extension_types] if extension_types else []
-        is_plugin_enabled = plugin_registry.is_enabled(name)
+        is_plugin_enabled = self._registry.is_enabled(name)
         
         
         any_visible = False
@@ -595,7 +602,7 @@ class PluginManagementDialog(QDialog):
     def update_status_label(self) -> None:
         total = len(self._all_plugins)
         shown = self.table.rowCount()
-        enabled_count = sum(1 for name, _ in self._all_plugins if plugin_registry.is_enabled(name))
+        enabled_count = sum(1 for name, _ in self._all_plugins if self._registry.is_enabled(name))
         self.status_label.setText(f"Showing {shown}/{total} plugins  |  Enabled: {enabled_count}")
 
     def get_selected_plugin_name(self) -> Optional[str]:
@@ -611,10 +618,10 @@ class PluginManagementDialog(QDialog):
         if not name:
             return
         # Only enable if not already enabled to avoid duplicates
-        if not plugin_registry.is_enabled(name):
-            plugin_registry.enable_plugin(name)
+        if not self._registry.is_enabled(name):
+            self._registry.enable_plugin(name)
             # Call lifecycle hook
-            plugin_class = plugin_registry.get_plugin(name)
+            plugin_class = self._registry.get_plugin(name)
             if plugin_class and hasattr(plugin_class, 'on_plugin_enabled'):
                 try:
                     plugin_class.on_plugin_enabled()
@@ -629,9 +636,9 @@ class PluginManagementDialog(QDialog):
         name = self.get_selected_plugin_name()
         if not name:
             return
-        plugin_registry.disable_plugin(name)
+        self._registry.disable_plugin(name)
         # Call lifecycle hook
-        plugin_class = plugin_registry.get_plugin(name)
+        plugin_class = self._registry.get_plugin(name)
         if plugin_class and hasattr(plugin_class, 'on_plugin_disabled'):
             try:
                 plugin_class.on_plugin_disabled()
@@ -645,10 +652,10 @@ class PluginManagementDialog(QDialog):
         """Enable all plugins and call lifecycle hooks."""
         for name, _ in self._all_plugins:
             # Only enable if not already enabled to avoid duplicates
-            if not plugin_registry.is_enabled(name):
-                plugin_registry.enable_plugin(name)
+            if not self._registry.is_enabled(name):
+                self._registry.enable_plugin(name)
                 # Call lifecycle hook
-                plugin_class = plugin_registry.get_plugin(name)
+                plugin_class = self._registry.get_plugin(name)
                 if plugin_class and hasattr(plugin_class, 'on_plugin_enabled'):
                     try:
                         plugin_class.on_plugin_enabled()
@@ -662,13 +669,13 @@ class PluginManagementDialog(QDialog):
         """Disable all plugins and call lifecycle hooks."""
         for name, _ in self._all_plugins:
             # Only process if actually enabled
-            if not plugin_registry.is_enabled(name):
+            if not self._registry.is_enabled(name):
                 continue
             # Emit signal FIRST so plugin controller can remove extensions
             # before the plugin is disabled in the registry
             self.plugin_toggled.emit(name, False)
             # Call lifecycle hook
-            plugin_class = plugin_registry.get_plugin(name)
+            plugin_class = self._registry.get_plugin(name)
             if plugin_class and hasattr(plugin_class, 'on_plugin_disabled'):
                 try:
                     plugin_class.on_plugin_disabled()
@@ -686,11 +693,11 @@ class PluginManagementDialog(QDialog):
         name = self.get_selected_plugin_name()
         if not name:
             return
-        plugin_class = plugin_registry.get_plugin(name)
+        plugin_class = self._registry.get_plugin(name)
         if not plugin_class:
             return
         info = plugin_class.get_plugin_info()
-        is_enabled = plugin_registry.is_enabled(name)
+        is_enabled = self._registry.is_enabled(name)
 
         menu = QMenu(self)
         toggle_action = menu.addAction("Disable" if is_enabled else "Enable")
@@ -724,7 +731,7 @@ class PluginManagementDialog(QDialog):
                 f"Name: {info['name']}",
                 f"Version: {info['version']}",
                 f"Author: {info['author']}",
-                f"Type: {'Core' if name in plugin_registry.get_core_plugins() else 'External'}",
+                f"Type: {'Core' if name in self._registry.get_core_plugins() else 'External'}",
                 f"Requires Admin: {'Yes' if info.get('requires_admin') else 'No'}",
                 f"Compatible: {'Yes' if info.get('compatible', True) else 'No'}",
                 f"Platforms: {', '.join(info['supported_platforms'])}",
@@ -739,13 +746,13 @@ class PluginManagementDialog(QDialog):
         name = self.get_selected_plugin_name()
         if not name:
             return
-        plugin_class = plugin_registry.get_plugin(name)
+        plugin_class = self._registry.get_plugin(name)
         if not plugin_class:
             return
         
         plugin_target: Any = plugin_class
         try:
-            plugin_target = plugin_registry.get_plugin_instance(name)
+            plugin_target = self._registry.get_plugin_instance(name)
         except Exception as e:
             logger.debug(f"Using plugin class for settings (instance unavailable) '{name}': {e}")
         

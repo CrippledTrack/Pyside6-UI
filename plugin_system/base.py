@@ -261,7 +261,7 @@ class CoreTabPlugin(BaseTabPlugin):
 
 
 # Re-exports
-from .registry import PluginRegistry, plugin_registry
+from .registry import PluginRegistry
 from .types import MenuItemDefinition, ToolbarAction, PluginEvent
 
 __all__ = [
@@ -270,7 +270,6 @@ __all__ = [
     'CoreTabPlugin',
     # Registry
     'PluginRegistry',
-    'plugin_registry',
     # Interfaces
     'PluginProtocol',
     'TabExtension',
