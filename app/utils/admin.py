@@ -87,7 +87,7 @@ def set_show_all_platforms(enabled: bool) -> None:
     _show_all_platforms = enabled
     _persist_flags()
     
-    logger.warning(f"set_show_all_platforms({enabled}) called - dev_mode={_dev_mode}, module_id={id(__import__('sys').modules.get(__name__, 'unknown'))}")
+    logger.debug(f"set_show_all_platforms({enabled}) called - dev_mode={_dev_mode}")
     
     if enabled:
         logger.warning("Show all platforms enabled - Windows and Linux tabs will be shown")

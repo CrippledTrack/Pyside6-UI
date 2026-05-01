@@ -155,6 +155,20 @@ def get_container() -> ServiceContainer:
     return _global_container
 
 
+def set_container(container: ServiceContainer) -> None:
+    """Set the global service container instance.
+    
+    Call this from the application bootstrap (app.py) after creating
+    the primary ServiceContainer so that get_container() returns the
+    same instance instead of creating a second one.
+    
+    Args:
+        container: The service container to register globally
+    """
+    global _global_container
+    _global_container = container
+
+
 def reset_container() -> None:
     """Reset the global container (mainly for testing)."""
     global _global_container
@@ -164,6 +178,7 @@ def reset_container() -> None:
 __all__ = [
     'ServiceContainer',
     'get_container',
+    'set_container',
     'reset_container',
 ]
 

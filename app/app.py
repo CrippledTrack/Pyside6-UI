@@ -14,7 +14,7 @@ from typing import List
 from .constants import VERSION as GUI_API_VERSION
 from .services.logging_service import setup_logging, set_dev_logging_override
 from .services.app_lifecycle_service import AppLifecycleService
-from .services.container import ServiceContainer
+from .services.container import ServiceContainer, set_container
 from .services.daemon_lifecycle_service import DaemonLifecycleService
 from .services.qt_deps_service import QtDepsService
 from .services.settings_service import SettingsService
@@ -79,6 +79,7 @@ def run(argv: List[str]) -> int:
     # Initialize service container (safe now -- Qt libs are available)
     container = ServiceContainer()
     container.initialize_services()
+    set_container(container)
     logger.info("Service container initialized")
     
     # Get settings service from container

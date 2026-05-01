@@ -137,25 +137,29 @@ class TabController(QObject):
         
         # Call deactivation hook for previously active tab
         if self._previous_tab_index >= 0 and self._previous_tab_index != index:
-            try:
-                prev_tab_name = self.tab_widget.tabText(self._previous_tab_index)
-                prev_instance_info = self.loaded_tabs.get(prev_tab_name)
-                prev_instance = prev_instance_info.get("instance") if prev_instance_info else None
+            # Guard against stale index after tabs are removed
+            if self._previous_tab_index >= self.tab_widget.count():
+                self._previous_tab_index = -1
+            else:
+                try:
+                    prev_tab_name = self.tab_widget.tabText(self._previous_tab_index)
+                    prev_instance_info = self.loaded_tabs.get(prev_tab_name)
+                    prev_instance = prev_instance_info.get("instance") if prev_instance_info else None
 
-                # Only deactivate/emit for a real plugin tab widget (not placeholders)
-                if prev_instance and not isinstance(
-                    prev_instance, (LoadingPlaceholder, ErrorPlaceholder, AdminRequiredPlaceholder)
-                ):
-                    try:
-                        plugin_instance = self.registry.get_plugin_instance(prev_tab_name)
-                        if hasattr(plugin_instance, 'on_tab_deactivated'):
-                            plugin_instance.on_tab_deactivated()
-                    except Exception as e:
-                        logger.debug(f"Error calling deactivation hook: {e}")
+                    # Only deactivate/emit for a real plugin tab widget (not placeholders)
+                    if prev_instance and not isinstance(
+                        prev_instance, (LoadingPlaceholder, ErrorPlaceholder, AdminRequiredPlaceholder)
+                    ):
+                        try:
+                            plugin_instance = self.registry.get_plugin_instance(prev_tab_name)
+                            if hasattr(plugin_instance, 'on_tab_deactivated'):
+                                plugin_instance.on_tab_deactivated()
+                        except Exception as e:
+                            logger.debug(f"Error calling deactivation hook: {e}")
 
-                    self.tab_deactivated.emit(prev_tab_name)
-            except Exception as e:
-                logger.debug(f"Error calling deactivation hook: {e}")
+                        self.tab_deactivated.emit(prev_tab_name)
+                except Exception as e:
+                    logger.debug(f"Error calling deactivation hook: {e}")
         
         try:
             self.is_loading_tab = True

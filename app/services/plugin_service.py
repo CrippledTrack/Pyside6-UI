@@ -337,10 +337,10 @@ class PluginService:
         
         for plugin_list in plugin_lists:
             for plugin_class in plugin_list:
-                name = getattr(plugin_class, 'tab_name', None)
-                if not name or name == "Unnamed Tab":
-                    name = getattr(plugin_class, 'plugin_name', None)
+                name = getattr(plugin_class, 'plugin_name', None)
                 if not name or name == "Unnamed Plugin":
+                    name = getattr(plugin_class, 'tab_name', None)
+                if not name or name == "Unnamed Tab":
                     name = plugin_class.__name__
                 if name not in seen_names:
                     seen_names[name] = plugin_class

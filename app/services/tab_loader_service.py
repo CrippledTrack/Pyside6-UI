@@ -98,7 +98,7 @@ class TabLoaderThread(QThread):
 
     def _emit_enabled_plugins(self) -> None:
         """Emit add_tab signals for all enabled plugins, respecting saved order."""
-        enabled_plugins = self._plugin_service.get_enabled_plugins()
+        enabled_plugins = dict(self._plugin_service.get_enabled_plugins())
 
         def _is_tab_enabled(plugin_name: str) -> bool:
             if not self._settings_service:

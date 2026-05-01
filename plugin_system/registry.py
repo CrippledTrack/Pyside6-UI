@@ -173,19 +173,19 @@ class PluginRegistry:
             is_core: Whether this is a core plugin
         """
         # Get plugin name - check for non-default values
-        # Legacy plugins use tab_name, new ones use plugin_name
+        # New plugins use plugin_name (v4.0+), legacy ones use tab_name
         plugin_name = None
         
-        # First check tab_name (legacy) - prefer this for backward compat
-        tab_name = getattr(plugin_class, 'tab_name', None)
-        if tab_name and tab_name != "Unnamed Tab":
-            plugin_name = tab_name
+        # First check plugin_name (v4.0+) - prefer modern naming
+        pn = getattr(plugin_class, 'plugin_name', None)
+        if pn and pn != "Unnamed Plugin":
+            plugin_name = pn
         
-        # If no valid tab_name, check plugin_name (v4.0)
+        # Fall back to tab_name (legacy) for backward compat
         if not plugin_name:
-            pn = getattr(plugin_class, 'plugin_name', None)
-            if pn and pn != "Unnamed Plugin":
-                plugin_name = pn
+            tab_name = getattr(plugin_class, 'tab_name', None)
+            if tab_name and tab_name != "Unnamed Tab":
+                plugin_name = tab_name
         
         # Fallback to class name
         if not plugin_name:
