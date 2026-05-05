@@ -373,7 +373,14 @@ class PluginService:
             try:
                 self.register_plugin(plugin_class, is_core=True)
                 registered.append(plugin_class)
-                logger.info(f"Registered core plugin: {getattr(plugin_class, 'tab_name', plugin_class.__name__)}")
+                
+                name = getattr(plugin_class, 'plugin_name', None)
+                if not name or name == "Unnamed Plugin":
+                    name = getattr(plugin_class, 'tab_name', None)
+                if not name or name == "Unnamed Tab":
+                    name = plugin_class.__name__
+                
+                logger.info(f"Registered core plugin: {name}")
             except Exception as e:
                 logger.error(f"Failed to register core plugin {plugin_class.__name__}: {e}")
         return registered

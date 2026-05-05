@@ -346,42 +346,6 @@ class PluginDiscovery:
         self.discovered_plugins = discovered
         return discovered.copy()
 
-    def register_discovered_plugins(
-        self,
-        discovered_plugins: Optional[List[Tuple[str, Type[Any], str]]] = None,
-    ) -> Dict[str, str]:
-        """
-        Register discovered plugins in the global registry.
-        
-        Args:
-            discovered_plugins: List of plugins to register (uses self.discovered_plugins if None)
-            
-        Returns:
-            Dict mapping plugin names to their registration status
-        """
-        if discovered_plugins is None:
-            discovered_plugins = self.discovered_plugins
-        
-        registration_results = {}
-        
-        for plugin_name, plugin_class, source in discovered_plugins:
-            try:
-                # Determine if it's a core plugin (part of the main application)
-                # Use explicit attribute only
-                is_core = bool(getattr(plugin_class, 'is_core_plugin', False))
-                
-                # Register the plugin
-                plugin_registry.register_plugin(plugin_class, is_core=is_core)
-                
-                registration_results[plugin_name] = f"success ({source})"
-                logger.info(f"Registered plugin: {plugin_name} from {source}")
-                
-            except Exception as e:
-                registration_results[plugin_name] = f"failed: {e}"
-                logger.error(f"Failed to register plugin {plugin_name}: {e}")
-        
-        return registration_results
-    
     def get_plugin_info_summary(self) -> Dict[str, any]:
         """
         Get a summary of all discovered plugins.
@@ -409,33 +373,4 @@ class PluginDiscovery:
         }
 
 
-def discover_and_register_plugins(plugins_dir: Optional[str] = None) -> Tuple[Dict[str, str], Dict[str, any]]:
-    """
-    Convenience function to discover and register all plugins.
-    
-    Args:
-        plugins_dir: Path to the plugins directory
-        
-    Returns:
-        Tuple of (registration_results, discovery_summary)
-    """
-    discovery = PluginDiscovery(plugins_dir)
-    discovered = discovery.discover_all_plugins(enable_entry_points=False)
-    registration_results = discovery.register_discovered_plugins(discovered)
-    summary = discovery.get_plugin_info_summary()
-    
-    return registration_results, summary
-
-
-def discover_and_register_packages(
-    sources: List[PluginSource],
-) -> Tuple[Dict[str, str], Dict[str, Any]]:
-    """Convenience function to discover and register plugins from package sources."""
-    discovery = PluginDiscovery(plugins_dir=None)
-    discovered = discovery.discover_from_packages(sources)
-    registration_results = discovery.register_discovered_plugins(discovered)
-    summary = discovery.get_plugin_info_summary()
-    return registration_results, summary
-
-
-__all__ = ['PluginDiscovery', 'discover_and_register_plugins', 'discover_and_register_packages']
+__all__ = ['PluginDiscovery']
