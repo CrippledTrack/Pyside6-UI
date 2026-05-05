@@ -167,7 +167,7 @@ def _discover_platform_plugins(target_platform: str) -> List[Type[Any]]:
     
     # Get the BaseTabPlugin class for isinstance checking
     try:
-        from GUI.plugin_system.base import BaseTabPlugin
+        from ....plugin_system.base import BaseTabPlugin
     except ImportError:
         logger.error("Could not import BaseTabPlugin")
         return plugins

@@ -200,7 +200,7 @@ def get_gui_version() -> str:
         Current GUI version string (e.g., "3.0.0")
     """
     try:
-        from GUI.app.constants import VERSION
+        from ..app.constants import VERSION
         return VERSION
     except (ImportError, AttributeError) as e:
         logger.warning(f"Could not import GUI version constant, assuming 4.0.0: {e}")

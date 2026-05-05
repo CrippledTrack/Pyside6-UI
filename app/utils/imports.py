@@ -14,6 +14,10 @@ from typing import Any
 
 from .paths import parent_has_gui_plugin_dirs
 
+# Cache for the merged constants namespace.  The merge is deterministic for
+# a given process, so we only need to compute it once.
+_cached_constants: Any = None
+
 
 def get_platforms_constants() -> Any:
     """
@@ -25,10 +29,15 @@ def get_platforms_constants() -> Any:
     3. GUI/app/constants (framework defaults)
     
     Constants from higher priority sources override those from lower priority.
+    The result is cached after the first call.
     
     Returns:
         SimpleNamespace: A module-like object with merged constants
     """
+    global _cached_constants
+    if _cached_constants is not None:
+        return _cached_constants
+
     # This file is at GUI/app/utils/imports.py
     # Parent project root is 4 levels up
     current_file = Path(__file__).resolve()
@@ -74,7 +83,8 @@ def get_platforms_constants() -> Any:
     except ImportError:
         pass
     
-    return SimpleNamespace(**merged)
+    _cached_constants = SimpleNamespace(**merged)
+    return _cached_constants
 
 
 __all__ = ['get_platforms_constants']
