@@ -186,6 +186,13 @@ class PluginRegistry:
             tab_name = getattr(plugin_class, 'tab_name', None)
             if tab_name and tab_name != "Unnamed Tab":
                 plugin_name = tab_name
+                import warnings
+                warnings.warn(
+                    f"Plugin '{plugin_class.__name__}' uses deprecated 'tab_name' attribute. "
+                    f"Migrate to 'plugin_name' before the next major release.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
         
         # Fallback to class name
         if not plugin_name:

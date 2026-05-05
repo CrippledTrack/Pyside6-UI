@@ -255,8 +255,22 @@ class BaseTabPlugin:
 class CoreTabPlugin(BaseTabPlugin):
     """Base class for core (built-in) tab plugins."""
     
-    plugin_author: str = "Basic GUI Application Team"
     is_core_plugin: bool = True
+
+    @classmethod
+    def _default_core_author(cls) -> str:
+        """Derive the default author string from VERSION_NAME."""
+        try:
+            from ..app.constants import VERSION_NAME
+            return f"{VERSION_NAME} Team"
+        except Exception:
+            return "Core Team"
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        # Only set the default if the subclass hasn't explicitly overridden it
+        if cls.plugin_author == "Unknown":
+            cls.plugin_author = cls._default_core_author()
 
 
 

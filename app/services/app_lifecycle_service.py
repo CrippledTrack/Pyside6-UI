@@ -27,7 +27,13 @@ class AppLifecycleService:
 
         import fcntl
 
-        self._lock_file_path = "/tmp/basic-ui.lock"
+        # Derive lock file name from VERSION_NAME to avoid hardcoding
+        try:
+            from ..utils.imports import get_platforms_constants
+            slug = get_platforms_constants().VERSION_NAME.lower().replace(" ", "-")
+        except Exception:
+            slug = "gui-application"
+        self._lock_file_path = f"/tmp/{slug}.lock"
         try:
             self._lock_file = open(self._lock_file_path, "w", encoding="utf-8")
             fcntl.lockf(self._lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)

@@ -225,6 +225,14 @@ class PluginDiscovery:
             plugin_name = getattr(plugin_class, 'plugin_name', None)
             if not plugin_name or plugin_name == "Unnamed Plugin":
                 plugin_name = getattr(plugin_class, 'tab_name', "Unknown Plugin")
+                if plugin_name != "Unknown Plugin":
+                    import warnings
+                    warnings.warn(
+                        f"Plugin '{plugin_class.__name__}' uses deprecated 'tab_name' attribute. "
+                        f"Migrate to 'plugin_name' before the next major release.",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
                 
             plugins.append((plugin_name, plugin_class, f"local:{py_file.name}"))
             logger.info(f"Successfully loaded local plugin: {plugin_name} from {py_file.name}")

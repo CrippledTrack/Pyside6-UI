@@ -342,6 +342,14 @@ class PluginService:
                 name = getattr(plugin_class, 'plugin_name', None)
                 if not name or name == "Unnamed Plugin":
                     name = getattr(plugin_class, 'tab_name', None)
+                    if name and name != "Unnamed Tab":
+                        import warnings
+                        warnings.warn(
+                            f"Plugin '{plugin_class.__name__}' uses deprecated 'tab_name' attribute. "
+                            f"Migrate to 'plugin_name' before the next major release.",
+                            DeprecationWarning,
+                            stacklevel=2,
+                        )
                 if not name or name == "Unnamed Tab":
                     name = plugin_class.__name__
                 if name not in seen_names:
