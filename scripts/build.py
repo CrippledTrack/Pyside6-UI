@@ -58,7 +58,7 @@ def _resolve_roots() -> tuple[Path, Path, Path]:
     gui_root = script_dir.parent                          # GUI/
     project_root = gui_root.parent                        # parent project
 
-    # Heuristic: if project_root contains main.py that imports from GUI,
+    # Heuristic: if project_root contains main.py that imports from the GUI module,
     # we are inside the full parent project.  Otherwise treat gui_root as
     # the standalone root.
     main_py = project_root / "main.py"
@@ -305,13 +305,13 @@ def _collect_hidden_imports() -> List[str]:
     imports = [
         # The generated build-info module is imported via a try/except and
         # may not exist at analysis time.
-        "app._build_info_generated" if IS_STANDALONE else "GUI.app._build_info_generated",
+        "app._build_info_generated" if IS_STANDALONE else f"{GUI_ROOT.name}.app._build_info_generated",
     ]
 
     if IS_STANDALONE:
         # Dynamically loaded via import_aliases and plugin discovery; not
         # reachable by static analysis from run.py.
-        imports.extend(["GUI.plugins", "GUI.themes"])
+        imports.extend([f"{GUI_ROOT.name}.plugins", f"{GUI_ROOT.name}.themes"])
     else:
         # app_plugins.core_plugins is imported at runtime by the plugin
         # service; ensure PyInstaller can see the top-level package.

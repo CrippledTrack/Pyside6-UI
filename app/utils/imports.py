@@ -82,6 +82,10 @@ def get_platforms_constants() -> Any:
         merged.update(collect(app_constants))
     except ImportError:
         pass
+        
+    # Ensure GUI internal constants are never overridden by external plugins
+    merged['GUI_API_VERSION'] = gui_constants.GUI_API_VERSION
+    merged['CURRENT_PLATFORM'] = gui_constants.CURRENT_PLATFORM
     
     _cached_constants = SimpleNamespace(**merged)
     return _cached_constants

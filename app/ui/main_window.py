@@ -472,7 +472,7 @@ class MainWindow(QMainWindow):
     
     def show_about_dialog(self) -> None:
         """Show the About dialog without blocking the main window."""
-        from ..constants import VERSION as GUI_VERSION, VERSION_NAME as DEFAULT_VERSION_NAME
+        from ..constants import GUI_API_VERSION as GUI_VERSION, VERSION_NAME as DEFAULT_VERSION_NAME
         from ..utils.about_info import create_about_dialog
         
         if self._about_dialog and self._about_dialog.isVisible():

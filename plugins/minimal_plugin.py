@@ -5,10 +5,10 @@ from __future__ import annotations
 
 from typing import Optional, TYPE_CHECKING
 from PySide6.QtWidgets import QWidget
-from GUI.plugin_system.base import BaseTabPlugin
+from ..plugin_system.base import BaseTabPlugin
 
 if TYPE_CHECKING:
-    from GUI.app.services.container import ServiceContainer
+    from ..app.services.container import ServiceContainer
 
 
 class MinimalTabPlugin(BaseTabPlugin):

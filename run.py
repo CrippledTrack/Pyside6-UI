@@ -1,7 +1,7 @@
 """
 Standalone runner for the GUI submodule (script or PyInstaller binary).
 
-Puts the directory that contains the GUI folder on sys.path so `import GUI`
+Puts the parent directory on sys.path so the module can be imported
 resolves to the real GUI package. Use this for both interactive runs and as
 the PyInstaller entry point.
 
@@ -30,6 +30,8 @@ if __name__ == "__main__":
     if path_entry not in sys.path:
         sys.path.insert(0, path_entry)
 
-    from GUI.app.app import run
+    package_name = gui_dir.name
+    module = __import__(f"{package_name}.app.app", fromlist=["run"])
+    run = module.run
 
     raise SystemExit(run(sys.argv))

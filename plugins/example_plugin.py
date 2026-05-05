@@ -21,11 +21,11 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QTimer
 
-from GUI.plugin_system.base import BaseTabPlugin
-from GUI.plugin_system.types import MenuItemDefinition, ToolbarAction
+from ..plugin_system.base import BaseTabPlugin
+from ..plugin_system.types import MenuItemDefinition, ToolbarAction
 
 if TYPE_CHECKING:
-    from GUI.app.services.container import ServiceContainer
+    from ..app.services.container import ServiceContainer
 
 # Note: Inheriting from BaseTabPlugin covers the basic Plugin requirements.
 # We implement the protocols by defining the required methods.

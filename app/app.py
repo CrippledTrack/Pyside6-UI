@@ -11,7 +11,7 @@ import platform
 import sys
 from typing import List
 
-from .constants import VERSION as GUI_API_VERSION
+from .constants import GUI_API_VERSION
 from .services.logging_service import setup_logging, set_dev_logging_override
 from .utils.admin import set_dev_mode
 

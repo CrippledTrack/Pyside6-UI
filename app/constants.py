@@ -10,14 +10,18 @@ from __future__ import annotations
 import platform
 
 # =============================================================================
+# GUI Internal Variables (app_plugins will NOT override these)
+# =============================================================================
+GUI_API_VERSION = "5.0.0-dev-7"
+
+# =============================================================================
 # Version Information (can be overridden by app_plugins/constants.py)
 # =============================================================================
-GUI_API_VERSION = "5.0.0-dev-6"
-VERSION = GUI_API_VERSION  # Intended to be used externally, if not defined externally, then it will default the GUI_API_VERSION
+VERSION = GUI_API_VERSION  # Intended to be used externally, if not defined externally, then it will default to the GUI API Version
 VERSION_NAME = "Basic UI Application"
 
 VERSION_INFO = {
-    "version": GUI_API_VERSION,
+    "version": VERSION,
     "name": VERSION_NAME,
     "description": VERSION_NAME,
 }
@@ -50,7 +54,6 @@ CURRENT_PLATFORM = platform.system().lower()
 
 __all__ = [
     # Version info
-    'GUI_API_VERSION',
     'VERSION',
     'VERSION_NAME',
     'VERSION_INFO',
@@ -62,5 +65,6 @@ __all__ = [
     'NEW_UI_ENABLED_BY_DEFAULT',
     'HIDE_ADMIN_MENU_BY_DEFAULT',
     # GUI internal
+    'GUI_API_VERSION',
     'CURRENT_PLATFORM',
 ]

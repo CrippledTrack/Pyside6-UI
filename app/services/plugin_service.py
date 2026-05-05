@@ -233,8 +233,8 @@ class PluginService:
                         priority=190,
                     ),
                     PluginSource(
-                        source_id="GUI.plugins",
-                        package="GUI.plugins",
+                        source_id=f"{__package__.split('.')[0]}.plugins",
+                        package=f"{__package__.split('.')[0]}.plugins",
                         priority=100,
                     ),
                 ]
@@ -259,7 +259,7 @@ class PluginService:
                         try:
                             self._registry.register_plugin(plugin_class, is_core=False)
                             total_registered += 1
-                            if source.package == "GUI.plugins":
+                            if source.package == f"{__package__.split('.')[0]}.plugins":
                                 builtin_registered += 1
                         except Exception as e:
                             logger.warning(f"Failed to register plugin '{plugin_name}' from {source.source_id}: {e}")

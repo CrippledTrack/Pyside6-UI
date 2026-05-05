@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import sys
 
-from GUI.app.app import run
+from .app.app import run
 
 if __name__ == "__main__":
     raise SystemExit(run(sys.argv))
