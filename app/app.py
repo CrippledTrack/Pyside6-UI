@@ -31,7 +31,7 @@ def run(argv: List[str]) -> int:
     
     # Check for dev mode flag or dev version - bypasses admin requirements for tab loading and enables dev logging
     dev_flag = ('-dev' in argv or '--dev' in argv)
-    dev_version = ('-dev' in str(VERSION)) or ('-dev' in str(GUI_API_VERSION))
+    dev_version = '-dev' in str(VERSION)
     is_dev = dev_flag or dev_version
     if is_dev:
         set_dev_mode(True)
