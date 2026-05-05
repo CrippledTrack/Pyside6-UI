@@ -72,8 +72,6 @@ class DevModeService:
         if not enabled:
             self._show_all_platforms = False
         self._persist_flags()
-        if enabled:
-            logger.warning("Dev mode enabled - admin requirements bypassed for tab loading")
 
     def is_dev_mode(self) -> bool:
         """Check if dev mode is enabled.

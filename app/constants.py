@@ -12,7 +12,7 @@ import platform
 # =============================================================================
 # Version Information (can be overridden by app_plugins/constants.py)
 # =============================================================================
-GUI_API_VERSION = "5.0.0-dev-5"
+GUI_API_VERSION = "5.0.0-dev-6"
 VERSION = GUI_API_VERSION  # Intended to be used externally, if not defined externally, then it will default the GUI_API_VERSION
 VERSION_NAME = "Basic UI Application"
 

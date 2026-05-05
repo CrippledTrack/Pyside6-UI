@@ -80,8 +80,6 @@ def set_dev_mode(enabled: bool) -> None:
     else:
         # Early bootstrap – store until the service is wired
         _early_dev_mode = enabled
-        if enabled:
-            logger.warning("Dev mode enabled - admin requirements bypassed for tab loading")
 
 
 def is_dev_mode() -> bool:
