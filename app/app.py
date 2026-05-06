@@ -29,6 +29,17 @@ def run(argv: List[str]) -> int:
     VERSION = constants.VERSION
     VERSION_NAME = constants.VERSION_NAME
     
+    # Configure Qt binding from constants or command line arguments
+    qt_binding = getattr(constants, "DEFAULT_QT_BINDING", "")
+    for arg in argv:
+        if arg.startswith("--qt-binding="):
+            qt_binding = arg.split("=", 1)[1].strip()
+            break
+            
+    if qt_binding:
+        import os
+        os.environ.setdefault("QT_BINDING", qt_binding)
+    
     # Check for dev mode flag or dev version - bypasses admin requirements for tab loading and enables dev logging
     dev_flag = ('-dev' in argv or '--dev' in argv)
     dev_version = '-dev' in str(VERSION)

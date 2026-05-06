@@ -25,6 +25,7 @@ from ...qt_bindings import (
     QPalette,
     QColor,
     QMouseEvent,
+    Signal,
 )
 
 if TYPE_CHECKING:
@@ -35,6 +36,8 @@ logger = logging.getLogger(__name__)
 
 class ToastNotification(QFrame):
     """A toast notification widget that appears temporarily."""
+    
+    toast_closed = Signal()
     
     def __init__(
         self, 
@@ -56,16 +59,12 @@ class ToastNotification(QFrame):
     
     def setup_ui(self) -> None:
         """Setup the toast notification UI."""
-        # Use Tool window type - stays above parent but not globally on top of all apps
-        # Don't use WindowStaysOnTopHint as it makes it globally on top
-        window_flags = Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool
-        
-        self.setWindowFlags(window_flags)
         # Set parent to establish window hierarchy (Tool windows stay above their parent)
         if self.parent_window:
             self.setParent(self.parent_window)
         
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setFixedSize(320, 70)
         # Set a semi-transparent background instead of fully transparent
         self.setWindowOpacity(0.95)
@@ -95,9 +94,6 @@ class ToastNotification(QFrame):
         self.close_button.clicked.connect(self.close_toast)
         self.close_button.setObjectName("closeButton")
         content_layout.addWidget(self.close_button)
-        
-        # Don't use WA_TransparentForMouseEvents - it doesn't work for click-through on top-level windows
-        # Instead, we'll handle events manually in event() method
         
         layout.addWidget(content_frame)
         
@@ -262,52 +258,30 @@ class ToastNotification(QFrame):
         self.close_timer.setSingleShot(True)
         self.close_timer.timeout.connect(self.close_toast)
     
-    def show_toast(self, parent_widget: Optional[QWidget] = None):
+    def show_toast(self, parent_widget: Optional[QWidget] = None, target_y: int = 40):
         """Show the toast notification with animation."""
         from ...qt_bindings import QPoint
         
-        # Use stored parent_window if no parent_widget provided
         target_parent = parent_widget or self.parent_window
         
         if target_parent:
-            # Position relative to parent - try to get the main window
-            main_window = target_parent
-            while main_window and not isinstance(main_window, QMainWindow):
-                main_window = main_window.parent()
-            
-            if main_window:
-                # Get the main window's geometry in screen coordinates
-                # mapToGlobal converts a point from widget coordinates to screen coordinates
-                top_right = main_window.mapToGlobal(QPoint(main_window.width(), 0))
-                
-                # Position toast in top-right corner with some padding
-                x = top_right.x() - self.width() - 15
-                y = top_right.y() + 40  # Offset from top to clear menu bar
-                self.move(x, y)
-            else:
-                # Fallback - use target_parent's global position
-                top_right = target_parent.mapToGlobal(QPoint(target_parent.width(), 0))
-                x = top_right.x() - self.width() - 15
-                y = top_right.y() + 40
-                self.move(x, y)
+            x = target_parent.width() - self.width() - 15
         else:
-            # No parent available, use screen positioning
             from ...qt_bindings import QApplication
             screen = QApplication.primaryScreen().geometry()
             x = screen.width() - self.width() - 15
-            y = 60  # Move down to clear top menu areas
-            self.move(x, y)
-        
-        # Start hidden above the target position
-        start_rect = QRect(self.x(), self.y() - self.height(), self.width(), self.height())
-        end_rect = QRect(self.x(), self.y(), self.width(), self.height())
+            
+        # Start hidden to the right
+        start_rect = QRect(x + self.width() + 20, target_y, self.width(), self.height())
+        end_rect = QRect(x, target_y, self.width(), self.height())
         
         self.setGeometry(start_rect)
         self.show()
         self.raise_()
-        # Don't call activateWindow() as it brings focus to the toast
         
-        # Animate slide down
+        self.animation.stop()
+        self.animation.setDuration(300)
+        self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         self.animation.setStartValue(start_rect)
         self.animation.setEndValue(end_rect)
         self.animation.start()
@@ -316,44 +290,46 @@ class ToastNotification(QFrame):
         self.close_timer.start(self.duration)
         
         logger.debug(f"Showing toast: {self.message}")
+        
+    def update_position(self, target_y: int):
+        """Smoothly move to a new vertical position."""
+        if getattr(self, '_is_closing', False):
+            return
+            
+        current_rect = self.geometry()
+        end_rect = QRect(current_rect.x(), target_y, self.width(), self.height())
+        
+        self.animation.stop()
+        self.animation.setDuration(250)
+        self.animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self.animation.setStartValue(current_rect)
+        self.animation.setEndValue(end_rect)
+        self.animation.start()
     
     def close_toast(self):
         """Close the toast notification with animation."""
-        if hasattr(self, 'animation') and self.animation.state() == QPropertyAnimation.State.Running:
-            return  # Already animating
+        if getattr(self, '_is_closing', False):
+            return
+        self._is_closing = True
         
-        # Animate slide up and close
+        self.animation.stop()
+        
+        # Animate slide out to the right
         current_rect = self.geometry()
-        end_rect = QRect(current_rect.x(), current_rect.y() - self.height(), 
+        end_rect = QRect(current_rect.x() + self.width() + 20, current_rect.y(), 
                         current_rect.width(), current_rect.height())
         
         self.animation.setStartValue(current_rect)
         self.animation.setEndValue(end_rect)
         self.animation.setEasingCurve(QEasingCurve.Type.InCubic)
-        self.animation.finished.connect(self.close)
+        self.animation.finished.connect(self._on_close_animation_finished)
         self.animation.start()
         
         logger.debug(f"Closing toast: {self.message}")
-    
-    def event(self, event: QEvent):
-        """Override event handler to enable click-through except on close button."""
-        # Only process mouse events if they're on the close button
-        if event.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease, 
-                           QEvent.Type.MouseMove, QEvent.Type.Enter, QEvent.Type.Leave):
-            if isinstance(event, QMouseEvent):
-                # Check if click is on close button
-                if hasattr(self, 'close_button'):
-                    button_rect = self.close_button.geometry()
-                    if button_rect.contains(event.pos()):
-                        # Let close button handle it normally
-                        return super().event(event)
-                
-                # For all other mouse events, don't process them (click-through)
-                # Return False to indicate event wasn't handled
-                return False
         
-        # Process all other events normally
-        return super().event(event)
+    def _on_close_animation_finished(self):
+        self.toast_closed.emit()
+        self.close()
 
 
 __all__ = ['ToastNotification']

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 from typing import Optional, TYPE_CHECKING
+from ...qt_bindings import QObject, QEvent
 
 if TYPE_CHECKING:
     from ...qt_bindings import QWidget
@@ -17,7 +18,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class ToastManager:
+class ToastManager(QObject):
     """Manages multiple toast notifications."""
     
     def __init__(
@@ -26,10 +27,20 @@ class ToastManager:
         theme_manager: Optional["ThemeManager"] = None,
         notification_service: Optional["NotificationService"] = None
     ) -> None:
+        super().__init__(parent_widget)
         self.parent_widget = parent_widget
         self.theme_manager = theme_manager
         self.notification_service = notification_service
         self.active_toasts: list["ToastNotification"] = []
+        
+        if self.parent_widget:
+            self.parent_widget.installEventFilter(self)
+            
+    def eventFilter(self, obj: 'QObject', event: 'QEvent') -> bool:
+        """Handle parent widget resize to reposition toasts."""
+        if obj == self.parent_widget and event.type() == QEvent.Type.Resize:
+            self._reposition_toasts(animate=False)
+        return super().eventFilter(obj, event)
     
     def show_toast(self, message: str, notification_type: str = "info", duration: int = 3000) -> None:
         """Show a toast notification."""
@@ -52,12 +63,20 @@ class ToastManager:
             except Exception as e:
                 logger.error(f"Failed to add notification to history: {e}")
 
-        # Close all existing toasts when showing a new one
-        self.clear_all()
+        # Limit maximum active toasts to prevent covering too much screen
+        if len(self.active_toasts) >= 5:
+            oldest = self.active_toasts.pop(0)
+            oldest.close_toast()
         
         # Create and show new toast
         toast = ToastNotification(message, notification_type, duration, self.parent_widget, self.theme_manager)
-        toast.show_toast(self.parent_widget)
+        
+        # Determine target Y based on existing toasts
+        target_y = 40
+        for t in self.active_toasts:
+            target_y += t.height() + 10
+            
+        toast.show_toast(self.parent_widget, target_y)
         
         # Track active toasts
         self.active_toasts.append(toast)
@@ -66,8 +85,28 @@ class ToastManager:
         def remove_toast():
             if toast in self.active_toasts:
                 self.active_toasts.remove(toast)
+                self._reposition_toasts(animate=True)
         
-        toast.destroyed.connect(remove_toast)
+        toast.toast_closed.connect(remove_toast)
+        
+    def _reposition_toasts(self, animate: bool = True) -> None:
+        """Update positions of all active toasts."""
+        if not self.parent_widget:
+            return
+            
+        current_y = 40
+        parent_width = self.parent_widget.width()
+        
+        for toast in self.active_toasts:
+            target_x = parent_width - toast.width() - 15
+            if animate:
+                toast.update_position(current_y)
+            else:
+                # Direct move without animation (e.g., during rapid resize)
+                if hasattr(toast, 'animation'):
+                    toast.animation.stop()
+                toast.move(target_x, current_y)
+            current_y += toast.height() + 10
     
     def show_info(self, message: str, duration: int = 3000) -> None:
         """Show info toast."""
