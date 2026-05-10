@@ -30,8 +30,12 @@ if __name__ == "__main__":
     if path_entry not in sys.path:
         sys.path.insert(0, path_entry)
 
-    package_name = gui_dir.name
-    module = __import__(f"{package_name}.app.app", fromlist=["run"])
-    run = module.run
+    if getattr(sys, "frozen", False):
+        # Static import allows PyInstaller to trace and bundle the app correctly
+        from GUI.app.app import run
+    else:
+        package_name = gui_dir.name
+        module = __import__(f"{package_name}.app.app", fromlist=["run"])
+        run = module.run
 
     raise SystemExit(run(sys.argv))
