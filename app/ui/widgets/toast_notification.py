@@ -291,13 +291,13 @@ class ToastNotification(QFrame):
         
         logger.debug(f"Showing toast: {self.message}")
         
-    def update_position(self, target_y: int):
-        """Smoothly move to a new vertical position."""
+    def update_position(self, target_x: int, target_y: int):
+        """Smoothly move to a new position."""
         if getattr(self, '_is_closing', False):
             return
             
         current_rect = self.geometry()
-        end_rect = QRect(current_rect.x(), target_y, self.width(), self.height())
+        end_rect = QRect(target_x, target_y, self.width(), self.height())
         
         self.animation.stop()
         self.animation.setDuration(250)

@@ -64,9 +64,11 @@ class ToastManager(QObject):
                 logger.error(f"Failed to add notification to history: {e}")
 
         # Limit maximum active toasts to prevent covering too much screen
-        if len(self.active_toasts) >= 5:
+        max_toasts = 5
+        while len(self.active_toasts) >= max_toasts:
             oldest = self.active_toasts.pop(0)
             oldest.close_toast()
+            self._reposition_toasts(animate=True)
         
         # Create and show new toast
         toast = ToastNotification(message, notification_type, duration, self.parent_widget, self.theme_manager)
@@ -100,7 +102,7 @@ class ToastManager(QObject):
         for toast in self.active_toasts:
             target_x = parent_width - toast.width() - 15
             if animate:
-                toast.update_position(current_y)
+                toast.update_position(target_x, current_y)
             else:
                 # Direct move without animation (e.g., during rapid resize)
                 if hasattr(toast, 'animation'):

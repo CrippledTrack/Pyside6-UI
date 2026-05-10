@@ -11,9 +11,20 @@ import platform
 import sys
 from typing import List
 
-from .constants import GUI_API_VERSION
+from .constants import VERSION as GUI_API_VERSION
 from .services.logging_service import setup_logging, set_dev_logging_override
+from .services.app_lifecycle_service import AppLifecycleService
+from .services.container import ServiceContainer
+from .services.daemon_lifecycle_service import DaemonLifecycleService
+from .services.qt_deps_service import QtDepsService
+from .services.settings_service import SettingsService
+from .services.theme_init_service import ThemeInitService
+from .utils.console import apply_console_setting
 from .utils.admin import set_dev_mode
+from .utils.imports import get_platforms_constants
+constants = get_platforms_constants()
+VERSION = constants.VERSION
+VERSION_NAME = constants.VERSION_NAME
 
 def run(argv: List[str]) -> int:
     """Application bootstrap. Mirrors previous behavior from main.py without changes."""
@@ -22,47 +33,30 @@ def run(argv: List[str]) -> int:
         from .daemon.server import run_daemon
         return run_daemon(argv)
     
-    # PERF: Import get_platforms_constants inline instead of at module level.
-    # This defers a ~130ms package resolution penalty until the run() method actually executes.
-    from .utils.imports import get_platforms_constants
-    constants = get_platforms_constants()
-    VERSION = constants.VERSION
-    VERSION_NAME = constants.VERSION_NAME
-    
-    # Configure Qt binding from constants or command line arguments
-    qt_binding = getattr(constants, "DEFAULT_QT_BINDING", "")
-    for arg in argv:
-        if arg.startswith("--qt-binding="):
-            qt_binding = arg.split("=", 1)[1].strip()
-            break
-            
-    if qt_binding:
-        import os
-        os.environ.setdefault("QT_BINDING", qt_binding)
-    
     # Check for dev mode flag or dev version - bypasses admin requirements for tab loading and enables dev logging
     dev_flag = ('-dev' in argv or '--dev' in argv)
-    dev_version = '-dev' in str(VERSION)
+    dev_version = ('-dev' in str(VERSION)) or ('-dev' in str(GUI_API_VERSION))
     is_dev = dev_flag or dev_version
     if is_dev:
         set_dev_mode(True)
         set_dev_logging_override(True)
 
-    # PERF: Service imports are loaded lazily below. This reduces the time-to-first-paint
-    # by ensuring module-level imports in app.py don't drag in the entire dependency tree.
-    from .services.app_lifecycle_service import AppLifecycleService
     app_lifecycle = AppLifecycleService()
     if not app_lifecycle.acquire_single_instance_lock():
         print("Another instance is already running.", file=sys.stderr)
         return 1
     
     # Apply console visibility setting based on SHOW_CONSOLE constant
-    from .utils.console import apply_console_setting
     apply_console_setting()
     
     logger = setup_logging()
     logger.info(f"Starting {VERSION_NAME} v{VERSION} on {platform.system().lower()}")
     logger.info(f"GUI API Version: v{GUI_API_VERSION}")
+
+    # Install legacy import aliases used by some plugin modules (best-effort).
+    installed_aliases = install_import_aliases()
+    if installed_aliases:
+        logger.debug(f"Installed plugin import aliases: {installed_aliases}")
 
     # Log dev mode status now that logging is configured
     if is_dev:
@@ -72,7 +66,6 @@ def run(argv: List[str]) -> int:
     # imports qt_bindings.  Many services (NotificationService, etc.)
     # import Qt at module level, so this must happen before the service
     # container is initialised.
-    from .services.qt_deps_service import QtDepsService
     qt_deps_service = QtDepsService()
     deps_ok, deps_message = qt_deps_service.ensure_dependencies()
     if not deps_ok:
@@ -89,14 +82,11 @@ def run(argv: List[str]) -> int:
     from .ui.main_window import MainWindow
 
     # Initialize service container (safe now -- Qt libs are available)
-    from .services.container import ServiceContainer, set_container
     container = ServiceContainer()
     container.initialize_services()
-    set_container(container)
     logger.info("Service container initialized")
     
     # Get settings service from container
-    from .services.settings_service import SettingsService
     settings_service = container.get(SettingsService)
     logger.info("Settings service loaded")
     
@@ -107,11 +97,9 @@ def run(argv: List[str]) -> int:
 
     app_lifecycle.configure_qt_application(app, VERSION_NAME, GUI_API_VERSION)
 
-    from .services.theme_init_service import ThemeInitService
     theme_init_service = ThemeInitService()
     theme_manager = theme_init_service.initialize(container, settings_service)
 
-    from .services.daemon_lifecycle_service import DaemonLifecycleService
     daemon_lifecycle = DaemonLifecycleService()
     daemon_client = daemon_lifecycle.start_if_required(container)
 
