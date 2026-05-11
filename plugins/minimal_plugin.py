@@ -4,7 +4,7 @@ Minimal plugin example - contains only what's necessary to register as a plugin.
 from __future__ import annotations
 
 from typing import Optional, TYPE_CHECKING
-from PySide6.QtWidgets import QWidget
+from ..app.qt_bindings import QWidget
 from ..plugin_system.base import BaseTabPlugin
 
 if TYPE_CHECKING:

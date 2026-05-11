@@ -29,7 +29,7 @@ from ...qt_bindings import (
 )
 
 if TYPE_CHECKING:
-    from ...themes.theme_manager import ThemeManager
+    from ....themes.theme_manager import ThemeManager
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +145,8 @@ class ToastNotification(QFrame):
             # Convert hex to RGB
             if window_color.startswith('#'):
                 hex_color = window_color.lstrip('#')
+                if len(hex_color) == 3:
+                    hex_color = ''.join(c + c for c in hex_color)
                 r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
                 # Calculate luminance
                 luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
@@ -175,6 +177,8 @@ class ToastNotification(QFrame):
         def parse_hex_color(hex_color: str) -> tuple:
             """Parse hex color to RGB tuple."""
             hex_color = hex_color.lstrip('#')
+            if len(hex_color) == 3:
+                hex_color = ''.join(c + c for c in hex_color)
             if len(hex_color) == 6:
                 return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
             return (0, 120, 212)  # Default blue

@@ -15,11 +15,11 @@ from __future__ import annotations
 
 import logging
 from typing import Optional, Dict, List, Any, Callable, TYPE_CHECKING
-from PySide6.QtWidgets import (
+from ..app.qt_bindings import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
-    QTextEdit, QCheckBox, QSpinBox, QFormLayout, QMessageBox
+    QTextEdit, QCheckBox, QSpinBox, QFormLayout, QMessageBox,
+    QTimer
 )
-from PySide6.QtCore import QTimer
 
 from ..plugin_system.base import BaseTabPlugin
 from ..plugin_system.types import MenuItemDefinition, ToolbarAction

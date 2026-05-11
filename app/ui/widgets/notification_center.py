@@ -20,7 +20,7 @@ from ...qt_bindings import (
 
 if TYPE_CHECKING:
     from ...services.notification_service import NotificationService, Notification
-    from ...themes.theme_manager import ThemeManager
+    from ....themes.theme_manager import ThemeManager
 
 from ...constants import CURRENT_PLATFORM
 
