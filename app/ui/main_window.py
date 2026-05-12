@@ -127,7 +127,6 @@ class MainWindow(QMainWindow):
         self._setup_window_geometry()
         self._setup_ui_components()
         self._setup_controllers()
-        self._start_tab_loader()
         
         # ── Deferred init ───────────────────────────────────────────────
         # PERF: Standard GUI architectures block the main thread while building menus,
@@ -150,6 +149,7 @@ class MainWindow(QMainWindow):
         self._setup_menu_bar()
         self._update_window_title()
         self._setup_tooltips()
+        self._start_tab_loader()
     
     def _setup_window_geometry(self) -> None:
         """Restore window size and state from settings."""
