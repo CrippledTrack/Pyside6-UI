@@ -3,6 +3,7 @@
 # ---------------------------------------------------------------------------
 # Triggered on:
 #   - Push / PR to main (when relevant files change)
+#   - Release published (attaches executables to the GitHub Release)
 #   - Manual dispatch (workflow_dispatch)
 #
 # NOTE: The application expects to live inside a directory named "GUI/" so
@@ -35,12 +36,14 @@ on:
       - "run.py"
       - "requirements-*.txt"
       - ".github/workflows/build-gui.yml"
+  release:
+    types: [published]
   workflow_dispatch:  # allows manual runs from the Actions tab
 
-# Cancel redundant runs on the same branch / PR
+# Cancel redundant runs on the same branch / PR (but never cancel release builds)
 concurrency:
-  group: build-gui-${{ github.ref }}
-  cancel-in-progress: true
+  group: build-gui-${{ github.event_name == 'release' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'release' }}
 
 jobs:
   build:
@@ -53,21 +56,28 @@ jobs:
             requirements: GUI/requirements-win.txt
             artifact-name: GUI-Windows
             artifact-glob: "GUI/dist/*.exe"
+            release-suffix: "-Windows.exe"
 
           - os: ubuntu-22.04
             label: Linux
             requirements: GUI/requirements-linux.txt
             artifact-name: GUI-Linux
             artifact-glob: "GUI/dist/*"
+            release-suffix: "-Linux"
 
           - os: macos-latest
             label: macOS
             requirements: GUI/requirements-linux.txt   # same deps (no pywin32)
             artifact-name: GUI-macOS
             artifact-glob: "GUI/dist/*"
+            release-suffix: "-macOS"
 
     name: Build – ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
+
+    # Grant write access to release assets
+    permissions:
+      contents: write
 
     steps:
       # ----- Checkout into GUI/ so imports resolve correctly ------------------
@@ -113,7 +123,7 @@ jobs:
       - name: Run build script
         run: python GUI/scripts/build.py --clean
 
-      # ----- Upload artifact --------------------------------------------------
+      # ----- Upload CI artifact (always) --------------------------------------
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -121,3 +131,31 @@ jobs:
           path: ${{ matrix.artifact-glob }}
           if-no-files-found: error
           retention-days: 30
+
+      # ----- Attach to GitHub Release (only on release events) ----------------
+      - name: Prepare release asset
+        if: github.event_name == 'release'
+        shell: bash
+        run: |
+          # Find the built executable and rename it for the release
+          mkdir -p release-assets
+          for file in ${{ matrix.artifact-glob }}; do
+            if [ -f "$file" ]; then
+              base=$(basename "$file")
+              name="${base%.*}"
+              ext="${base##*.}"
+              if [ "$base" = "$ext" ]; then
+                # No extension (Linux/macOS)
+                cp "$file" "release-assets/${name}${{ matrix.release-suffix }}"
+              else
+                # Has extension (Windows .exe)
+                cp "$file" "release-assets/${name}${{ matrix.release-suffix }}"
+              fi
+            fi
+          done
+
+      - name: Upload release assets
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
