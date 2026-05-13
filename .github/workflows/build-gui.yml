@@ -2,8 +2,12 @@
 # Build the GUI submodule for Windows, Linux, and macOS
 # ---------------------------------------------------------------------------
 # Triggered on:
-#   - Push / PR to main (when GUI/** or the workflow itself changes)
+#   - Push / PR to main (when relevant files change)
 #   - Manual dispatch (workflow_dispatch)
+#
+# NOTE: The application expects to live inside a directory named "GUI/" so
+# that imports like `GUI.app.app` resolve correctly.  We use the checkout
+# `path: GUI` option to recreate that structure in CI.
 # ---------------------------------------------------------------------------
 
 name: Build GUI
@@ -12,12 +16,24 @@ on:
   push:
     branches: [main]
     paths:
-      - "GUI/**"
+      - "app/**"
+      - "plugins/**"
+      - "plugin_system/**"
+      - "themes/**"
+      - "scripts/**"
+      - "run.py"
+      - "requirements-*.txt"
       - ".github/workflows/build-gui.yml"
   pull_request:
     branches: [main]
     paths:
-      - "GUI/**"
+      - "app/**"
+      - "plugins/**"
+      - "plugin_system/**"
+      - "themes/**"
+      - "scripts/**"
+      - "run.py"
+      - "requirements-*.txt"
       - ".github/workflows/build-gui.yml"
   workflow_dispatch:  # allows manual runs from the Actions tab
 
@@ -54,11 +70,11 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      # ----- Checkout ---------------------------------------------------------
+      # ----- Checkout into GUI/ so imports resolve correctly ------------------
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive   # ensures GUI submodule is fetched
+          path: GUI
 
       # ----- Python -----------------------------------------------------------
       - name: Set up Python
