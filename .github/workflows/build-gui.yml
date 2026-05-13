@@ -52,19 +52,19 @@ jobs:
             label: Windows
             requirements: GUI/requirements-win.txt
             artifact-name: GUI-Windows
-            artifact-glob: "dist/*.exe"
+            artifact-glob: "GUI/dist/*.exe"
 
           - os: ubuntu-22.04
             label: Linux
             requirements: GUI/requirements-linux.txt
             artifact-name: GUI-Linux
-            artifact-glob: "dist/*"
+            artifact-glob: "GUI/dist/*"
 
           - os: macos-latest
             label: macOS
             requirements: GUI/requirements-linux.txt   # same deps (no pywin32)
             artifact-name: GUI-macOS
-            artifact-glob: "dist/*"
+            artifact-glob: "GUI/dist/*"
 
     name: Build – ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
