@@ -3,14 +3,6 @@ Plugin extension interfaces for the Basic UI Application.
 
 This module defines Protocol-based interfaces for each extension point that plugins
 can implement. Plugins can implement any combination of these interfaces.
-
-v4.0.0 BREAKING CHANGES:
-- All interfaces now use typing.Protocol instead of ABC
-- Methods are instance-based (use `self`) instead of classmethods
-- Removed `tab_name` aliasing - use `plugin_name` and `tab_title`
-- `create_widget` now typed to return QWidget
-
-Legacy 3.x plugins can use LegacyPluginAdapter from compatibility.py.
 """
 
 from __future__ import annotations
@@ -196,11 +188,9 @@ class SettingsExtension(Protocol):
         ...
 
 
-from .compatibility import Plugin  # Legacy ABC kept in compatibility module
-
 
 __all__ = [
-    # New Protocol interfaces (v4.0.0)
+    # Protocol interfaces
     'PluginProtocol',
     'TabExtension',
     'MenuExtension',
@@ -209,6 +199,4 @@ __all__ = [
     'ServiceExtension',
     'EventSubscriberExtension',
     'SettingsExtension',
-    # Legacy (for 3.x compatibility)
-    'Plugin',
 ]

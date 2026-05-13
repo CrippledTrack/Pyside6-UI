@@ -1,27 +1,29 @@
 """
 Plugin service for managing plugin discovery and registry access.
 
-This module provides the PluginService class which wraps the plugin_registry
-singleton, enabling dependency injection and easier testing. It handles:
+This module provides the PluginService class which wraps a PluginRegistry
+instance, enabling dependency injection and easier testing. It handles:
 - Plugin discovery from multiple sources
 - Plugin registration and state management
 - Access to plugin registry methods
 
-The underlying plugin_registry singleton is still used for compatibility,
-but all access should go through this service when using dependency injection.
+The PluginRegistry instance is injected by the ServiceContainer.
+All access should go through this service when using dependency injection.
 """
 
 from __future__ import annotations
 
 import logging
+import os
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Type, TYPE_CHECKING
 
-from ...plugin_system import plugin_registry
+from ...plugin_system.registry import PluginRegistry
 from ...plugin_system.base import BaseTabPlugin
 from ...plugin_system.discovery import PluginDiscovery
 from ...plugin_system.sources import PluginSource
-from ...plugin_system.import_aliases import install_import_aliases
+from ..utils.paths import parent_has_gui_plugin_dirs
 
 if TYPE_CHECKING:
     from .settings_service import SettingsService
@@ -29,75 +31,99 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _ensure_parent_project_on_path() -> None:
+    """Ensure the parent project root (sibling to GUI/) is on sys.path so app_plugins/platforms can be imported.
+
+    Main plugin loading uses 'from app_plugins.core_plugins import ...' and
+    'from platforms.core_plugins import ...', which require the repo root on path.
+    - When not standalone: always add parent so plugins work regardless of cwd.
+    - When standalone: add parent only if app_plugins or platforms exists there,
+      so that running from GUI/ (run.py) with the full repo layout still loads
+      native plugins (e.g. Linux app_plugins core), not just cross-platform dev tabs.
+    """
+    # This file is at GUI/app/services/plugin_service.py -> 4 levels up = repo root
+    current_file = Path(__file__).resolve()
+    parent_project = current_file.parent.parent.parent.parent
+    if os.environ.get("GUI_STANDALONE_MODE") == "1":
+        # In standalone, only add path if the parent has our plugin trees (not an unrelated folder)
+        if not parent_has_gui_plugin_dirs(parent_project):
+            return
+    parent_str = str(parent_project)
+    if parent_str not in sys.path:
+        sys.path.insert(0, parent_str)
+
+
 class PluginService:
     """Service for plugin discovery and registry management.
     
-    This service wraps the global plugin_registry singleton to enable
-    dependency injection and easier testing. All plugin registry operations
-    should go through this service when using the ServiceContainer.
+    Wraps an injected PluginRegistry instance to enable dependency injection
+    and easier testing. All plugin registry operations should go through
+    this service when using the ServiceContainer.
     """
     
-    def __init__(self, settings_service: Optional["SettingsService"] = None) -> None:
+    def __init__(self, settings_service: Optional["SettingsService"] = None, registry: Optional[PluginRegistry] = None) -> None:
         """Initialize the plugin service.
         
         Args:
             settings_service: Optional settings service for plugin state persistence
+            registry: Optional PluginRegistry instance (injected by ServiceContainer)
         """
         self.settings_service = settings_service
+        self._registry = registry or PluginRegistry()
         self._discovery_complete = False
     
     # =========================================================================
-    # Registry Access Methods (delegating to plugin_registry)
+    # Registry Access Methods (delegating to injected registry)
     # =========================================================================
     
     def get_all_plugins(self) -> Dict[str, Type[BaseTabPlugin]]:
         """Get all registered plugins."""
-        return plugin_registry.get_all_plugins()
+        return self._registry.get_all_plugins()
     
     def get_core_plugins(self) -> Dict[str, Type[BaseTabPlugin]]:
         """Get core plugins only."""
-        return plugin_registry.get_core_plugins()
+        return self._registry.get_core_plugins()
     
     def get_external_plugins(self) -> Dict[str, Type[BaseTabPlugin]]:
         """Get external plugins only."""
-        return plugin_registry.get_external_plugins()
+        return self._registry.get_external_plugins()
     
     def get_plugin(self, name: str) -> Optional[Type[BaseTabPlugin]]:
         """Get a specific plugin by name."""
-        return plugin_registry.get_plugin(name)
+        return self._registry.get_plugin(name)
     
     def list_plugin_names(self) -> List[str]:
         """Get list of all plugin names."""
-        return plugin_registry.list_plugin_names()
+        return self._registry.list_plugin_names()
     
     def register_plugin(self, plugin_class: Type[BaseTabPlugin], is_core: bool = False) -> None:
         """Register a plugin in the registry."""
-        plugin_registry.register_plugin(plugin_class, is_core=is_core)
+        self._registry.register_plugin(plugin_class, is_core=is_core)
     
     def clear(self) -> None:
         """Clear all registered plugins."""
-        plugin_registry.clear()
+        self._registry.clear()
         self._discovery_complete = False
     
     def disable_plugin(self, name: str) -> None:
         """Disable a plugin by name."""
-        plugin_registry.disable_plugin(name)
+        self._registry.disable_plugin(name)
     
     def enable_plugin(self, name: str) -> None:
         """Enable a plugin by name."""
-        plugin_registry.enable_plugin(name)
+        self._registry.enable_plugin(name)
     
     def is_enabled(self, name: str) -> bool:
         """Check if a plugin is enabled."""
-        return plugin_registry.is_enabled(name)
+        return self._registry.is_enabled(name)
     
     def get_enabled_plugins(self) -> Dict[str, Type[BaseTabPlugin]]:
         """Get all enabled plugins."""
-        return plugin_registry.get_enabled_plugins()
+        return self._registry.get_enabled_plugins()
     
     def get_version_incompatibility(self, name: str) -> Optional[str]:
         """Get the version incompatibility reason for a plugin, if any."""
-        return plugin_registry.get_version_incompatibility(name)
+        return self._registry.get_version_incompatibility(name)
     
     # =========================================================================
     # Discovery Methods
@@ -122,9 +148,6 @@ class PluginService:
         summary: Dict[str, Any] = {"total_discovered": 0}
 
         try:
-            # Ensure legacy imports used by some plugin modules resolve consistently.
-            install_import_aliases()
-
             # Load core plugins from all three sources in priority order
             logger.info("Attempting to load core plugins from all sources...")
             app_plugins = self._load_core_plugins_from_source("app_plugins")
@@ -137,7 +160,7 @@ class PluginService:
                 platforms_plugins, # Middle priority
                 gui_plugins,       # Lowest priority
             ])
-            logger.info("Total core plugins to register after merge: %d plugins", len(all_core_plugins))
+            logger.info(f"Total core plugins to register after merge: {len(all_core_plugins)} plugins")
             registered_core = self._register_core_plugins(all_core_plugins)
 
             # In dev mode with show_all_platforms, also load cross-platform plugins
@@ -147,26 +170,38 @@ class PluginService:
                     from ..constants import CURRENT_PLATFORM
                     try:
                         if CURRENT_PLATFORM == "linux":
+                            # Linux host: load Windows and macOS plugins.
+                            # Only Windows plugins need special mocks.
                             from ..utils.dev_mode_utils.win32_mocks import install_win32_mocks
                             install_win32_mocks()
                         elif CURRENT_PLATFORM == "windows":
+                            # Windows host: load Linux and macOS plugins.
+                            # Linux-style APIs are mocked for safety.
                             from ..utils.dev_mode_utils.linux_mocks import install_linux_mocks
                             install_linux_mocks()
+                        elif CURRENT_PLATFORM == "darwin":
+                            # macOS host: load both Windows and Linux plugins.
+                            # Install both sets of mocks so platform-specific
+                            # imports for either OS won't fail at import time.
+                            from ..utils.dev_mode_utils.win32_mocks import install_win32_mocks
+                            from ..utils.dev_mode_utils.linux_mocks import install_linux_mocks
+                            install_win32_mocks()
+                            install_linux_mocks()
                     except Exception as e:
-                        logger.warning("Could not install cross-platform mocks: %s", e)
+                        logger.warning(f"Could not install cross-platform mocks: {e}")
 
                     try:
                         from ..utils.dev_mode_utils.cross_platform_plugins import clear_cross_platform_cache
                         clear_cross_platform_cache()
                     except Exception as e:
-                        logger.debug("Could not clear cross-platform plugin cache: %s", e)
+                        logger.debug(f"Could not clear cross-platform plugin cache: {e}")
 
                     logger.info("Dev mode: Loading cross-platform plugins...")
                     from ..utils.dev_mode_utils.cross_platform_plugins import load_cross_platform_plugins
                     cross_platform = load_cross_platform_plugins()
                     if cross_platform:
                         registered_cross = self._register_core_plugins(cross_platform)
-                        logger.info("Registered %d cross-platform plugins", len(registered_cross))
+                        logger.info(f"Registered {len(registered_cross)} cross-platform plugins")
                         registered_core.extend(registered_cross)
             except ImportError as e:
                 logger.debug(f"Cross-platform plugins not available: {e}")
@@ -198,8 +233,8 @@ class PluginService:
                         priority=190,
                     ),
                     PluginSource(
-                        source_id="GUI.plugins",
-                        package="GUI.plugins",
+                        source_id=f"{__package__.split('.')[0]}.plugins",
+                        package=f"{__package__.split('.')[0]}.plugins",
                         priority=100,
                     ),
                 ]
@@ -218,49 +253,37 @@ class PluginService:
 
                     for plugin_name, plugin_class, _src in discovered:
                         # Preserve priority: if already registered, don't override.
-                        if plugin_registry.get_plugin(plugin_name) is not None:
-                            logger.debug(
-                                "Skipping plugin '%s' from %s due to higher-priority registration",
-                                plugin_name,
-                                source.source_id,
-                            )
+                        if self._registry.get_plugin(plugin_name) is not None:
+                            logger.debug(f"Skipping plugin '{plugin_name}' from {source.source_id} due to higher-priority registration")
                             continue
                         try:
-                            plugin_registry.register_plugin(plugin_class, is_core=False)
+                            self._registry.register_plugin(plugin_class, is_core=False)
                             total_registered += 1
-                            if source.package == "GUI.plugins":
+                            if source.package == f"{__package__.split('.')[0]}.plugins":
                                 builtin_registered += 1
                         except Exception as e:
-                            logger.warning(
-                                "Failed to register plugin '%s' from %s: %s",
-                                plugin_name,
-                                source.source_id,
-                                e,
-                            )
+                            logger.warning(f"Failed to register plugin '{plugin_name}' from {source.source_id}: {e}")
 
                 # Discover and register external plugins from the plugins directory.
                 local_discovered = discovery.discover_local_plugins()
                 local_registered = 0
                 for plugin_name, plugin_class, _src in local_discovered:
-                    if plugin_registry.get_plugin(plugin_name) is not None:
-                        logger.debug(
-                            "Skipping local plugin '%s' due to higher-priority registration",
-                            plugin_name,
-                        )
+                    if self._registry.get_plugin(plugin_name) is not None:
+                        logger.debug(f"Skipping local plugin '{plugin_name}' due to higher-priority registration")
                         continue
                     try:
-                        plugin_registry.register_plugin(plugin_class, is_core=False)
+                        self._registry.register_plugin(plugin_class, is_core=False)
                         local_registered += 1
                     except Exception as e:
-                        logger.warning("Failed to register local plugin '%s': %s", plugin_name, e)
+                        logger.warning(f"Failed to register local plugin '{plugin_name}': {e}")
 
                 summary["total_discovered"] = summary.get("total_discovered", 0) + total_registered + local_registered
                 summary["builtin_plugins"] = builtin_registered
                 summary["local_plugins"] = local_registered
             except Exception as e:  # pragma: no cover - optional discovery
-                logger.warning("Plugin discovery failed: %s", e)
+                logger.warning(f"Plugin discovery failed: {e}")
         except Exception as e:
-            logger.error("Error during plugin discovery: %s", e)
+            logger.error(f"Error during plugin discovery: {e}")
             raise
 
         self._discovery_complete = True
@@ -276,26 +299,28 @@ class PluginService:
             List of plugin classes, empty list on error
         """
         try:
+            if source in ("app_plugins", "platforms"):
+                _ensure_parent_project_on_path()
             if source == "app_plugins":
                 from app_plugins.core_plugins import get_core_plugins  # type: ignore
                 plugins = get_core_plugins()
-                logger.info("app_plugins core plugins retrieved: %d plugins", len(plugins))
+                logger.info(f"app_plugins core plugins retrieved: {len(plugins)} plugins")
                 return plugins
             elif source == "platforms":
                 from platforms.core_plugins import get_core_plugins  # type: ignore
                 plugins = get_core_plugins()
-                logger.info("platforms core plugins retrieved: %d plugins", len(plugins))
+                logger.info(f"platforms core plugins retrieved: {len(plugins)} plugins")
                 return plugins
             elif source == "gui":
                 from ...plugin_system.core_plugins import get_core_plugins
                 plugins = get_core_plugins()
-                logger.info("GUI core plugins retrieved: %d plugins", len(plugins))
+                logger.info(f"GUI core plugins retrieved: {len(plugins)} plugins")
                 return plugins
             else:
                 logger.warning(f"Unknown core plugin source: {source}")
                 return []
         except Exception as e:
-            logger.info("Failed to load %s core plugins: %s", source, e)
+            logger.info(f"Failed to load {source} core plugins: {e}")
             return []
     
     def _merge_plugins_with_priority(
@@ -314,10 +339,18 @@ class PluginService:
         
         for plugin_list in plugin_lists:
             for plugin_class in plugin_list:
-                name = getattr(plugin_class, 'tab_name', None)
-                if not name or name == "Unnamed Tab":
-                    name = getattr(plugin_class, 'plugin_name', None)
+                name = getattr(plugin_class, 'plugin_name', None)
                 if not name or name == "Unnamed Plugin":
+                    name = getattr(plugin_class, 'tab_name', None)
+                    if name and name != "Unnamed Tab":
+                        import warnings
+                        warnings.warn(
+                            f"Plugin '{plugin_class.__name__}' uses deprecated 'tab_name' attribute. "
+                            f"Migrate to 'plugin_name' before the next major release.",
+                            DeprecationWarning,
+                            stacklevel=2,
+                        )
+                if not name or name == "Unnamed Tab":
                     name = plugin_class.__name__
                 if name not in seen_names:
                     seen_names[name] = plugin_class
@@ -340,9 +373,16 @@ class PluginService:
             try:
                 self.register_plugin(plugin_class, is_core=True)
                 registered.append(plugin_class)
-                logger.info("Registered core plugin: %s", getattr(plugin_class, "tab_name", plugin_class.__name__))
+                
+                name = getattr(plugin_class, 'plugin_name', None)
+                if not name or name == "Unnamed Plugin":
+                    name = getattr(plugin_class, 'tab_name', None)
+                if not name or name == "Unnamed Tab":
+                    name = plugin_class.__name__
+                
+                logger.info(f"Registered core plugin: {name}")
             except Exception as e:
-                logger.error("Failed to register core plugin %s: %s", plugin_class.__name__, e)
+                logger.error(f"Failed to register core plugin {plugin_class.__name__}: {e}")
         return registered
     
     # =========================================================================

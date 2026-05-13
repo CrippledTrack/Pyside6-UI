@@ -17,7 +17,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Type
 
-from .base import BaseTabPlugin, plugin_registry
+from .base import BaseTabPlugin
+from .registry import PluginRegistry
 from .sources import PluginSource
 
 # Try to import entry_points (Python 3.8+)
@@ -210,13 +211,6 @@ class PluginDiscovery:
         module_name = self._module_name_for_path(py_file)
         logger.debug(f"Attempting to load local plugin module: {module_name}")
         
-        # Ensure legacy import aliases are installed before executing plugin code.
-        try:
-            from .import_aliases import install_import_aliases
-            install_import_aliases()
-        except Exception:
-            pass
-        
         spec = importlib.util.spec_from_file_location(module_name, py_file)
         if spec is None or spec.loader is None:
             logger.warning(f"Could not create spec for {py_file}")
@@ -227,10 +221,18 @@ class PluginDiscovery:
         
         plugin_classes = self._find_plugin_classes_in_module(module)
         for plugin_class in plugin_classes:
-            # v4.0.0: Prefer plugin_name, fall back to tab_name
+            # Prefer plugin_name, fall back to tab_name
             plugin_name = getattr(plugin_class, 'plugin_name', None)
             if not plugin_name or plugin_name == "Unnamed Plugin":
                 plugin_name = getattr(plugin_class, 'tab_name', "Unknown Plugin")
+                if plugin_name != "Unknown Plugin":
+                    import warnings
+                    warnings.warn(
+                        f"Plugin '{plugin_class.__name__}' uses deprecated 'tab_name' attribute. "
+                        f"Migrate to 'plugin_name' before the next major release.",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
                 
             plugins.append((plugin_name, plugin_class, f"local:{py_file.name}"))
             logger.info(f"Successfully loaded local plugin: {plugin_name} from {py_file.name}")
@@ -280,7 +282,7 @@ class PluginDiscovery:
                 return False
 
             # Must have a valid identifier (plugin_name OR tab_name)
-            # v4.0.0: plugin_name is preferred, legacy uses tab_name
+            # plugin_name is preferred, legacy uses tab_name
             has_plugin_name = bool(getattr(cls, 'plugin_name', None)) and getattr(cls, 'plugin_name') != "Unnamed Plugin"
             has_tab_name = bool(getattr(cls, 'tab_name', None)) and getattr(cls, 'tab_name') != "Unnamed Tab"
             if not has_plugin_name and not has_tab_name:
@@ -315,31 +317,24 @@ class PluginDiscovery:
         This is the default discovery mechanism for in-repo plugin packages.
         It avoids sys.path mutation by importing packages/modules normally.
         """
-        # Ensure legacy imports like `from plugins.base import ...` still work.
-        try:
-            from .import_aliases import install_import_aliases
-            install_import_aliases()
-        except Exception:
-            pass
-
         discovered: List[Tuple[str, Type[Any], str]] = []
         for source in sources:
             try:
                 pkg = importlib.import_module(source.package)
             except Exception as e:
-                logger.debug("Package source not importable (%s): %s", source.package, e)
+                logger.debug(f"Package source not importable ({source.package}): {e}")
                 continue
 
             pkg_path = getattr(pkg, "__path__", None)
             if not pkg_path:
-                logger.debug("Package source has no __path__ (%s), skipping", source.package)
+                logger.debug(f"Package source has no __path__ ({source.package}), skipping")
                 continue
 
             for modinfo in pkgutil.iter_modules(pkg.__path__, prefix=f"{source.package}."):
                 try:
                     module = importlib.import_module(modinfo.name)
                 except Exception as e:
-                    logger.warning("Failed to import plugin module %s: %s", modinfo.name, e)
+                    logger.warning(f"Failed to import plugin module {modinfo.name}: {e}")
                     continue
 
                 for plugin_class in self._find_plugin_classes_in_module(module):
@@ -351,42 +346,6 @@ class PluginDiscovery:
         self.discovered_plugins = discovered
         return discovered.copy()
 
-    def register_discovered_plugins(
-        self,
-        discovered_plugins: Optional[List[Tuple[str, Type[Any], str]]] = None,
-    ) -> Dict[str, str]:
-        """
-        Register discovered plugins in the global registry.
-        
-        Args:
-            discovered_plugins: List of plugins to register (uses self.discovered_plugins if None)
-            
-        Returns:
-            Dict mapping plugin names to their registration status
-        """
-        if discovered_plugins is None:
-            discovered_plugins = self.discovered_plugins
-        
-        registration_results = {}
-        
-        for plugin_name, plugin_class, source in discovered_plugins:
-            try:
-                # Determine if it's a core plugin (part of the main application)
-                # Use explicit attribute only
-                is_core = bool(getattr(plugin_class, 'is_core_plugin', False))
-                
-                # Register the plugin
-                plugin_registry.register_plugin(plugin_class, is_core=is_core)
-                
-                registration_results[plugin_name] = f"success ({source})"
-                logger.info(f"Registered plugin: {plugin_name} from {source}")
-                
-            except Exception as e:
-                registration_results[plugin_name] = f"failed: {e}"
-                logger.error(f"Failed to register plugin {plugin_name}: {e}")
-        
-        return registration_results
-    
     def get_plugin_info_summary(self) -> Dict[str, any]:
         """
         Get a summary of all discovered plugins.
@@ -414,33 +373,4 @@ class PluginDiscovery:
         }
 
 
-def discover_and_register_plugins(plugins_dir: Optional[str] = None) -> Tuple[Dict[str, str], Dict[str, any]]:
-    """
-    Convenience function to discover and register all plugins.
-    
-    Args:
-        plugins_dir: Path to the plugins directory
-        
-    Returns:
-        Tuple of (registration_results, discovery_summary)
-    """
-    discovery = PluginDiscovery(plugins_dir)
-    discovered = discovery.discover_all_plugins(enable_entry_points=False)
-    registration_results = discovery.register_discovered_plugins(discovered)
-    summary = discovery.get_plugin_info_summary()
-    
-    return registration_results, summary
-
-
-def discover_and_register_packages(
-    sources: List[PluginSource],
-) -> Tuple[Dict[str, str], Dict[str, Any]]:
-    """Convenience function to discover and register plugins from package sources."""
-    discovery = PluginDiscovery(plugins_dir=None)
-    discovered = discovery.discover_from_packages(sources)
-    registration_results = discovery.register_discovered_plugins(discovered)
-    summary = discovery.get_plugin_info_summary()
-    return registration_results, summary
-
-
-__all__ = ['PluginDiscovery', 'discover_and_register_plugins', 'discover_and_register_packages']
+__all__ = ['PluginDiscovery']

@@ -151,13 +151,9 @@ class DaemonService:
         if os.path.exists(socket_path):
             try:
                 os.unlink(socket_path)
-                logger.info("Removed stale daemon socket at %s", socket_path)
+                logger.info(f"Removed stale daemon socket at {socket_path}")
             except OSError as e:
-                logger.warning(
-                    "Failed to remove stale daemon socket at %s: %s",
-                    socket_path,
-                    e,
-                )
+                logger.warning(f"Failed to remove stale daemon socket at {socket_path}: {e}")
 
         return self._start_new_daemon()
     

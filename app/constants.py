@@ -10,15 +10,20 @@ from __future__ import annotations
 import platform
 
 # =============================================================================
+# GUI Internal Variables (app_plugins will NOT override these)
+# =============================================================================
+GUI_API_VERSION = "5.0.0"
+
+# =============================================================================
 # Version Information (can be overridden by app_plugins/constants.py)
 # =============================================================================
-VERSION = "4.1.0"
+VERSION = GUI_API_VERSION  # Intended to be used externally, if not defined externally, then it will default to the GUI API Version
 VERSION_NAME = "Basic UI Application"
 
 VERSION_INFO = {
     "version": VERSION,
     "name": VERSION_NAME,
-    "description": "Basic UI Application",
+    "description": VERSION_NAME,
 }
 
 # =============================================================================
@@ -36,9 +41,10 @@ LOG_TO_FILE = True
 SHOW_CONSOLE = False
 
 # UI configuration
+DEFAULT_QT_BINDING = ""  # If set, overrides the default binding (e.g., "pyside6" or "pyqt6")
 NEW_UI_ENABLED_BY_DEFAULT = True
 # Hide the Admin menu/button by default (can be overridden by app_plugins/constants.py)
-HIDE_ADMIN_MENU_BY_DEFAULT = False
+HIDE_ADMIN_MENU_BY_DEFAULT = True
 
 # =============================================================================
 # GUI Internal (app_plugins will NOT override these)
@@ -57,8 +63,10 @@ __all__ = [
     'LOGGING_ENABLED',
     'LOG_TO_FILE',
     'SHOW_CONSOLE',
+    'DEFAULT_QT_BINDING',
     'NEW_UI_ENABLED_BY_DEFAULT',
     'HIDE_ADMIN_MENU_BY_DEFAULT',
     # GUI internal
+    'GUI_API_VERSION',
     'CURRENT_PLATFORM',
 ]

@@ -1,12 +1,6 @@
 """
 Plugin registry system for managing discovered and loaded plugins.
 
-v4.0.0 BREAKING CHANGES:
-- Registry now accepts ServiceContainer for plugin instantiation
-- Plugins are instantiated on-demand via get_plugin_instance()
-- Legacy 3.x plugins are wrapped via LegacyPluginAdapter
-- Interface checking uses Protocol-based isinstance()
-
 The registry maintains both plugin classes (for compatibility) and 
 plugin instances (for the new instance-based architecture).
 """
@@ -32,7 +26,6 @@ from .interfaces import (
     ServiceExtension,
     EventSubscriberExtension,
     SettingsExtension,
-    Plugin,  # Legacy ABC
 )
 from .version_utils import check_version_compatibility, get_gui_version
 
@@ -113,7 +106,7 @@ def _check_implements_interface(plugin_class: Type[Any], interface: Type) -> boo
 class PluginRegistry:
     """Registry for managing discovered plugins.
     
-    v4.0.0: Now supports instance-based plugins with ServiceContainer injection.
+    Now supports instance-based plugins with ServiceContainer injection.
     Plugin classes are still registered, but instances are created on-demand.
     
     Supports multiple extension interfaces:
@@ -129,7 +122,7 @@ class PluginRegistry:
         """Initialize the registry.
         
         Args:
-            container: Optional ServiceContainer for instantiating v4.0.0 plugins.
+            container: Optional ServiceContainer for instantiating plugins.
                       Can be set later via set_container().
         """
         self._container = container
@@ -140,7 +133,7 @@ class PluginRegistry:
         self._external_plugins: Dict[str, Type[Any]] = {}
         self._disabled_plugins: set = set()
         
-        # Plugin instances cache (v4.0.0)
+        # Plugin instances cache
         self._plugin_instances: Dict[str, Any] = {}
 
         # Optional async event delivery executor (opt-in)
@@ -180,19 +173,26 @@ class PluginRegistry:
             is_core: Whether this is a core plugin
         """
         # Get plugin name - check for non-default values
-        # Legacy plugins use tab_name, new ones use plugin_name
+        # New plugins use plugin_name (v4.0+), legacy ones use tab_name
         plugin_name = None
         
-        # First check tab_name (legacy) - prefer this for backward compat
-        tab_name = getattr(plugin_class, 'tab_name', None)
-        if tab_name and tab_name != "Unnamed Tab":
-            plugin_name = tab_name
+        # First check plugin_name (v4.0+) - prefer modern naming
+        pn = getattr(plugin_class, 'plugin_name', None)
+        if pn and pn != "Unnamed Plugin":
+            plugin_name = pn
         
-        # If no valid tab_name, check plugin_name (v4.0)
+        # Fall back to tab_name (legacy) for backward compat
         if not plugin_name:
-            pn = getattr(plugin_class, 'plugin_name', None)
-            if pn and pn != "Unnamed Plugin":
-                plugin_name = pn
+            tab_name = getattr(plugin_class, 'tab_name', None)
+            if tab_name and tab_name != "Unnamed Tab":
+                plugin_name = tab_name
+                import warnings
+                warnings.warn(
+                    f"Plugin '{plugin_class.__name__}' uses deprecated 'tab_name' attribute. "
+                    f"Migrate to 'plugin_name' before the next major release.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
         
         # Fallback to class name
         if not plugin_name:
@@ -242,14 +242,14 @@ class PluginRegistry:
     def get_plugin_instance(self, name: str) -> Any:
         """Get or create a plugin instance by name.
         
-        v4.0.0: Creates instances on first access, caches them for reuse.
+        Creates instances on first access, caches them for reuse.
         Legacy plugins are wrapped via LegacyPluginAdapter.
         
         Args:
             name: Plugin name
             
         Returns:
-            Plugin instance (either v4.0.0 instance or LegacyPluginAdapter)
+            Plugin instance
             
         Raises:
             ValueError: If plugin not found or container not set
@@ -263,10 +263,8 @@ class PluginRegistry:
         
         if not self._container:
             raise ValueError("ServiceContainer not set - call set_container() first")
-        
-        # Use compatibility utility to wrap legacy or instantiate new
-        from .compatibility import wrap_legacy_plugin
-        instance = wrap_legacy_plugin(plugin_class, self._container)
+        # Instantiate strict new-architecture plugin directly
+        instance = plugin_class(self._container)
         self._plugin_instances[name] = instance
         
         logger.debug(f"Created instance for plugin: {name}")
@@ -490,6 +488,28 @@ class PluginRegistry:
         """Get plugins that were rejected during registration."""
         return self._rejected_plugins.copy()
 
+    def register_plugin_force(self, name: str, plugin_class: Type[Any]) -> None:
+        """Force-register a previously rejected plugin, bypassing version checks.
+
+        Intended for user-initiated overrides (e.g. the plugin management dialog).
+        The plugin is added as an external plugin and enabled immediately.
+
+        Args:
+            name: Plugin name (must exist in the rejected plugins dict).
+            plugin_class: The plugin class to register.
+
+        Raises:
+            KeyError: If *name* is not in the rejected plugins list.
+        """
+        if name not in self._rejected_plugins:
+            raise KeyError(f"Plugin '{name}' is not in the rejected plugins list")
+
+        self._add_plugin_to_registry(name, plugin_class, is_core=False)
+        self.enable_plugin(name)
+        del self._rejected_plugins[name]
+        self._version_incompatibilities.pop(name, None)
+        logger.info(f"Force-registered rejected plugin: {name}")
+
     # =========================================================================
     # Enable/Disable
     # =========================================================================
@@ -573,7 +593,7 @@ class PluginRegistry:
         
         for plugin_name, plugin_class in subscribers.items():
             try:
-                # Try to get instance first (v4.0.0)
+                # Try to get instance first
                 try:
                     instance = self.get_plugin_instance(plugin_name)
                     subscriptions = instance.get_event_subscriptions()
@@ -617,18 +637,13 @@ class PluginRegistry:
                     try:
                         cb(data)
                     except Exception as e:
-                        logger.error("Error delivering async event '%s' to '%s': %s", ev, name, e)
+                        logger.error(f"Error delivering async event '{ev}' to '{name}': {e}")
 
                 futures.append(executor.submit(_run))
             except Exception as e:
-                logger.error("Error scheduling event '%s' to '%s': %s", event_name, plugin_name, e)
+                logger.error(f"Error scheduling event '{event_name}' to '{plugin_name}': {e}")
 
         return futures
 
 
-# Global plugin registry instance
-# Note: Container should be set via set_container() before instantiating plugins
-plugin_registry = PluginRegistry()
-
-
-__all__ = ['PluginRegistry', 'plugin_registry']
+__all__ = ['PluginRegistry']

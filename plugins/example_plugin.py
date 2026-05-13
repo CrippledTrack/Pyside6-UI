@@ -15,17 +15,17 @@ from __future__ import annotations
 
 import logging
 from typing import Optional, Dict, List, Any, Callable, TYPE_CHECKING
-from PySide6.QtWidgets import (
+from ..app.qt_bindings import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
-    QTextEdit, QCheckBox, QSpinBox, QFormLayout, QMessageBox
+    QTextEdit, QCheckBox, QSpinBox, QFormLayout, QMessageBox,
+    QTimer
 )
-from PySide6.QtCore import QTimer
 
-from GUI.plugin_system.base import BaseTabPlugin
-from GUI.plugin_system.types import MenuItemDefinition, ToolbarAction
+from ..plugin_system.base import BaseTabPlugin
+from ..plugin_system.types import MenuItemDefinition, ToolbarAction
 
 if TYPE_CHECKING:
-    from GUI.app.services.container import ServiceContainer
+    from ..app.services.container import ServiceContainer
 
 # Note: Inheriting from BaseTabPlugin covers the basic Plugin requirements.
 # We implement the protocols by defining the required methods.
@@ -40,7 +40,7 @@ class ExampleTabPlugin(BaseTabPlugin):
     plugin_name = "Example Plugin"
     tab_title = "Example Plugin"
     plugin_description = "A comprehensive example plugin showing all extension points"
-    supported_platforms = ["Windows", "Linux"]
+    supported_platforms = ["Windows", "Linux", "macOS"]
     requires_admin = False
     plugin_version = "2.0.1"
     plugin_author = "Example Author"
