@@ -2,6 +2,10 @@
 
 This module provides functions to check if admin privileges are required
 for plugin operations on different platforms.
+
+Note: Dev mode state is now managed by DevModeService. The functions in
+this module delegate to the service when available, or fall back to a
+module-level flag for early bootstrap (before the container is ready).
 """
 
 from __future__ import annotations
@@ -14,34 +18,50 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from ..services.settings_service import SettingsService
+    from ..services.dev_mode_service import DevModeService
 
-# Dev mode flag - when True, admin requirements are bypassed for tab loading
-_dev_mode: bool = False
+# ---------------------------------------------------------------------------
+# Backward-compatibility shim
+# ---------------------------------------------------------------------------
+# During early bootstrap (before the ServiceContainer is initialized) the
+# caller (app.py) sets dev mode via set_dev_mode().  Once the container is
+# ready, configure_settings_service() wires the DevModeService and all
+# subsequent calls delegate there.
 
-# Cross-platform tabs flag - when True, tabs from all platforms are shown (dev mode only)
-_show_all_platforms: bool = False
-_settings_service: Optional["SettingsService"] = None
+_dev_mode_service: Optional["DevModeService"] = None
+
+# Fallback flag used *only* during early bootstrap, before the service exists.
+_early_dev_mode: bool = False
+
+
+def _get_service() -> Optional["DevModeService"]:
+    """Return the DevModeService if it has been wired, else None."""
+    return _dev_mode_service
 
 
 def configure_settings_service(settings_service: "SettingsService") -> None:
-    """Attach settings service for persisting dev/admin flags."""
-    global _settings_service, _dev_mode, _show_all_platforms
-    _settings_service = settings_service
-    try:
-        if not _dev_mode:
-            _dev_mode = settings_service.get_dev_mode()
-        if not _show_all_platforms:
-            _show_all_platforms = settings_service.get_show_all_platforms()
-        _persist_flags()
-    except Exception as e:
-        logger.debug("Failed to sync dev flags from settings: %s", e)
+    """Attach settings service for persisting dev/admin flags.
+
+    This also creates the DevModeService if it hasn't been wired yet,
+    transferring any early-bootstrap dev mode flag into the service.
+    """
+    global _dev_mode_service, _early_dev_mode
+    if _dev_mode_service is None:
+        from ..services.dev_mode_service import DevModeService
+        _dev_mode_service = DevModeService()
+    # Transfer any early flag that was set before the service existed
+    if _early_dev_mode and not _dev_mode_service.is_dev_mode():
+        _dev_mode_service.set_dev_mode(True)
+    _dev_mode_service.configure_settings_service(settings_service)
 
 
-def _persist_flags() -> None:
-    if not _settings_service:
-        return
-    _settings_service.save_dev_mode(_dev_mode)
-    _settings_service.save_show_all_platforms(_show_all_platforms)
+def set_dev_mode_service(service: "DevModeService") -> None:
+    """Explicitly set the DevModeService instance (called by container)."""
+    global _dev_mode_service, _early_dev_mode
+    _dev_mode_service = service
+    # Transfer early flag
+    if _early_dev_mode and not service.is_dev_mode():
+        service.set_dev_mode(True)
 
 
 def set_dev_mode(enabled: bool) -> None:
@@ -53,13 +73,13 @@ def set_dev_mode(enabled: bool) -> None:
     Args:
         enabled: True to enable dev mode, False to disable
     """
-    global _dev_mode, _show_all_platforms
-    _dev_mode = enabled
-    if not enabled:
-        _show_all_platforms = False
-    _persist_flags()
-    if enabled:
-        logger.warning("Dev mode enabled - admin requirements bypassed for tab loading")
+    global _early_dev_mode
+    svc = _get_service()
+    if svc is not None:
+        svc.set_dev_mode(enabled)
+    else:
+        # Early bootstrap – store until the service is wired
+        _early_dev_mode = enabled
 
 
 def is_dev_mode() -> bool:
@@ -68,7 +88,10 @@ def is_dev_mode() -> bool:
     Returns:
         True if dev mode is enabled, False otherwise
     """
-    return _dev_mode
+    svc = _get_service()
+    if svc is not None:
+        return svc.is_dev_mode()
+    return _early_dev_mode
 
 
 def set_show_all_platforms(enabled: bool) -> None:
@@ -80,19 +103,11 @@ def set_show_all_platforms(enabled: bool) -> None:
     Args:
         enabled: True to show all platform tabs, False to filter by current platform
     """
-    global _show_all_platforms, _dev_mode
-    if enabled and not _dev_mode:
-        logger.info("Show all platforms ignored because dev mode is disabled")
-        return
-    _show_all_platforms = enabled
-    _persist_flags()
-    
-    logger.warning(f"set_show_all_platforms({enabled}) called - dev_mode={_dev_mode}, module_id={id(__import__('sys').modules.get(__name__, 'unknown'))}")
-    
-    if enabled:
-        logger.warning("Show all platforms enabled - Windows and Linux tabs will be shown")
+    svc = _get_service()
+    if svc is not None:
+        svc.set_show_all_platforms(enabled)
     else:
-        logger.info("Show all platforms disabled - filtering by current platform")
+        logger.debug("set_show_all_platforms called before DevModeService is available")
 
 
 def is_show_all_platforms() -> bool:
@@ -103,9 +118,10 @@ def is_show_all_platforms() -> bool:
     Returns:
         True if showing all platform tabs, False otherwise
     """
-    result = _dev_mode and _show_all_platforms
-    logger.debug(f"is_show_all_platforms() called: dev_mode={_dev_mode}, show_all={_show_all_platforms}, result={result}")
-    return result
+    svc = _get_service()
+    if svc is not None:
+        return svc.is_show_all_platforms()
+    return False
 
 
 def needs_admin_for_plugin(is_windows: bool, requires_admin: bool, is_admin: bool) -> bool:
@@ -125,7 +141,7 @@ def needs_admin_for_plugin(is_windows: bool, requires_admin: bool, is_admin: boo
         In dev mode: admin requirements are always bypassed.
     """
     # Dev mode bypasses all admin requirements for tab loading
-    if _dev_mode:
+    if is_dev_mode():
         return False
     
     if not requires_admin:
@@ -137,7 +153,7 @@ def needs_admin_for_plugin(is_windows: bool, requires_admin: bool, is_admin: boo
     # Linux: check daemon availability
     if platform.system().lower() == "linux":
         try:
-            from GUI.app.daemon import is_daemon_available
+            from ..daemon import is_daemon_available
             return not is_daemon_available()
         except Exception:
             # If daemon module not available, assume admin required
@@ -148,11 +164,10 @@ def needs_admin_for_plugin(is_windows: bool, requires_admin: bool, is_admin: boo
 
 __all__ = [
     'configure_settings_service',
+    'set_dev_mode_service',
     'needs_admin_for_plugin',
     'set_dev_mode',
     'is_dev_mode',
     'set_show_all_platforms',
     'is_show_all_platforms',
 ]
-
-

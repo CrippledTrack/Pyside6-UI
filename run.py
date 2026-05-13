@@ -1,8 +1,9 @@
 """
-Standalone runner for the GUI submodule.
+Standalone runner for the GUI submodule (script or PyInstaller binary).
 
-This allows running the GUI even when the parent project does not provide a
-top-level `main.py` next to the `GUI/` folder.
+Puts the parent directory on sys.path so the module can be imported
+resolves to the real GUI package. Use this for both interactive runs and as
+the PyInstaller entry point.
 
 Example:
     cd GUI
@@ -13,33 +14,28 @@ from __future__ import annotations
 
 import os
 import sys
-import types
-
-
-def _ensure_gui_virtual_package() -> None:
-    """Ensure `import GUI...` works when this file is executed as a script.
-
-    When executing `python GUI/run.py`, sys.path[0] becomes the GUI directory,
-    so `import GUI` would normally look for `GUI/GUI`. We instead create a
-    virtual package named `GUI` that points at this directory.
-    """
-    repo_root = os.path.dirname(os.path.abspath(__file__))  # .../GUI
-
-    # Mark as standalone so path resolution uses GUI/ as base when appropriate.
-    os.environ.setdefault("GUI_STANDALONE_MODE", "1")
-
-    # If GUI is already loaded, don't stomp it.
-    if "GUI" in sys.modules:
-        return
-
-    module = types.ModuleType("GUI")
-    module.__path__ = [repo_root]
-    sys.modules["GUI"] = module
+from pathlib import Path
 
 
 if __name__ == "__main__":
-    _ensure_gui_virtual_package()
-    from GUI.app.app import run
+    os.environ.setdefault("GUI_STANDALONE_MODE", "1")
+
+    gui_dir = Path(__file__).resolve().parent
+    if getattr(sys, "frozen", False):
+        root = getattr(sys, "_MEIPASS", None)
+        path_entry = str(Path(root) if isinstance(root, str) else gui_dir.parent)
+    else:
+        path_entry = str(gui_dir.parent)
+
+    if path_entry not in sys.path:
+        sys.path.insert(0, path_entry)
+
+    if getattr(sys, "frozen", False):
+        # Static import allows PyInstaller to trace and bundle the app correctly
+        from GUI.app.app import run
+    else:
+        package_name = gui_dir.name
+        module = __import__(f"{package_name}.app.app", fromlist=["run"])
+        run = module.run
 
     raise SystemExit(run(sys.argv))
-

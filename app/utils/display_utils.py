@@ -10,6 +10,17 @@ from __future__ import annotations
 from typing import Dict, Optional
 
 
+def _format_platform_name(platform_name: str) -> str:
+    """Return a human-friendly platform label for titles/metadata."""
+    normalized = str(platform_name).lower()
+    mapping = {
+        "windows": "Windows",
+        "linux": "Linux",
+        "darwin": "macOS",
+    }
+    return mapping.get(normalized, platform_name.capitalize())
+
+
 def build_title(version_name: str, version: str, platform_name: str,
                 tab_name: Optional[str] = None, plugin_version: Optional[str] = None) -> str:
     """
@@ -25,7 +36,8 @@ def build_title(version_name: str, version: str, platform_name: str,
     Returns:
         Formatted title string
     """
-    base_title = f"{version_name} v{version} ({platform_name.capitalize()})"
+    pretty_platform = _format_platform_name(platform_name)
+    base_title = f"{version_name} v{version} ({pretty_platform})"
     if not tab_name:
         return base_title
     if plugin_version:
@@ -44,10 +56,11 @@ def build_version_details(version_info: Dict[str, str], platform_name: str) -> D
     Returns:
         Dictionary with formatted version details for display
     """
+    pretty_platform = _format_platform_name(platform_name)
     return {
         "version": version_info["version"],
         "name": version_info["name"],
-        "platform": platform_name.capitalize(),
+        "platform": pretty_platform,
         "supported_platforms": ", ".join(version_info["supported_platforms"]) if isinstance(version_info.get("supported_platforms"), (list, tuple)) else version_info.get("supported_platforms", ""),
         "description": version_info.get("description", ""),
     }

@@ -44,10 +44,13 @@ def _format_build_time(raw: str) -> str:
 
 
 def _build_distro_line(platform_name: str) -> str:
+    """Build distro/time line for About dialog. Only shown when running from a frozen binary."""
     try:
         from .admin import is_dev_mode
         from ..build_info import BUILD_DISTRO, BUILD_TIME_UTC
 
+        if not getattr(sys, "frozen", False):
+            return ""
         if not is_dev_mode():
             return ""
 
@@ -143,11 +146,15 @@ def build_about_info(
     build_distro_line = _build_distro_line(str(platform_name))
     python_line = _python_version_line()
 
+    # Use a human-friendly platform label (e.g., map 'darwin' -> 'macOS').
+    from .display_utils import _format_platform_name
+    pretty_platform = _format_platform_name(platform_name)
+
     return (
         f"<h2>{app_name}</h2>"
         f"{version_line}"
         f"<p><b>GUI API Version:</b> {gui_api_version}</p>"
-        f"<p><b>Platform:</b> {str(platform_name).title()}</p>"
+        f"<p><b>Platform:</b> {pretty_platform}</p>"
         f"{distro_line}"
         f"{build_distro_line}"
         f"{python_line}"

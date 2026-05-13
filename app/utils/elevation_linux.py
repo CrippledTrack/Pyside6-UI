@@ -467,15 +467,16 @@ def start_daemon(socket_path: Optional[str] = None) -> Optional[object]:
             # Look for app.py which contains the run() function
             app_py = Path(__file__).parent.parent / 'app' / 'app.py'
             if app_py.exists():
-                # Find the root script that imports from GUI.app.app
+                # Find the root script that imports from the GUI module
                 # Check common locations relative to app.py
                 root_dir = app_py.parent.parent.parent
+                gui_pkg = app_py.parent.parent.name
                 # Look for any .py file in root that might be the entry point
                 for py_file in root_dir.glob('*.py'):
                     try:
-                        # Quick check: does it import from GUI.app.app?
+                        # Quick check: does it import from the gui package app.app?
                         content = py_file.read_text(encoding='utf-8', errors='ignore')
-                        if 'from GUI.app.app import run' in content or 'GUI.app.app' in content:
+                        if f'from {gui_pkg}.app.app import run' in content or f'{gui_pkg}.app.app' in content:
                             script_path = py_file
                             break
                     except Exception:

@@ -98,39 +98,32 @@ class TabLoaderThread(QThread):
 
     def _emit_enabled_plugins(self) -> None:
         """Emit add_tab signals for all enabled plugins, respecting saved order."""
-        enabled_plugins = self._plugin_service.get_enabled_plugins()
+        enabled_plugins = dict(self._plugin_service.get_enabled_plugins())
+        has_settings = self._settings_service is not None
 
-        def _is_tab_enabled(plugin_name: str) -> bool:
-            if not self._settings_service:
-                return True
-            return self._settings_service.is_extension_enabled(plugin_name, "Tab")
-        
         # Get saved tab order if available
-        saved_order = []
-        if self._settings_service:
-            saved_order = self._settings_service.get_tab_order()
+        saved_order = self._settings_service.get_tab_order() if has_settings else []
         
         # 1. Add tabs in saved order
         for tab_name in saved_order:
             if self._should_cancel():
                 return
-            if tab_name in enabled_plugins:
-                if not _is_tab_enabled(tab_name):
-                    del enabled_plugins[tab_name]
+            
+            # PERF: Use pop() to get and remove in one atomic operation (1 hash lookup vs 3)
+            plugin_class = enabled_plugins.pop(tab_name, None)
+            if plugin_class is not None:
+                # PERF: Inline the extension enabled check to avoid function call overhead in loop
+                if has_settings and not self._settings_service.is_extension_enabled(tab_name, "Tab"):
                     continue
-                plugin_class = enabled_plugins[tab_name]
                 self.add_tab.emit(tab_name, plugin_class)
-                # Remove from dict to track what's left
-                del enabled_plugins[tab_name]
         
         # 2. Add remaining (new/unsaved) tabs alphabetically
         for tab_name in sorted(enabled_plugins.keys()):
             if self._should_cancel():
                 return
-            if not _is_tab_enabled(tab_name):
+            if has_settings and not self._settings_service.is_extension_enabled(tab_name, "Tab"):
                 continue
-            plugin_class = enabled_plugins[tab_name]
-            self.add_tab.emit(tab_name, plugin_class)
+            self.add_tab.emit(tab_name, enabled_plugins[tab_name])
 
     def _should_cancel(self) -> bool:
         """Check if cancellation has been requested."""

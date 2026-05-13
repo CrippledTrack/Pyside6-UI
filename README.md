@@ -1,19 +1,49 @@
-## GUI Submodule — How to Run with a `main.py`
+## GUI Submodule — How to Run and Build
 
-### Scenario
-You only have the `GUI` submodule (folder) and need to run the application. Create a `main.py` file next to the `GUI` folder (not inside it) and use it to launch the GUI.
+### How to run
 
-### Required placement
-Keep the files arranged like this:
+You can run the GUI in three ways:
+
+**1. From the project root (with a `main.py` next to `GUI/`)**
+
+- Windows (PowerShell):
+  ```bash
+  py main.py
+  ```
+- Linux/macOS:
+  ```bash
+  python3 main.py
+  ```
+  Run from the directory that contains `main.py` and the `GUI/` folder.
+
+**2. From the project root using the module (no `main.py` required)**
+
+- From the directory that contains the `GUI/` folder:
+  ```bash
+  python3 -m GUI
+  ```
+  (Windows: `py -m GUI`.) Behavior is the same as running `main.py`.
+
+**3. Standalone (only the `GUI/` folder)**
+
+- From inside the `GUI/` directory:
+  ```bash
+  cd GUI
+  python3 run.py
+  ```
+  (Windows: `py run.py`.) Run adds the parent of the GUI directory to the path so the GUI package is found. Use this when the parent project does not provide a `main.py` or when you only have the GUI submodule. Optional flags: `run.py --dev`.
+
+### Minimal `main.py` (when using option 1)
+
+If you use option 1, create `main.py` at the same level as `GUI/`:
 
 ```
 your-project/
-  main.py              <-- create this at the same level as `GUI/`
+  main.py              <-- same level as GUI/
   GUI/                 <-- the GUI submodule
 ```
 
-### Minimal `main.py`
-Create `main.py` with the following contents:
+Contents of `main.py`:
 
 ```python
 import sys
@@ -24,6 +54,7 @@ if __name__ == "__main__":
 ```
 
 ### Set up a virtual environment and install PySide6
+
 It’s recommended to run the GUI inside a virtual environment.
 
 - Windows (PowerShell):
@@ -47,24 +78,30 @@ To leave the environment later, run:
 deactivate
 ```
 
-### How to run
-- Windows (PowerShell):
+### Building a standalone binary (PyInstaller)
+
+You can build a single executable so that no external start script is needed.
+
+- From inside the `GUI/` directory (standalone layout):
   ```bash
-  py main.py
+  cd GUI
+  python3 scripts/build.py
   ```
-- Linux/macOS:
+- From the project root (same build):
   ```bash
-  python3 main.py
+  python3 GUI/scripts/build.py
   ```
 
-Run these commands from the directory that contains `main.py` and the `GUI/` folder.
+The resulting binary is self-contained; you do **not** need to ship or run `main.py` or any other launcher. Build options (e.g. `--onedir`, `--name`, `--icon`) are documented in the script help: `python3 scripts/build.py --help`.
 
-### Packaging note (PyInstaller)
-- Do **not** build/target PyInstaller using `GUI/run.py`. It is a standalone/dev shim that manipulates import state; PyInstaller cannot trace its imports.
-- Standalone builds use `standalone_entry.py`, which imports `app.app` directly so PyInstaller can discover all modules.
-- Non-standalone builds use `main.py` at the project root as the entry point.
+- The build script uses `run.py` as the entry; it adds the parent of the GUI directory (or the bundle root when frozen) to the path so PyInstaller sees the GUI package and the bundle is correct.
+
+### Standalone and external plugin directories
+
+When you run standalone (`cd GUI && python run.py`), if the **parent** of `GUI/` contains an `app_plugins` or `platforms` folder that looks like this GUI’s plugin tree (e.g. has `constants.py`, `core_plugins.py`, or `linux/` / `windows/` subdirs), the app will load constants and plugins from those directories. That lets you use the full repo layout without running from the repo root. If the parent has a folder named `app_plugins` or `platforms` that is **not** for this app (e.g. another project’s), avoid running standalone from that location so the app doesn’t use the wrong constants or plugins.
 
 ### Troubleshooting
+
 - If you see `ModuleNotFoundError: No module named 'GUI'`:
-  - Ensure you are running the command from the directory that contains both `main.py` and the `GUI/` folder.
-  - Confirm `main.py` is not inside the `GUI/` directory.
+  - When using `main.py` or `python -m GUI`: run from the directory that contains the `GUI/` folder (and `main.py` if using that).
+  - When using standalone: run `python run.py` from inside the `GUI/` directory.

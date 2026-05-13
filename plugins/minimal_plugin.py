@@ -4,11 +4,11 @@ Minimal plugin example - contains only what's necessary to register as a plugin.
 from __future__ import annotations
 
 from typing import Optional, TYPE_CHECKING
-from PySide6.QtWidgets import QWidget
-from GUI.plugin_system.base import BaseTabPlugin
+from ..app.qt_bindings import QWidget
+from ..plugin_system.base import BaseTabPlugin
 
 if TYPE_CHECKING:
-    from GUI.app.services.container import ServiceContainer
+    from ..app.services.container import ServiceContainer
 
 
 class MinimalTabPlugin(BaseTabPlugin):
@@ -20,7 +20,7 @@ class MinimalTabPlugin(BaseTabPlugin):
     plugin_name = "Minimal Plugin"
     tab_title = "Minimal Plugin"
     plugin_description = "A minimal plugin with only required components"
-    supported_platforms = ["Windows", "Linux"]
+    supported_platforms = ["Windows", "Linux", "macOS"]
     requires_admin = False
     plugin_version = "1.0.1"
     plugin_author = "Plugin Creator"

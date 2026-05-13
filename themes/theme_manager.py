@@ -198,6 +198,23 @@ class ThemeManager:
     def get_current_theme(self) -> str:
         """Get current theme name"""
         return getattr(self, 'current_theme', '')
+
+    def get_theme_data(self, theme_name: Optional[str] = None) -> Dict[str, Any]:
+        """Get the data dict for a theme.
+
+        Args:
+            theme_name: Theme to look up.  ``None`` (default) uses the current theme.
+
+        Returns:
+            Theme data dictionary, or ``{}`` if the theme is not found.
+        """
+        if theme_name is None:
+            theme_name = self.get_current_theme()
+        return self._themes.get(theme_name, {})
+
+    def is_legacy_ui(self) -> bool:
+        """Whether the UI is running in legacy (classic) mode."""
+        return self._use_legacy
     
     def apply_theme(self, theme_name: str, new_ui_enabled: Optional[bool] = None) -> bool:
         """Apply a theme to the application

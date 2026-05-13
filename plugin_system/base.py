@@ -1,13 +1,5 @@
 """
 Base plugin classes for the Basic UI Application.
-
-v4.0.0 BREAKING CHANGES:
-- BaseTabPlugin is now instance-based (use `self` instead of `cls`)
-- Constructor receives ServiceContainer for dependency injection
-- Use `plugin_name` and `tab_title` instead of `tab_name`
-- Removed PluginMeta metaclass and aliasing
-
-Legacy 3.x plugins using classmethods will continue to work via LegacyPluginAdapter.
 """
 from __future__ import annotations
 
@@ -30,14 +22,30 @@ from .interfaces import (
     ServiceExtension,
     EventSubscriberExtension,
     SettingsExtension,
-    Plugin,  # Legacy ABC
 )
+
+
+def _normalize_platform_name_for_matching(name: str) -> str:
+    """Normalize platform names for matching against supported_platforms.
+
+    This allows plugins to declare user-friendly labels like "macOS" while
+    Python's platform.system() returns identifiers such as "Darwin".
+    """
+    s = str(name).strip().lower()
+    if s in ("windows", "win32"):
+        return "Windows"
+    if s == "linux":
+        return "Linux"
+    if s in ("darwin", "macos", "mac os", "osx", "mac os x"):
+        return "macOS"
+    # Fallback: capitalize the original for best-effort matching.
+    return str(name).capitalize()
 
 
 class BaseTabPlugin:
     """Base class for tab plugins with service injection.
     
-    v4.0.0: This is now an instance-based class. Plugins receive a 
+    This is now an instance-based class. Plugins receive a 
     ServiceContainer in their constructor and use instance methods.
     
     For backward compatibility, both old (tab_name) and new (plugin_name/tab_title)
@@ -142,7 +150,12 @@ class BaseTabPlugin:
         """
         if not cls.supported_platforms:
             return True  # Empty = all platforms supported
-        return platform_name.capitalize() in cls.supported_platforms
+
+        target = _normalize_platform_name_for_matching(platform_name)
+        supported_normalized = {
+            _normalize_platform_name_for_matching(p) for p in cls.supported_platforms
+        }
+        return target in supported_normalized
     
     @classmethod
     def get_current_platform(cls) -> str:
@@ -182,7 +195,7 @@ class BaseTabPlugin:
             description = getattr(cls, 'tab_description', "No description provided")
 
         # If supported_platforms is empty, show all application-supported platforms
-        display_platforms = cls.supported_platforms if cls.supported_platforms else ["Windows", "Linux"]
+        display_platforms = cls.supported_platforms if cls.supported_platforms else ["Windows", "Linux", "macOS"]
         
         return {
             'name': name,
@@ -242,114 +255,35 @@ class BaseTabPlugin:
 class CoreTabPlugin(BaseTabPlugin):
     """Base class for core (built-in) tab plugins."""
     
-    plugin_author: str = "Basic GUI Application Team"
     is_core_plugin: bool = True
 
-
-# =============================================================================
-# Legacy 3.x support
-# =============================================================================
-
-class LegacyBaseTabPlugin(Plugin):
-    """Legacy base class for 3.x classmethod-based plugins.
-    
-    This class exists for backward compatibility with 3.x plugins.
-    It will be adapted via LegacyPluginAdapter at runtime.
-    """
-    
-    # Legacy naming (kept for 3.x compat)
-    tab_name: str = "Unnamed Tab"
-    tab_description: str = "No description provided"
-    supported_platforms: List[str] = ["Windows", "Linux"]
-    requires_admin: bool = False
-    plugin_version: str = "1.0.0"
-    plugin_author: str = "Unknown"
-    plugin_authors: List[str] = []
-    disabled_by_default: bool = False
-    dependencies: List[str] = []
-    min_gui_version: Optional[str] = None
-    required_gui_version: Optional[str] = None
-    
     @classmethod
-    @abstractmethod
-    def create_widget(cls, parent: Optional[Any] = None) -> Any:
-        """Legacy classmethod - use instance method instead."""
-        pass
-    
-    @classmethod
-    def on_tab_activated(cls, widget: Any) -> None:
-        """Legacy classmethod - use instance method without widget param."""
-        pass
-    
-    @classmethod
-    def on_tab_deactivated(cls, widget: Any) -> None:
-        """Legacy classmethod - use instance method without widget param."""
-        pass
-    
-    @classmethod
-    def is_supported_platform(cls, platform_name: str) -> bool:
-        """Check if this plugin supports the given platform.
-        
-        If supported_platforms is empty, all platforms are supported.
-        """
-        if not cls.supported_platforms:
-            return True  # Empty = all platforms supported
-        return platform_name.capitalize() in cls.supported_platforms
-    
-    @classmethod
-    def get_current_platform(cls) -> str:
-        return platform.system()
-    
-    @classmethod
-    def is_compatible(cls) -> bool:
-        return cls.is_supported_platform(cls.get_current_platform())
-    
-    @classmethod
-    def get_plugin_info(cls) -> Dict[str, Any]:
-        """Get plugin info using legacy naming."""
-        authors_list: List[str] = []
+    def _default_core_author(cls) -> str:
+        """Derive the default author string from VERSION_NAME."""
         try:
-            if isinstance(getattr(cls, 'plugin_authors', []), list) and getattr(cls, 'plugin_authors'):
-                authors_list = [str(a) for a in getattr(cls, 'plugin_authors') if a]
+            from ..app.constants import VERSION_NAME
+            return f"{VERSION_NAME} Team"
         except Exception:
-            authors_list = []
-        if not authors_list and getattr(cls, 'plugin_author', None):
-            authors_list = [str(getattr(cls, 'plugin_author'))]
+            return "Core Team"
 
-        author_text = ", ".join(authors_list) if authors_list else str(getattr(cls, 'plugin_author', 'Unknown'))
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        # Only set the default if the subclass hasn't explicitly overridden it
+        if cls.plugin_author == "Unknown":
+            cls.plugin_author = cls._default_core_author()
 
-        # If supported_platforms is empty, show all application-supported platforms
-        display_platforms = cls.supported_platforms if cls.supported_platforms else ["Windows", "Linux"]
-
-        return {
-            'name': getattr(cls, 'tab_name', cls.__name__),
-            'description': getattr(cls, 'tab_description', ''),
-            'supported_platforms': display_platforms,
-            'requires_admin': cls.requires_admin,
-            'version': cls.plugin_version,
-            'author': author_text,
-            'authors': authors_list,
-            'compatible': cls.is_compatible(),
-            'current_platform': cls.get_current_platform(),
-            'min_gui_version': getattr(cls, 'min_gui_version', None),
-            'required_gui_version': getattr(cls, 'required_gui_version', None),
-            'dependencies': getattr(cls, 'dependencies', []),
-        }
 
 
 # Re-exports
-from .registry import PluginRegistry, plugin_registry
+from .registry import PluginRegistry
 from .types import MenuItemDefinition, ToolbarAction, PluginEvent
 
 __all__ = [
-    # v4.0.0 classes
+    # Base classes
     'BaseTabPlugin',
     'CoreTabPlugin',
-    # Legacy (for 3.x compatibility)
-    'LegacyBaseTabPlugin',
     # Registry
     'PluginRegistry',
-    'plugin_registry',
     # Interfaces
     'PluginProtocol',
     'TabExtension',

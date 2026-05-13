@@ -220,14 +220,29 @@ class MenuBarController(QObject):
         dev_menu = QMenu("Dev", self.parent_widget)
         self.menu_bar.addMenu(dev_menu)
         
-        # Platform name for menu item
-        other_platform = "Windows" if CURRENT_PLATFORM == "linux" else "Linux"
-        
-        self.show_all_platforms_action = QAction(f"Show {other_platform} Tabs", self.parent_widget)
+        # Menu text now reflects that we load tabs from *all* other platforms,
+        # not just a single opposite platform.
+        self.show_all_platforms_action = QAction("Show All Platform Tabs", self.parent_widget)
         self.show_all_platforms_action.setCheckable(True)
         self.show_all_platforms_action.setChecked(is_show_all_platforms())
+        
+        # Build a human-readable list of other platforms for the tooltip
+        platform_labels = {
+            "windows": "Windows",
+            "linux": "Linux",
+            "darwin": "macOS",
+        }
+        all_platform_keys = ["windows", "linux", "darwin"]
+        current_key = CURRENT_PLATFORM
+        other_platforms = [
+            platform_labels[p]
+            for p in all_platform_keys
+            if p != current_key and p in platform_labels
+        ]
+        other_text = ", ".join(other_platforms) if other_platforms else "other platforms"
+        
         self.show_all_platforms_action.setToolTip(
-            f"Show tabs from {other_platform} for testing purposes. "
+            f"Show tabs from {other_text} for testing purposes. "
             "Requires application restart to take effect."
         )
         self.show_all_platforms_action.triggered.connect(self._on_show_all_platforms_toggled)
@@ -275,6 +290,7 @@ class MenuBarController(QObject):
         # About action
         self.about_action = QAction("About...", self.parent_widget)
         self.about_action.setToolTip("Show information about this application")
+
         if on_about:
             self.about_action.triggered.connect(on_about)
         help_menu.addAction(self.about_action)

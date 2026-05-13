@@ -58,7 +58,7 @@ def _resolve_roots() -> tuple[Path, Path, Path]:
     gui_root = script_dir.parent                          # GUI/
     project_root = gui_root.parent                        # parent project
 
-    # Heuristic: if project_root contains main.py that imports from GUI,
+    # Heuristic: if project_root contains main.py that imports from the GUI module,
     # we are inside the full parent project.  Otherwise treat gui_root as
     # the standalone root.
     main_py = project_root / "main.py"
@@ -295,11 +295,7 @@ def _collect_hidden_imports() -> List[str]:
 
     Most of the application is reachable through the normal import graph:
     - Non-standalone: main.py -> GUI.app.app -> services, ui, themes, ...
-    - Standalone: standalone_entry.py -> app.app -> services, ui, themes, ...
-
-    Standalone uses standalone_entry.py (not run.py) because run.py relies on
-    runtime sys.modules patching for ``GUI``; PyInstaller does not execute that
-    shim, so ``GUI.app.*`` imports would not be discovered.
+    - Standalone: run.py -> GUI.app.app -> services, ui, themes, ...
 
     Plugin modules are pulled in via their respective ``core_plugins.py``
     which uses explicit static imports specifically so PyInstaller can
@@ -309,10 +305,14 @@ def _collect_hidden_imports() -> List[str]:
     imports = [
         # The generated build-info module is imported via a try/except and
         # may not exist at analysis time.
-        "app._build_info_generated" if IS_STANDALONE else "GUI.app._build_info_generated",
+        "app._build_info_generated" if IS_STANDALONE else f"{GUI_ROOT.name}.app._build_info_generated",
     ]
 
-    if not IS_STANDALONE:
+    if IS_STANDALONE:
+        # Dynamically loaded via import_aliases and plugin discovery; not
+        # reachable by static analysis from run.py.
+        imports.extend([f"{GUI_ROOT.name}.plugins", f"{GUI_ROOT.name}.themes"])
+    else:
         # app_plugins.core_plugins is imported at runtime by the plugin
         # service; ensure PyInstaller can see the top-level package.
         imports.append("app_plugins")
@@ -339,21 +339,42 @@ def build_pyinstaller_args(opts: argparse.Namespace, consts: dict[str, object]) 
     """Assemble the ``pyinstaller`` CLI arguments from parsed options."""
     # Determine the entry point
     if IS_STANDALONE:
-        entry = str(GUI_ROOT / "standalone_entry.py")
+        entry = str(GUI_ROOT / "run.py")
     else:
         entry = str(PROJECT_ROOT / "main.py")
 
     args: List[str] = ["pyinstaller"]
 
-    # Standalone: add GUI root to module search path so "app" package is found.
+    # Standalone: add parent of GUI so PyInstaller sees "GUI" as a real package.
     if IS_STANDALONE:
-        args.extend(["--paths", str(GUI_ROOT)])
+        args.extend(["--paths", str(GUI_ROOT.parent)])
 
     # -- One-file vs one-dir ---------------------------------------------------
+    # NOTE (macOS): PyInstaller is deprecating one-file mode for windowed
+    # .app bundles. To avoid deprecation warnings (and future errors), prefer
+    # onedir on macOS unless the user explicitly forces --onefile in a
+    # non-windowed build.
+    sysname = platform.system().lower()
     if opts.onedir:
         args.append("--onedir")
     else:
-        args.append("--onefile")
+        if sysname == "darwin":
+            # If the user requested a console build, onefile is still
+            # acceptable; otherwise, default to onedir for GUI apps.
+            wants_console = bool(opts.console)
+            wants_windowed = bool(opts.windowed)
+            if wants_console and not wants_windowed:
+                args.append("--onefile")
+            else:
+                print(
+                    "  Note: Using --onedir on macOS to avoid deprecated "
+                    "onefile .app bundles. Pass --onedir explicitly to silence "
+                    "this message.",
+                    file=sys.stderr,
+                )
+                args.append("--onedir")
+        else:
+            args.append("--onefile")
 
     # -- Name ------------------------------------------------------------------
     name = opts.name

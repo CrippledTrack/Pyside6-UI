@@ -27,7 +27,13 @@ class AppLifecycleService:
 
         import fcntl
 
-        self._lock_file_path = "/tmp/basic-ui.lock"
+        # Derive lock file name from VERSION_NAME to avoid hardcoding
+        try:
+            from ..utils.imports import get_platforms_constants
+            slug = get_platforms_constants().VERSION_NAME.lower().replace(" ", "-")
+        except Exception:
+            slug = "gui-application"
+        self._lock_file_path = f"/tmp/{slug}.lock"
         try:
             self._lock_file = open(self._lock_file_path, "w", encoding="utf-8")
             fcntl.lockf(self._lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -57,8 +63,13 @@ class AppLifecycleService:
         """Configure Qt application style, fonts, and Windows AppUserModelID."""
         from ..qt_bindings import QFont
 
-        if platform.system().lower() == "windows":
+        sysname = platform.system().lower()
+
+        # Use the built-in Fusion style on Windows and macOS for consistent theming.
+        if sysname in ("windows", "darwin"):
             app.setStyle("Fusion")
+
+        if sysname == "windows":
             try:
                 import ctypes
 
@@ -67,7 +78,9 @@ class AppLifecycleService:
             except Exception as e:
                 print(f"Failed to set AppUserModelID: {e}", file=sys.stderr)  # type: ignore[name-defined]
 
-        app.setFont(QFont("Segoe UI", 10))
+            # Only force Segoe UI on Windows; other platforms keep their
+            # native default UI font for better integration.
+            app.setFont(QFont("Segoe UI", 10))
 
 
 __all__ = ["AppLifecycleService"]
