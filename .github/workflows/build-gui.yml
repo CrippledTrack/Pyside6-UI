@@ -137,20 +137,22 @@ jobs:
         if: github.event_name == 'release'
         shell: bash
         run: |
-          # Find the built executable and rename it for the release
           mkdir -p release-assets
-          for file in ${{ matrix.artifact-glob }}; do
-            if [ -f "$file" ]; then
-              base=$(basename "$file")
+          for item in ${{ matrix.artifact-glob }}; do
+            if [ -f "$item" ]; then
+              # Single-file executable (Windows .exe, Linux onefile)
+              base=$(basename "$item")
               name="${base%.*}"
               ext="${base##*.}"
               if [ "$base" = "$ext" ]; then
-                # No extension (Linux/macOS)
-                cp "$file" "release-assets/${name}${{ matrix.release-suffix }}"
+                cp "$item" "release-assets/${name}${{ matrix.release-suffix }}"
               else
-                # Has extension (Windows .exe)
-                cp "$file" "release-assets/${name}${{ matrix.release-suffix }}"
+                cp "$item" "release-assets/${name}${{ matrix.release-suffix }}"
               fi
+            elif [ -d "$item" ]; then
+              # Directory bundle (macOS onedir) — zip it for the release
+              base=$(basename "$item")
+              (cd "$(dirname "$item")" && zip -r "$GITHUB_WORKSPACE/release-assets/${base}${{ matrix.release-suffix }}.zip" "$base")
             fi
           done
 
