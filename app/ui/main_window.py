@@ -595,15 +595,6 @@ class MainWindow(QMainWindow):
         ]
         other_text = ", ".join(other_platforms) if other_platforms else "other platforms"
         
-        # Always clear the cross-platform plugin cache so that any subsequent
-        # discovery run reflects the new toggle state and (for dev mode) the
-        # correct mock modules installed by PluginService.
-        try:
-            from ..utils.dev_mode_utils.cross_platform_plugins import clear_cross_platform_cache
-            clear_cross_platform_cache()
-        except ImportError:
-            logger.warning("Could not clear cross-platform plugin cache")
-        
         # Reload plugins with the new cross-platform setting applied.
         self._reload_all_plugins()
         

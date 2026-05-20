@@ -44,6 +44,32 @@ def _is_show_all_platforms() -> bool:
         logger.debug(f"Could not check show_all_platforms flag: {e}")
         return False
 
+
+def _create_prefixed_plugin(original_class: Type[Any], platform_prefix: str) -> Type[Any]:
+    """Create a wrapper plugin class with a prefixed tab_name/plugin_name."""
+    original_name = getattr(original_class, 'plugin_name', None)
+    if not original_name or original_name == "Unnamed Plugin":
+        original_name = getattr(original_class, 'tab_name', original_class.__name__)
+
+    original_title = getattr(original_class, 'tab_title', getattr(original_class, 'tab_name', original_name))
+
+    prefixed_name = f"{platform_prefix} {original_name}"
+    prefixed_title = f"{platform_prefix} {original_title}"
+
+    new_class = type(
+        f"CrossPlatform_{original_class.__name__}",
+        (original_class,),
+        {
+            'plugin_name': prefixed_name,
+            'tab_title': prefixed_title,
+            'tab_name': prefixed_name,
+            '_original_tab_name': original_title,
+            '_is_cross_platform': True,
+        }
+    )
+    return new_class
+
+
 def _check_implements_interface(plugin_class: Type[Any], interface: Type) -> bool:
     """Check if a plugin class implements an interface.
 
@@ -222,6 +248,23 @@ class PluginRegistry:
             return
 
         if show_all and not is_compatible:
+            # Determine platform prefix
+            platform_prefix = ""
+            if supported_platforms:
+                sp = supported_platforms[0].lower()
+                if "win" in sp:
+                    platform_prefix = "[Win]"
+                elif "linux" in sp:
+                    platform_prefix = "[Linux]"
+                elif "darwin" in sp or "mac" in sp:
+                    platform_prefix = "[macOS]"
+                else:
+                    platform_prefix = f"[{supported_platforms[0].capitalize()}]"
+            else:
+                platform_prefix = "[XPlatform]"
+
+            plugin_class = _create_prefixed_plugin(plugin_class, platform_prefix)
+            plugin_name = plugin_class.plugin_name
             logger.info(f"Loading cross-platform plugin '{plugin_name}' (supported: {supported_platforms})")
 
         # Check version compatibility
@@ -238,6 +281,40 @@ class PluginRegistry:
         self._seen_plugins.add(plugin_name)
         
         logger.debug(f"Registered plugin: {plugin_name} (core={is_core})")
+
+    def get_registered_name(self, plugin_class: Type[Any]) -> str:
+        """Get the name this plugin class will be registered under."""
+        name = getattr(plugin_class, 'plugin_name', None)
+        if not name or name == "Unnamed Plugin":
+            name = getattr(plugin_class, 'tab_name', None)
+        if not name or name == "Unnamed Tab":
+            name = plugin_class.__name__
+
+        show_all = _is_show_all_platforms()
+        if hasattr(plugin_class, 'is_compatible'):
+            is_compatible = plugin_class.is_compatible()
+        else:
+            is_compatible = self._check_extension_plugin_compatibility(plugin_class)
+
+        if show_all and not is_compatible:
+            supported_platforms = getattr(plugin_class, 'supported_platforms', [])
+            platform_prefix = ""
+            if supported_platforms:
+                sp = supported_platforms[0].lower()
+                if "win" in sp:
+                    platform_prefix = "[Win]"
+                elif "linux" in sp:
+                    platform_prefix = "[Linux]"
+                elif "darwin" in sp or "mac" in sp:
+                    platform_prefix = "[macOS]"
+                else:
+                    platform_prefix = f"[{supported_platforms[0].capitalize()}]"
+            else:
+                platform_prefix = "[XPlatform]"
+            
+            return f"{platform_prefix} {name}"
+        
+        return name
 
     def get_plugin_instance(self, name: str) -> Any:
         """Get or create a plugin instance by name.
