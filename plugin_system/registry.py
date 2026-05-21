@@ -320,7 +320,6 @@ class PluginRegistry:
         """Get or create a plugin instance by name.
         
         Creates instances on first access, caches them for reuse.
-        Legacy plugins are wrapped via LegacyPluginAdapter.
         
         Args:
             name: Plugin name
@@ -601,7 +600,7 @@ class PluginRegistry:
 
     def is_enabled(self, name: str) -> bool:
         """Check if a plugin is enabled."""
-        return name not in self._disabled_plugins
+        return name in self._plugins and name not in self._disabled_plugins
 
     def get_enabled_plugins(self) -> Dict[str, Type[Any]]:
         """Get all enabled plugin classes."""
@@ -669,6 +668,16 @@ class PluginRegistry:
         subscribers = self.get_event_subscriber_extensions(enabled_only=True)
         
         for plugin_name, plugin_class in subscribers.items():
+            # Check if Events extension is enabled for this plugin
+            try:
+                if self._container:
+                    from ..app.services.settings_service import SettingsService
+                    settings_svc = self._container.get(SettingsService)
+                    if settings_svc and not settings_svc.is_extension_enabled(plugin_name, "Events"):
+                        continue
+            except Exception:
+                pass
+
             try:
                 # Try to get instance first
                 try:
@@ -698,6 +707,16 @@ class PluginRegistry:
         futures: List[Future] = []
 
         for plugin_name, plugin_class in subscribers.items():
+            # Check if Events extension is enabled for this plugin
+            try:
+                if self._container:
+                    from ..app.services.settings_service import SettingsService
+                    settings_svc = self._container.get(SettingsService)
+                    if settings_svc and not settings_svc.is_extension_enabled(plugin_name, "Events"):
+                        continue
+            except Exception:
+                pass
+
             try:
                 try:
                     instance = self.get_plugin_instance(plugin_name)

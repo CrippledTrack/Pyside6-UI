@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional, Callable, TYPE_CHECKING
 
-from ...qt_bindings import QObject, Signal, Qt, QAction, QToolBar
+from ...qt_bindings import QObject, Signal, Qt, QAction, QToolBar, QIcon
 
 try:
     from shiboken6 import isValid as _qt_is_valid
@@ -99,6 +99,13 @@ class PluginController(QObject):
             if not self.plugin_service.is_enabled(plugin_name):
                 self.plugin_service.enable_plugin(plugin_name)
                 logger.info(f"Enabled plugin: {plugin_name}")
+                # Call lifecycle hook on plugin instance
+                try:
+                    instance = self.registry.get_plugin_instance(plugin_name)
+                    if hasattr(instance, 'on_plugin_enabled'):
+                        instance.on_plugin_enabled()
+                except Exception as e:
+                    logger.error(f"Error calling on_plugin_enabled for '{plugin_name}': {e}")
                 # Publish event for EventSubscriberExtension plugins
                 self.registry.publish_event("plugin_enabled", {"plugin_name": plugin_name})
             
@@ -119,6 +126,14 @@ class PluginController(QObject):
                 logger.warning(f"Cannot dynamically integrate extensions for '{plugin_name}': MainWindow not set")
         else:
             if self.plugin_service.is_enabled(plugin_name):
+                # Call lifecycle hook on plugin instance
+                try:
+                    if self.registry.has_plugin_instance(plugin_name):
+                        instance = self.registry.get_plugin_instance(plugin_name)
+                        if hasattr(instance, 'on_plugin_disabled'):
+                            instance.on_plugin_disabled()
+                except Exception as e:
+                    logger.error(f"Error calling on_plugin_disabled for '{plugin_name}': {e}")
                 self.plugin_service.disable_plugin(plugin_name)
                 logger.info(f"Disabled plugin: {plugin_name}")
                 # Publish event for EventSubscriberExtension plugins
@@ -146,7 +161,7 @@ class PluginController(QObject):
         try:
             # Integrate Menu Extension (has get_menu_items method)
             if hasattr(plugin_class, 'get_menu_items'):
-                if self.settings_service.is_extension_enabled(plugin_name, "Menu"):
+                if self._is_extension_enabled(plugin_name, "Menu"):
                     self._integrate_menu_extension(plugin_name, plugin_class)
                     logger.info(f"Dynamically integrated menu extension for '{plugin_name}'")
                 else:
@@ -154,7 +169,7 @@ class PluginController(QObject):
             
             # Integrate Status Extension (has create_status_widget method)
             if hasattr(plugin_class, 'create_status_widget'):
-                if self.settings_service.is_extension_enabled(plugin_name, "Status"):
+                if self._is_extension_enabled(plugin_name, "Status"):
                     self._integrate_status_extension(plugin_name, plugin_class)
                     logger.info(f"Dynamically integrated status extension for '{plugin_name}'")
                 else:
@@ -162,7 +177,7 @@ class PluginController(QObject):
             
             # Integrate Toolbar Extension (has get_toolbar_actions method)
             if hasattr(plugin_class, 'get_toolbar_actions'):
-                if self.settings_service.is_extension_enabled(plugin_name, "Toolbar"):
+                if self._is_extension_enabled(plugin_name, "Toolbar"):
                     self._integrate_toolbar_extension(plugin_name, plugin_class)
                     logger.info(f"Dynamically integrated toolbar extension for '{plugin_name}'")
                 else:
@@ -170,7 +185,7 @@ class PluginController(QObject):
             
             # Start Service Extension (has on_application_start method)
             if hasattr(plugin_class, 'on_application_start'):
-                if self.settings_service.is_extension_enabled(plugin_name, "Service"):
+                if self._is_extension_enabled(plugin_name, "Service"):
                     # Get instance
                     instance = self.registry.get_plugin_instance(plugin_name)
                     instance.on_application_start(self.container)
@@ -195,6 +210,17 @@ class PluginController(QObject):
                     try:
                         if target_menu and _qt_is_valid(target_menu):
                             target_menu.removeAction(action)
+                            # If the menu is now empty, remove it from the menu bar (if it's a top-level menu on the menu bar)
+                            if len(target_menu.actions()) == 0 and self._main_window:
+                                menu_bar = self._main_window.menuBar()
+                                for act in menu_bar.actions():
+                                    try:
+                                        if act.menu() == target_menu:
+                                            menu_bar.removeAction(act)
+                                            logger.debug(f"Removed now-empty menu '{target_menu.title()}'")
+                                            break
+                                    except Exception:
+                                        continue
                     except Exception as e:
                         logger.debug(f"Error removing menu action: {e}")
                 del self._plugin_menu_actions[plugin_name]
@@ -208,15 +234,19 @@ class PluginController(QObject):
                         if not _qt_is_valid(menu):
                             continue
                         # Find and remove the menu's action from the menu bar
-                        for action in menu_bar.actions():
-                            try:
-                                action_menu = action.menu()
-                            except Exception:
-                                continue
-                            if action_menu == menu:
-                                menu_bar.removeAction(action)
-                                logger.debug(f"Removed created menu '{menu.title()}' for '{plugin_name}'")
-                                break
+                        # Only remove it if it is now empty (no other plugin has actions in it)
+                        if len(menu.actions()) == 0:
+                            for action in menu_bar.actions():
+                                try:
+                                    action_menu = action.menu()
+                                except Exception:
+                                    continue
+                                if action_menu == menu:
+                                    menu_bar.removeAction(action)
+                                    logger.debug(f"Removed created menu '{menu.title()}' for '{plugin_name}'")
+                                    break
+                        else:
+                            logger.debug(f"Keeping created menu '{menu.title()}' as it still has actions from other plugins")
                     except Exception as e:
                         logger.debug(f"Error removing created menu: {e}")
                 del self._plugin_created_menus[plugin_name]
@@ -309,7 +339,7 @@ class PluginController(QObject):
         # Handle Dynamic Tab Extension Toggle
         # We need to manually handle this because tabs are normally managed by MainWindow via plugin_toggled
         if hasattr(plugin_class, 'create_widget') and self._main_window and hasattr(self._main_window, 'tab_controller'):
-            should_have_tab = self.settings_service.is_extension_enabled(plugin_name, "Tab")
+            should_have_tab = self._is_extension_enabled(plugin_name, "Tab")
             # Check if tab is currently loaded
             tab_exists = plugin_name in self._main_window.tab_controller.loaded_tabs
             
@@ -371,6 +401,15 @@ class PluginController(QObject):
             return None
         
         return plugin_class.get_plugin_info()
+    
+    def _is_extension_enabled(self, plugin_name: str, extension_type: str) -> bool:
+        """Check if a specific extension type is enabled for a plugin.
+        
+        Defaults to True if settings service is not available.
+        """
+        if not self.settings_service:
+            return True
+        return self.settings_service.is_extension_enabled(plugin_name, extension_type)
     
     def _save_plugin_states(self) -> None:
         """Save plugin states to settings.
@@ -533,7 +572,7 @@ class PluginController(QObject):
             menu_plugins = self.registry.get_menu_extensions(enabled_only=True)
             for name, plugin_class in menu_plugins.items():
                 try:
-                    if self.settings_service.is_extension_enabled(name, "Menu"):
+                    if self._is_extension_enabled(name, "Menu"):
                         self._integrate_menu_extension(name, plugin_class)
                     else:
                         logger.debug(f"Menu extension disabled for '{name}'")
@@ -544,7 +583,7 @@ class PluginController(QObject):
             status_plugins = self.registry.get_status_extensions(enabled_only=True)
             for name, plugin_class in status_plugins.items():
                 try:
-                    if self.settings_service.is_extension_enabled(name, "Status"):
+                    if self._is_extension_enabled(name, "Status"):
                         self._integrate_status_extension(name, plugin_class)
                     else:
                         logger.debug(f"Status extension disabled for '{name}'")
@@ -555,7 +594,7 @@ class PluginController(QObject):
             toolbar_plugins = self.registry.get_toolbar_extensions(enabled_only=True)
             for name, plugin_class in toolbar_plugins.items():
                 try:
-                    if self.settings_service.is_extension_enabled(name, "Toolbar"):
+                    if self._is_extension_enabled(name, "Toolbar"):
                         self._integrate_toolbar_extension(name, plugin_class)
                     else:
                         logger.debug(f"Toolbar extension disabled for '{name}'")
@@ -614,6 +653,8 @@ class PluginController(QObject):
             action.triggered.connect(item.callback)
             if item.shortcut:
                 action.setShortcut(item.shortcut)
+            if item.icon:
+                action.setIcon(QIcon(item.icon))
             action.setEnabled(item.enabled)
             target_menu.addAction(action)
             
@@ -679,6 +720,8 @@ class PluginController(QObject):
         for action_def in actions:
             action = QAction(action_def.label, self._main_window)
             action.triggered.connect(action_def.callback)
+            if action_def.icon:
+                action.setIcon(QIcon(action_def.icon))
             if action_def.tooltip:
                 action.setToolTip(action_def.tooltip)
             if action_def.checkable:
@@ -703,7 +746,7 @@ class PluginController(QObject):
             service_plugins = self.registry.get_service_extensions(enabled_only=True)
             for name, plugin_class in service_plugins.items():
                 try:
-                    if self.settings_service.is_extension_enabled(name, "Service"):
+                    if self._is_extension_enabled(name, "Service"):
                         # Get plugin instance and start service
                         instance = self.registry.get_plugin_instance(name)
                         logger.info(f"Starting service extension: {name}")

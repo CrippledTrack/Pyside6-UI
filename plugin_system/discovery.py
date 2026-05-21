@@ -217,7 +217,12 @@ class PluginDiscovery:
             return plugins
         
         module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        sys.modules[module_name] = module
+        try:
+            spec.loader.exec_module(module)
+        except Exception:
+            sys.modules.pop(module_name, None)
+            raise
         
         plugin_classes = self._find_plugin_classes_in_module(module)
         for plugin_class in plugin_classes:
@@ -343,7 +348,7 @@ class PluginDiscovery:
                         plugin_name = getattr(plugin_class, 'tab_name', "Unknown Plugin")
                     discovered.append((plugin_name, plugin_class, f"package:{source.package}"))
 
-        self.discovered_plugins = discovered
+        self.discovered_plugins.extend(discovered)
         return discovered.copy()
 
     def get_plugin_info_summary(self) -> Dict[str, any]:
