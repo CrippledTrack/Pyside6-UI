@@ -32,6 +32,9 @@ def get_theme() -> Dict[str, Any]:
             button_hover="#f0f0f0",
             button_pressed="#e0e0e0",
             is_dark=False,
+            flat_containers=True,       # Drops modern card rendering wrappers
+            winforms_label_quirk=True,  # Applies bordered style onto scoped field labels
+            tab_selected_indicator="#adadad",  # Gray top-border on selected tab (classic Windows)
         ) + """
             /* ===========================================
                Legacy Overrides - Classic/Simple Styling
@@ -136,21 +139,6 @@ def get_theme() -> Dict[str, Any]:
                 background-color: transparent; /* or #f3f3f3 to mask border */
                 color: #000000;
                 font-weight: bold;
-            }
-
-            /* Labels */
-            QLabel {
-                color: #000000;
-                border: 1px solid #d9d9d9;
-                padding: 4px 8px;
-                background-color: #ffffff;
-                border-radius: 2px;
-            }
-            /* Unframed labels (titles etc) */
-            QGroupBox > QLabel, QSplitter > QLabel {
-                border: none;
-                background-color: transparent;
-                padding: 0;
             }
             
             /* Basic scrollbars - Classic Square */
@@ -301,13 +289,7 @@ def get_theme() -> Dict[str, Any]:
                 background-color: #cce8ff;
                 border: 1px solid #99d1ff;
             }
-            
-            /* No card styling - keep frames simple */
-            QFrame#card, QFrame[card="true"], QFrame#cardElevated {
-                border: none;
-                background-color: transparent;
-            }
-            
+
             /* Classic header styling */
             QHeaderView::section {
                 text-transform: none;
@@ -317,7 +299,24 @@ def get_theme() -> Dict[str, Any]:
                 border: 1px solid #d0d0d0;
             }
         """,
-        "legacy_stylesheet": _CLASSIC_STYLESHEET,
+        # Classic mode structural tokens (v5.1.0)
+        "classic_border_radius": "4px",
+        "classic_scrollbar_size": "12px",
+        "classic_tab_font_weight": "bold",
+        # Classic tab selection — white active tab blending with pane (R3)
+        "classic_tab_selected_bg": "#ffffff",
+        "classic_tab_selected_text": "#000000",
+        # Classic tab hover — subtle gray (G8)
+        "classic_tab_hover_bg": "#e8e8e8",
+        # Enable WinForms label quirk in classic mode (R4)
+        "winforms_label_quirk": True,
+        # Classic button overrides — white Windows-style buttons (R5)
+        "classic_button_bg": "#ffffff",
+        "classic_button_text": "#000000",
+        "classic_button_hover": "#f8f8f8",
+        "classic_button_pressed": "#e0e0e0",
+        "classic_button_border": "1px solid #d0d0d0",
+        "classic_button_border_radius": "3px",
         "palette": {
             "window": "#f3f3f3",
             "window_text": "#000000",
@@ -336,68 +335,3 @@ def get_theme() -> Dict[str, Any]:
     }
 
 
-# =============================================================================
-# Classic Stylesheet Overrides
-# =============================================================================
-
-_CLASSIC_STYLESHEET = """
-/* Legacy theme overrides - Windows classic styling, 3px radius, 12px scrollbar */
-QTabWidget::pane {
-    border-radius: 4px;
-}
-QTabBar::tab {
-    background-color: #f0f0f0;
-    border-top-left-radius: 4px;
-    border-top-right-radius: 4px;
-    font-weight: normal;
-}
-QTabBar::tab:selected {
-    background-color: #ffffff;
-    border-bottom-color: #ffffff;
-    font-weight: bold;
-}
-QTabBar::tab:hover {
-    background-color: #e8e8e8;
-}
-/* Bordered labels - WinForms/PowerShell style quirk */
-QLabel {
-    color: #000000;
-    border: 1px solid #d9d9d9;
-    padding: 4px 8px;
-    background-color: #ffffff;
-    border-radius: 2px;
-}
-/* Unframed labels inside groups/splitters */
-QGroupBox > QLabel, QSplitter > QLabel {
-    border: none;
-    background-color: transparent;
-    padding: 0;
-}
-QPushButton {
-    background-color: #ffffff;
-    color: #000000;
-    border: 1px solid #d0d0d0;
-    border-radius: 3px;
-    padding: 6px 12px;
-}
-QPushButton:hover {
-    background-color: #f8f8f8;
-    border-color: #a0a0a0;
-}
-QPushButton:pressed {
-    background-color: #e0e0e0;
-    border-color: #808080;
-}
-QLineEdit, QTextEdit, QComboBox {
-    border-radius: 3px;
-}
-QScrollBar:vertical {
-    width: 12px;
-}
-QScrollBar:horizontal {
-    height: 12px;
-}
-QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
-    border-radius: 6px;
-}
-"""

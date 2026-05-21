@@ -52,10 +52,11 @@ logger = logging.getLogger(__name__)
 class ThemePreviewWidget(QFrame):
     """Widget for previewing themes"""
     
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: Optional[QWidget] = None, theme_manager=None) -> None:
         super().__init__(parent)
         self.setMinimumSize(300, 200)
         self.setFrameStyle(QFrame.Shape.Box)
+        self._theme_manager = theme_manager
         self.setup_ui()
     
     def setup_ui(self) -> None:
@@ -94,12 +95,15 @@ class ThemePreviewWidget(QFrame):
             # Create a copy of theme data to avoid modifying the original
             preview_data = theme_data.copy()
             
-            # Apply stylesheet if available
-            stylesheet = preview_data.get('stylesheet', '')
+            # Use classic stylesheet when the app is in legacy/classic UI mode,
+            # matching what ThemeManager.apply_theme() does for the full application.
+            if self._theme_manager is not None and self._theme_manager.is_legacy_ui():
+                from ....themes.classic_theme_manager import get_classic_stylesheet
+                stylesheet = get_classic_stylesheet(preview_data)
+            else:
+                stylesheet = preview_data.get('stylesheet', '')
+
             if stylesheet:
-                # Scope stylesheet to the preview widget to prevent leaking
-                # Note: This is a simple scoping that prepends the widget ID or class
-                # For complex stylesheets, a proper parser would be needed
                 self.setStyleSheet(stylesheet)
             
             # Apply palette if available
@@ -209,7 +213,7 @@ class ThemeDialog(QDialog):
         preview_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
         right_layout.addWidget(preview_label)
         
-        self.preview_widget = ThemePreviewWidget()
+        self.preview_widget = ThemePreviewWidget(theme_manager=self.theme_manager)
         right_layout.addWidget(self.preview_widget)
         
         splitter.addWidget(right_widget)

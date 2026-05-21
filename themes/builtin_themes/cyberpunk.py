@@ -26,33 +26,25 @@ def get_theme() -> Dict[str, Any]:
             button_text="#ffffff",
             is_dark=True,
             border_radius=BORDER_RADIUS_SHARP,  # Sharp edges for cyberpunk aesthetic
-        ) + """
-            /* Cyberpunk-specific overrides for sharp edges and neon glow */
-            QTabWidget::pane {
-                border-width: 2px;
-            }
-            QTabBar::tab {
-                border-width: 2px;
-            }
-            QTabBar::tab:selected {
-                background-color: #00ff41;
-                color: #0a0a0a;
-            }
-            QTabBar::tab:hover:!selected {
-                background-color: #00cc33;
-                color: #0a0a0a;
-            }
-            QLineEdit, QTextEdit, QPlainTextEdit, QComboBox {
-                border-width: 2px;
-            }
-            QLineEdit:focus, QTextEdit:focus, QComboBox:focus {
-                border-color: #ff006e;
-            }
-            QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
-                border-radius: 0px;
-            }
-        """,
-        "legacy_stylesheet": _CLASSIC_STYLESHEET,
+            border_width="2px",                 # 2px borders everywhere via structural token
+            # Inverted tab colours: green-on-black selected, dark text on hover
+            tab_selected_bg="#00ff41",
+            tab_selected_text="#0a0a0a",
+            tab_hover_bg="#00cc33",
+            tab_hover_text="#0a0a0a",
+            scrollbar_handle_radius="0px",      # Sharp square scrollbar handles
+        ),
+        # Classic mode structural tokens (v5.1.0)
+        "classic_border_width": "2px",
+        "classic_border_radius": "0px",
+        "classic_tab_selected_bg": "#00ff41",    # Inverted: green bg on selected tab
+        "classic_tab_selected_text": "#0a0a0a",  # Inverted: dark text on green tab
+        "classic_tab_hover_bg": "#00cc33",        # Inverted: darker green on hover
+        "classic_tab_hover_text": "#0a0a0a",      # Dark text on hover
+        "classic_scrollbar_handle_radius": "0px", # Square handles
+        "classic_input_border_color": "#00ff41",  # Neon green input border
+        "classic_button_border": "2px solid #ff006e",  # Pink neon button border
+        "classic_button_border_radius": "0px",    # Sharp button corners
         "palette": {
             "window": "#0a0a0a",
             "window_text": "#00ff41",
@@ -69,40 +61,3 @@ def get_theme() -> Dict[str, Any]:
             "highlighted_text": "#ffffff"
         }
     }
-
-
-# =============================================================================
-# Classic Stylesheet Overrides
-# =============================================================================
-
-_CLASSIC_STYLESHEET = """
-/* Cyberpunk overrides - sharp corners, 2px borders, inverted selected tab */
-QTabWidget::pane {
-    border: 2px solid #00ff41;
-    border-radius: 0px;
-}
-QTabBar::tab {
-    border: 2px solid #00ff41;
-    border-top-left-radius: 0px;
-    border-top-right-radius: 0px;
-}
-QTabBar::tab:selected {
-    background-color: #00ff41;
-    color: #0a0a0a;
-}
-QTabBar::tab:hover {
-    background-color: #00cc33;
-    color: #0a0a0a;
-}
-QPushButton {
-    border: 2px solid #ff006e;
-    border-radius: 0px;
-}
-QLineEdit, QTextEdit, QComboBox {
-    border: 2px solid #00ff41;
-    border-radius: 0px;
-}
-QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
-    border-radius: 0px;
-}
-"""

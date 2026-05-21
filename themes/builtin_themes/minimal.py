@@ -60,7 +60,17 @@ def get_theme() -> Dict[str, Any]:
                 font-weight: bold;
             }
         """,
-        "legacy_stylesheet": _CLASSIC_STYLESHEET,
+        # Classic mode structural tokens (v5.1.0)
+        "classic_border_radius": "2px",
+        "classic_scrollbar_size": "8px",
+        "classic_scrollbar_handle_radius": "4px",
+        # Classic button overrides — light gray minimal-style buttons
+        "classic_button_bg": "#f8f9fa",
+        "classic_button_text": "#333333",
+        "classic_button_hover": "#e9ecef",
+        "classic_button_pressed": "#dee2e6",
+        "classic_button_border": "1px solid #dee2e6",
+        "classic_button_border_radius": "2px",
         "palette": {
             "window": "#ffffff",
             "window_text": "#333333",
@@ -77,46 +87,4 @@ def get_theme() -> Dict[str, Any]:
             "highlighted_text": "#ffffff"
         }
     }
-
-
-# =============================================================================
-# Classic Stylesheet Overrides
-# =============================================================================
-
-_CLASSIC_STYLESHEET = """
-/* Minimal overrides - 2px radius, 8px scrollbar, bordered buttons */
-QTabWidget::pane {
-    border-radius: 2px;
-}
-QTabBar::tab {
-    margin-right: 1px;
-    border-top-left-radius: 2px;
-    border-top-right-radius: 2px;
-}
-QPushButton {
-    background-color: #f8f9fa;
-    color: #333333;
-    border: 1px solid #dee2e6;
-    border-radius: 2px;
-}
-QPushButton:hover {
-    background-color: #e9ecef;
-    border-color: #adb5bd;
-}
-QPushButton:pressed {
-    background-color: #dee2e6;
-}
-QLineEdit, QTextEdit, QComboBox {
-    border-radius: 2px;
-}
-QScrollBar:vertical {
-    width: 8px;
-}
-QScrollBar:horizontal {
-    height: 8px;
-}
-QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
-    border-radius: 4px;
-}
-"""
 
