@@ -7,6 +7,7 @@ import pwd
 import grp
 import logging
 import time
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -19,6 +20,38 @@ DAEMON_QUICK_TIMEOUT = 1      # Quick daemon status check
 
 # Global daemon process reference
 _daemon_process: Optional[subprocess.Popen] = None
+
+
+def _drain_stderr(process: subprocess.Popen):
+    """Continuously reads and logs/discards stderr of the given process to prevent deadlock."""
+    logger.info(f"Starting stderr draining thread for PID {process.pid}")
+    try:
+        while True:
+            line = process.stderr.readline()
+            if not line:
+                break
+            try:
+                line_str = line.decode('utf-8', errors='ignore').strip()
+                if line_str:
+                    line_upper = line_str.upper()
+                    if " - ERROR - " in line_upper or " - CRITICAL - " in line_upper or "TRACEBACK" in line_upper or "EXCEPTION" in line_upper:
+                        logger.error(f"[Daemon-Stderr] {line_str}")
+                    elif " - WARNING - " in line_upper:
+                        logger.warning(f"[Daemon-Stderr] {line_str}")
+                    elif " - DEBUG - " in line_upper:
+                        logger.debug(f"[Daemon-Stderr] {line_str}")
+                    elif " - INFO - " in line_upper:
+                        logger.info(f"[Daemon-Stderr] {line_str}")
+                    else:
+                        # Fallback for general printed statements
+                        if any(err in line_upper for err in ["ERROR", "FAILED", "CRITICAL", "EXCEPTION"]):
+                            logger.error(f"[Daemon-Stderr] {line_str}")
+                        else:
+                            logger.info(f"[Daemon-Stderr] {line_str}")
+            except Exception:
+                pass
+    except Exception as e:
+        logger.debug(f"Error draining stderr: {e}")
 
 
 def is_admin():
@@ -365,7 +398,17 @@ def run_as_admin() -> bool:
 
 
 def is_daemon_running(socket_path: Optional[str] = None) -> bool:
-    """Check if daemon is running by checking socket existence."""
+    """Check if daemon is running.
+    
+    If USE_PIPE_DAEMON is enabled, checks if the daemon process is active.
+    Otherwise, checks if the socket exists and responds (Legacy Socket Mode, to be removed after 5.x).
+    """
+    from .imports import get_platforms_constants
+    use_pipe_daemon = getattr(get_platforms_constants(), 'USE_PIPE_DAEMON', False)
+    if use_pipe_daemon:
+        global _daemon_process
+        return _daemon_process is not None and _daemon_process.poll() is None
+
     if socket_path is None:
         from ..daemon.protocol import get_socket_path
         # Get UID from environment to determine correct socket path
@@ -396,14 +439,16 @@ def is_daemon_running(socket_path: Optional[str] = None) -> bool:
 
 
 def start_daemon(socket_path: Optional[str] = None) -> Optional[object]:
-    """Start the privileged daemon process.
+    """Start the privileged daemon process (Socket or Pipe mode).
     
     Returns:
         DaemonClient instance if successful, None otherwise
     """
     global _daemon_process
+    from .imports import get_platforms_constants
+    use_pipe_daemon = getattr(get_platforms_constants(), 'USE_PIPE_DAEMON', False)
     
-    if socket_path is None:
+    if socket_path is None and not use_pipe_daemon:
         from ..daemon.protocol import get_socket_path
         # Get UID from environment to determine correct socket path
         # When running normally (not via sudo/pkexec), get current user's UID directly
@@ -423,17 +468,20 @@ def start_daemon(socket_path: Optional[str] = None) -> Optional[object]:
     if is_daemon_running(socket_path):
         logger.info("Daemon already running")
         from ..daemon.client import DaemonClient
-        client = DaemonClient(socket_path)
-        if client.connect():
-            return client
-        logger.warning("Socket exists but connection failed, cleaning up...")
+        if use_pipe_daemon:
+            return DaemonClient(process=_daemon_process)
+        else:
+            client = DaemonClient(socket_path)
+            if client.connect():
+                return client
+            logger.warning("Socket exists but connection failed, cleaning up...")
     
     # Get path to current executable
     # Find the main script path
     if hasattr(sys, 'frozen') and sys.frozen:
         # PyInstaller bundle - executable is the script
         exe_path = sys.executable
-        daemon_cmd = [exe_path, '--daemon']
+        daemon_cmd = [exe_path, '--pipe' if use_pipe_daemon else '--daemon']
     else:
         # Development mode - need to run python with the script
         exe_path = sys.executable  # python executable
@@ -487,7 +535,10 @@ def start_daemon(socket_path: Optional[str] = None) -> Optional[object]:
             return None
         
         logger.info(f"Daemon script path: {script_path}")
-        daemon_cmd = [exe_path, str(script_path), '--daemon']
+        daemon_cmd = [exe_path, str(script_path), '--pipe' if use_pipe_daemon else '--daemon']
+    
+    # Pass parent process PID to daemon to monitor orphan status
+    daemon_cmd.extend(['--parent-pid', str(os.getpid())])
     
     # Get UID/GID before starting daemon (needed for socket path and permissions)
     # When running normally (not via sudo/pkexec), we need to get current user's UID
@@ -524,163 +575,172 @@ def start_daemon(socket_path: Optional[str] = None) -> Optional[object]:
         daemon_env['PKEXEC_GID'] = str(original_gid)
         daemon_env['SUDO_GID'] = str(original_gid)
     
+    process = None
     # Try pkexec first, then sudo
     if check_pkexec_available():
         logger.info("Starting daemon with pkexec...")
         try:
-            # Capture stderr to see daemon startup errors
-            # stdout can stay uncaptured for pkexec GUI prompt if needed
-            # Pass environment variables so daemon can determine socket path
+            # Capture stderr to see daemon startup errors and prevent deadlocks
             process = subprocess.Popen(
                 ['pkexec'] + daemon_cmd,
                 env=daemon_env,
+                stdin=subprocess.PIPE if use_pipe_daemon else None,
+                stdout=subprocess.PIPE if use_pipe_daemon else None,
                 stderr=subprocess.PIPE,
                 start_new_session=True  # Detach from parent
             )
             _daemon_process = process
-            logger.info(f"Daemon process started with PID {process.pid}")
+            logger.info(f"Daemon process started via pkexec with PID {process.pid}")
             
-            # Monitor daemon stderr in background to catch errors
-            import threading
-            def check_daemon_stderr_periodically():
-                """Periodically check daemon stderr for errors."""
-                if not process.stderr:
-                    return
-                try:
-                    # Wait a bit, then check if process exited
-                    time.sleep(2)
-                    if process.poll() is not None:
-                        # Process exited, read stderr
-                        try:
-                            stderr_data = process.stderr.read().decode('utf-8', errors='ignore')
-                            if stderr_data:
-                                logger.error(f"Daemon exited with stderr: {stderr_data}")
-                        except Exception:
-                            pass
-                except Exception as e:
-                    logger.debug(f"Error checking daemon stderr: {e}")
-            
-            threading.Thread(target=check_daemon_stderr_periodically, daemon=True).start()
+            # Start stderr draining thread
+            threading.Thread(target=_drain_stderr, name="DaemonStderrDrainer", args=(process,), daemon=True).start()
             
         except Exception as e:
             logger.error(f"Failed to start daemon with pkexec: {e}")
-            return None
+            process = None
     
-    elif check_sudo_available():
+    if process is None and check_sudo_available():
         logger.info("Starting daemon with sudo...")
         try:
-            # Don't capture stdout/stderr so password prompt can display
-            # Pass environment variables so daemon can determine socket path
-            # Use -E flag to preserve environment, or explicitly pass env
+            # Capture stderr in all modes to prevent buffer deadlocks
             process = subprocess.Popen(
                 ['sudo', '-E'] + daemon_cmd,
                 env=daemon_env,
+                stdin=subprocess.PIPE if use_pipe_daemon else None,
+                stdout=subprocess.PIPE if use_pipe_daemon else None,
+                stderr=subprocess.PIPE,
                 start_new_session=True  # Detach from parent
             )
             _daemon_process = process
+            logger.info(f"Daemon process started via sudo with PID {process.pid}")
+            
+            # Start stderr draining thread
+            threading.Thread(target=_drain_stderr, name="DaemonStderrDrainer", args=(process,), daemon=True).start()
+            
         except Exception as e:
             logger.error(f"Failed to start daemon with sudo: {e}")
             return None
-    
-    else:
+            
+    if process is None:
         logger.error("Neither pkexec nor sudo available")
         return None
     
-    # Wait for daemon to start (socket to appear)
-    # Use longer timeout for interactive prompts (pkexec/sudo) - users may take time to enter password
-    # For interactive elevation, allow up to 5 minutes (600 iterations * 0.5s)
-    # For non-interactive, use shorter timeout
-    using_interactive = check_pkexec_available() or check_sudo_available()
-    max_wait = 600 if using_interactive else 20  # 5 minutes for interactive, 10 seconds for non-interactive
-    check_interval = 0.5
-    
-    logger.info(f"Waiting for daemon to start... (checking socket at: {socket_path})")
-    logger.info(f"Daemon process PID: {_daemon_process.pid if _daemon_process else None}")
-    
-    for i in range(max_wait):
-        time.sleep(check_interval)
+    # Verify/wait for connection based on active mode
+    if use_pipe_daemon:
+        logger.info("Verifying pipe daemon connection via ping...")
+        from ..daemon.client import DaemonClient
+        client = DaemonClient(process=process)
         
-        # Periodically check if process is still running (every 2 seconds)
-        if i > 0 and i % 4 == 0:
-            if _daemon_process:
-                is_running = _daemon_process.poll() is None
-                logger.debug(f"Daemon process status: {'running' if is_running else 'exited'}")
-        
-        # Check if process is still alive
-        if _daemon_process and _daemon_process.poll() is not None:
-            # Process exited, check return code and read stderr
-            returncode = _daemon_process.returncode
-            logger.error(f"Daemon process exited with return code {returncode}")
+        # Poll for up to 60 seconds (120 * 0.5s) to accommodate password prompting
+        for i in range(120):
+            if process.poll() is not None:
+                logger.error(f"Pipe daemon process exited with return code {process.returncode}")
+                _daemon_process = None
+                return None
+            try:
+                response = client.request('ping', {}, timeout=1.0)
+                if response.get('success') and response.get('result') == 'pong':
+                    logger.info("Successfully connected to pipe daemon via ping")
+                    return client
+            except Exception as e:
+                logger.debug(f"Ping attempt {i} failed: {e}")
+            time.sleep(0.5)
             
-            # Try to read stderr for error messages
-            if _daemon_process.stderr:
-                try:
-                    stderr_data = _daemon_process.stderr.read().decode('utf-8', errors='ignore')
-                    if stderr_data:
-                        logger.error(f"Daemon stderr output: {stderr_data}")
-                except Exception:
-                    pass
-            
-            _daemon_process = None
-            return None
-        
-        # Check if socket appeared (daemon started)
-        if is_daemon_running(socket_path):
-            logger.info(f"Daemon started successfully, socket found at: {socket_path}")
-            from ..daemon.client import DaemonClient
-            client = DaemonClient(socket_path)
-            if client.connect():
-                logger.info("Successfully connected to daemon")
-                return client
-            else:
-                logger.warning("Socket exists but connection failed, continuing to wait...")
-        
-        # Log progress every 10 seconds
-        if i > 0 and i % 20 == 0:
-            elapsed = i * check_interval
-            logger.debug(f"Still waiting for daemon... ({elapsed:.1f}s elapsed, process running: {_daemon_process.poll() is None if _daemon_process else False})")
-        
-        # Process still running but socket not ready yet - continue waiting
-        # (user might be entering password in pkexec/sudo prompt)
-    
-    # Timeout reached - check final status
-    if _daemon_process and _daemon_process.poll() is None:
-        # Process is still running (likely waiting for password or starting up)
-        logger.warning(f"Daemon process still running (PID {_daemon_process.pid}) but socket not accessible after {max_wait * check_interval:.1f} seconds")
-        logger.warning("If you see a password prompt, please enter your password. The daemon will start once authenticated.")
-        # Don't kill the process - let it continue, user might still be entering password
-        # The process will continue in background and socket may appear later
-        return None
-    else:
-        logger.error("Daemon failed to start within timeout")
-        if _daemon_process:
-            returncode = _daemon_process.poll()
-            if returncode is not None:
-                logger.error(f"Daemon process exited with return code {returncode}")
-    
-    # Only cleanup if process has exited
-    if _daemon_process and _daemon_process.poll() is not None:
+        logger.error("Pipe daemon failed to respond to ping within timeout")
         try:
-            _daemon_process.terminate()
-            _daemon_process.wait(timeout=DAEMON_SHUTDOWN_TIMEOUT)
+            process.terminate()
+            process.wait(timeout=2.0)
         except Exception:
             try:
-                _daemon_process.kill()
+                process.kill()
             except Exception:
                 pass
         _daemon_process = None
-    return None
+        return None
+    
+    else:
+        # Legacy Socket Mode wait (To be removed after 5.x)
+        using_interactive = check_pkexec_available() or check_sudo_available()
+        max_wait = 600 if using_interactive else 20  # 5 minutes for interactive, 10 seconds for non-interactive
+        check_interval = 0.5
+        
+        logger.info(f"Waiting for daemon to start... (checking socket at: {socket_path})")
+        
+        for i in range(max_wait):
+            time.sleep(check_interval)
+            
+            # Periodically check if process is still running
+            if i > 0 and i % 4 == 0:
+                is_running = process.poll() is None
+                logger.debug(f"Daemon process status: {'running' if is_running else 'exited'}")
+            
+            # Check if process is still alive
+            if process.poll() is not None:
+                returncode = process.returncode
+                logger.error(f"Daemon process exited with return code {returncode}")
+                _daemon_process = None
+                return None
+            
+            # Check if socket appeared (daemon started)
+            if is_daemon_running(socket_path):
+                logger.info(f"Daemon started successfully, socket found at: {socket_path}")
+                from ..daemon.client import DaemonClient
+                client = DaemonClient(socket_path)
+                if client.connect():
+                    logger.info("Successfully connected to daemon")
+                    return client
+                else:
+                    logger.warning("Socket exists but connection failed, continuing to wait...")
+            
+            # Log progress every 10 seconds
+            if i > 0 and i % 20 == 0:
+                elapsed = i * check_interval
+                logger.debug(f"Still waiting for daemon... ({elapsed:.1f}s elapsed, process running: {process.poll() is None})")
+        
+        # Timeout reached
+        logger.warning(f"Daemon process still running (PID {process.pid}) but socket not accessible after timeout")
+        return None
 
 
 def stop_daemon(socket_path: Optional[str] = None):
-    """Stop the daemon by sending shutdown request."""
+    """Stop the daemon process gracefully."""
+    from .imports import get_platforms_constants
+    use_pipe_daemon = getattr(get_platforms_constants(), 'USE_PIPE_DAEMON', False)
+    global _daemon_process
+    
+    if use_pipe_daemon:
+        if not _daemon_process or _daemon_process.poll() is not None:
+            logger.info("Pipe daemon not running")
+            _daemon_process = None
+            return
+        
+        try:
+            from ..daemon.client import DaemonClient
+            client = DaemonClient(process=_daemon_process)
+            logger.info("Sending shutdown request to pipe daemon...")
+            client.request('shutdown', {}, timeout=2.0)
+            client.disconnect()
+        except Exception as e:
+            if "Connection closed by daemon" in str(e) or "pipe EOF" in str(e):
+                logger.info(f"Pipe daemon already stopped or shutting down (connection closed: {e})")
+            else:
+                logger.error(f"Error requesting pipe daemon shutdown: {e}")
+            if _daemon_process:
+                try:
+                    _daemon_process.terminate()
+                    _daemon_process.wait(timeout=DAEMON_SHUTDOWN_TIMEOUT)
+                except Exception:
+                    try:
+                        _daemon_process.kill()
+                    except Exception:
+                        pass
+        _daemon_process = None
+        return
+        
     if socket_path is None:
         from ..daemon.protocol import get_socket_path
-        # Get UID from environment to determine correct socket path
-        # When running normally (not via sudo/pkexec), get current user's UID directly
         uid_str = os.environ.get('SUDO_UID') or os.environ.get('PKEXEC_UID')
         if not uid_str:
-            # Not running via sudo/pkexec, get current user's UID directly
             try:
                 uid = os.getuid()
             except (AttributeError, OSError):
@@ -688,6 +748,7 @@ def stop_daemon(socket_path: Optional[str] = None):
         else:
             uid = int(uid_str) if uid_str else None
         socket_path = get_socket_path(uid)
+        
     if not is_daemon_running(socket_path):
         logger.info("Daemon not running")
         return
@@ -705,7 +766,6 @@ def stop_daemon(socket_path: Optional[str] = None):
         time.sleep(0.5)
         
         # Clean up process reference
-        global _daemon_process
         if _daemon_process:
             try:
                 _daemon_process.wait(timeout=DAEMON_QUICK_TIMEOUT)

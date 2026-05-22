@@ -133,12 +133,11 @@ def write_privileged_file(file_path: str, content: str) -> bool:
         except Exception:
             pass
 
-        # Write to temp file in the target directory for atomic replace
+        # Write to temp file in default temp dir (e.g. /tmp) to avoid PermissionError
         with tempfile.NamedTemporaryFile(
             mode="w",
             delete=False,
-            encoding="utf-8",
-            dir=target_dir
+            encoding="utf-8"
         ) as tmp:
             tmp.write(content)
             tmp_path = tmp.name
@@ -149,16 +148,24 @@ def write_privileged_file(file_path: str, content: str) -> bool:
             if result.returncode != 0:
                 raise IOError(f"Failed to write {file_path}: {result.stderr}")
 
-            # Restore permissions and ownership if we had them
+            # Restore permissions and ownership if we had them, otherwise default to root:root for new files
             run_privileged_command(["chmod", mode, file_path], timeout=10)
             if owner is not None and group is not None:
                 run_privileged_command(["chown", f"{owner}:{group}", file_path], timeout=10)
+            else:
+                try:
+                    run_privileged_command(["chown", "root:root", file_path], timeout=10)
+                except Exception:
+                    pass
 
             return True
         finally:
             # Clean up temp file if still present
             if os.path.exists(tmp_path):
-                os.remove(tmp_path)
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
                 
     except Exception as e:
         logger.error(f"Error writing privileged file {file_path}: {e}")

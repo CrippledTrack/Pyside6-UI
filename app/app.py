@@ -17,8 +17,8 @@ from .utils.admin import set_dev_mode
 
 def run(argv: List[str]) -> int:
     """Application bootstrap. Mirrors previous behavior from main.py without changes."""
-    # Check for daemon mode before GUI initialization
-    if '--daemon' in argv and platform.system().lower() == 'linux':
+    # Check for daemon or pipe mode before GUI initialization
+    if ('--daemon' in argv or '--pipe' in argv) and platform.system().lower() == 'linux':
         from .daemon.server import run_daemon
         return run_daemon(argv)
     

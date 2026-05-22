@@ -18,10 +18,26 @@ class DaemonLifecycleService:
         if platform.system().lower() != "linux":
             return None
 
-        from ..constants import REQUIRE_ADMIN_BY_DEFAULT
+        # Check if running directly as root
+        import os
+        try:
+            is_root = os.getuid() == 0 or os.geteuid() == 0
+        except (AttributeError, OSError):
+            is_root = False
+
+        if is_root:
+            logger.info("Application is running directly as root. Initializing LocalDaemonClient.")
+            from ..daemon.client import LocalDaemonClient
+            from ..daemon import set_daemon_client
+            daemon_client = LocalDaemonClient()
+            set_daemon_client(daemon_client)
+            return daemon_client
+
+        from ..utils.imports import get_platforms_constants
+        require_admin_by_default = getattr(get_platforms_constants(), 'REQUIRE_ADMIN_BY_DEFAULT', False)
         from ..daemon import set_daemon_client
         from ..utils.elevation_linux import start_daemon
-        if not REQUIRE_ADMIN_BY_DEFAULT:
+        if not require_admin_by_default:
             logger.info("REQUIRE_ADMIN_BY_DEFAULT is False - skipping privileged daemon startup")
             return None
 
@@ -38,8 +54,30 @@ class DaemonLifecycleService:
         logger.info("Privileged daemon started successfully")
         return daemon_client
 
-    def shutdown(self, daemon_client: Optional[Any]) -> None:
-        if platform.system().lower() != "linux" or not daemon_client:
+    def shutdown(self, daemon_client: Optional[Any] = None) -> None:
+        if platform.system().lower() != "linux":
+            return
+
+        if daemon_client is None:
+            try:
+                from ..daemon import get_daemon_client, is_daemon_available
+                if is_daemon_available():
+                    daemon_client = get_daemon_client()
+            except Exception:
+                pass
+
+        if not daemon_client:
+            # Try to stop daemon process if it was spawned but client is not available/connected
+            try:
+                from ..utils.elevation_linux import stop_daemon
+                stop_daemon()
+            except Exception:
+                pass
+            return
+
+        from ..daemon.client import LocalDaemonClient
+        if isinstance(daemon_client, LocalDaemonClient):
+            logger.info("Local root mode active, no external daemon to stop")
             return
 
         from ..utils.elevation_linux import stop_daemon

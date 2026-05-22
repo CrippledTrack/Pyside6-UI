@@ -61,6 +61,16 @@ class DaemonService:
         if not self._is_linux:
             return False
         
+        from ..utils.imports import get_platforms_constants
+        use_pipe_daemon = getattr(get_platforms_constants(), 'USE_PIPE_DAEMON', False)
+        if use_pipe_daemon:
+            try:
+                from ..daemon import is_daemon_available
+                return is_daemon_available()
+            except Exception as e:
+                logger.debug(f"Error checking if pipe daemon is running: {e}")
+                return False
+        
         try:
             return is_daemon_running()
         except Exception as e:
@@ -76,7 +86,18 @@ class DaemonService:
         if not self._is_linux:
             return False, "Daemon is only available on Linux"
         
-        # Check if daemon is already running
+        # If client is already available, we are good
+        if self.is_available():
+            return True, None
+            
+        from ..utils.imports import get_platforms_constants
+        use_pipe_daemon = getattr(get_platforms_constants(), 'USE_PIPE_DAEMON', False)
+        if use_pipe_daemon:
+            # In pipe mode, we don't try to connect to existing sockets or clean up stale sockets.
+            # We just start a new daemon.
+            return self._start_new_daemon()
+        
+        # Check if daemon is already running (Legacy Socket Mode specific checks, to be removed after 5.x)
         if self.is_running():
             # Check if client is set globally
             if not self.is_available():
@@ -99,6 +120,8 @@ class DaemonService:
     
     def _connect_to_existing_daemon(self) -> bool:
         """Connect to an existing daemon and set the client globally.
+        
+        NOTE: Legacy Socket Mode method. To be removed after 5.x.
         
         Returns:
             True if connection succeeded, False otherwise
@@ -139,7 +162,10 @@ class DaemonService:
             return False, f"Error starting daemon: {e}"
 
     def _restart_daemon_from_stale_socket(self) -> tuple[bool, Optional[str]]:
-        """Remove a stale socket and attempt to start a fresh daemon."""
+        """Remove a stale socket and attempt to start a fresh daemon.
+        
+        NOTE: Legacy Socket Mode method. To be removed after 5.x.
+        """
 
         try:
             uid = os.getuid()

@@ -257,7 +257,8 @@ class MainWindow(QMainWindow):
             on_restart_admin=self.restart_as_admin,
             on_view_logs=self.open_log_viewer_dialog,
             on_about=self.show_about_dialog,
-            on_toggle_new_ui=None  # Moved to theme dialog
+            on_toggle_new_ui=None,  # Moved to theme dialog
+            on_start_pipe_daemon=self.start_pipe_daemon
         )
     
         # Connect dev menu signals
@@ -536,6 +537,11 @@ class MainWindow(QMainWindow):
                 from ..utils.elevation_windows import run_as_admin
                 run_as_admin()
             elif CURRENT_PLATFORM == "linux":
+                # Ensure we start the socket daemon by setting USE_PIPE_DAEMON to False
+                from ..utils.imports import get_platforms_constants
+                constants = get_platforms_constants()
+                constants.USE_PIPE_DAEMON = False
+                
                 # Use daemon service to start the daemon
                 success, error_msg = self.daemon_service.start()
                 
@@ -553,6 +559,33 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Failed to restart as administrator: {e}")
             self.toast_manager.show_error(f"Failed to restart as administrator: {e}")
+
+    def start_pipe_daemon(self) -> None:
+        """Start the privileged daemon in pipe mode (Beta)."""
+        try:
+            if CURRENT_PLATFORM == "linux":
+                # Ensure we start the pipe daemon by setting USE_PIPE_DAEMON to True
+                from ..utils.imports import get_platforms_constants
+                constants = get_platforms_constants()
+                constants.USE_PIPE_DAEMON = True
+                
+                # Use daemon service to start the daemon
+                success, error_msg = self.daemon_service.start()
+                
+                if success:
+                    self.toast_manager.show_success("Pipe daemon (Beta) started successfully")
+                else:
+                    self.toast_manager.show_error(
+                        f"Failed to start pipe daemon: {error_msg or 'Check system permissions'}"
+                    )
+            else:
+                logger.warning(f"Pipe daemon not supported on platform: {CURRENT_PLATFORM}")
+                self.toast_manager.show_warning(
+                    f"Not supported on {CURRENT_PLATFORM}"
+                )
+        except Exception as e:
+            logger.error(f"Failed to start pipe daemon: {e}")
+            self.toast_manager.show_error(f"Failed to start pipe daemon: {e}")
     
     def _refresh_admin_tabs(self) -> None:
         """Refresh tabs that require admin privileges.

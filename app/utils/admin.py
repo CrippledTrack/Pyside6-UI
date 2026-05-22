@@ -146,6 +146,9 @@ def needs_admin_for_plugin(is_windows: bool, requires_admin: bool, is_admin: boo
     
     if not requires_admin:
         return False
+        
+    if is_admin:
+        return False
     
     if is_windows:
         return requires_admin and not is_admin

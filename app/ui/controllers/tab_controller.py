@@ -177,10 +177,10 @@ class TabController(QObject):
                     plugin_class = tab_info["plugin_class"]
                     requires_admin = getattr(plugin_class, 'requires_admin', False)
                     
-                    # Check if daemon is now available
-                    if self.daemon_service and self.daemon_service.is_available():
-                        if not needs_admin_for_plugin(False, requires_admin, False):
-                            # Daemon is available, reload the tab
+                    # Check if daemon is now available or running as root
+                    if (self.daemon_service and self.daemon_service.is_available()) or self.admin_service.is_admin():
+                        if not needs_admin_for_plugin(False, requires_admin, self.admin_service.is_admin()):
+                            # Daemon or root privilege is available, reload the tab
                             logger.info(f"Daemon available, reloading tab '{tab_name}'")
                             self._reload_tab(tab_name)
                             self._previous_tab_index = index

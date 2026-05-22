@@ -133,6 +133,9 @@ class AdminService:
         Returns:
             True if admin is available, False otherwise
         """
+        if self.is_admin():
+            return True
+            
         from ..qt_bindings import QMessageBox
         
         if CURRENT_PLATFORM == "windows":
