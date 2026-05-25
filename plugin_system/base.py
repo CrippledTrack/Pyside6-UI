@@ -48,9 +48,6 @@ class BaseTabPlugin:
     This is now an instance-based class. Plugins receive a 
     ServiceContainer in their constructor and use instance methods.
     
-    For backward compatibility, both old (tab_name) and new (plugin_name/tab_title)
-    attribute names are supported.
-    
     Example:
         class MyPlugin(BaseTabPlugin):
             plugin_name = "My Plugin"
@@ -70,10 +67,6 @@ class BaseTabPlugin:
     # Tab-specific
     tab_title: str = "Unnamed Tab"  # Display name in tab bar
     requires_admin: bool = False
-    
-    # Legacy aliases (backward compatibility with 3.x)
-    tab_name: str = "Unnamed Tab"  # Alias for plugin_name/tab_title
-    tab_description: str = "No description provided"  # Alias for plugin_description
     
     # Platform support (empty list = all platforms supported)
     supported_platforms: List[str] = []
@@ -181,18 +174,9 @@ class BaseTabPlugin:
 
         author_text = ", ".join(authors_list) if authors_list else str(getattr(cls, 'plugin_author', 'Unknown'))
 
-        # Support both new (plugin_name/tab_title) and legacy (tab_name) naming
-        name = getattr(cls, 'plugin_name', None)
-        if not name or name == "Unnamed Plugin":
-            name = getattr(cls, 'tab_name', cls.__name__)
-        
-        title = getattr(cls, 'tab_title', None)
-        if not title or title == "Unnamed Tab":
-            title = getattr(cls, 'tab_name', name)
-        
-        description = getattr(cls, 'plugin_description', None)
-        if not description or description == "No description provided":
-            description = getattr(cls, 'tab_description', "No description provided")
+        name = getattr(cls, 'plugin_name', cls.__name__)
+        title = getattr(cls, 'tab_title', name)
+        description = getattr(cls, 'plugin_description', "No description provided")
 
         # If supported_platforms is empty, show all application-supported platforms
         display_platforms = cls.supported_platforms if cls.supported_platforms else ["Windows", "Linux", "macOS"]
@@ -218,21 +202,13 @@ class BaseTabPlugin:
         """Validate the plugin configuration and return any error messages."""
         errors = []
         
-        # Support both new (plugin_name) and legacy (tab_name) naming
-        has_name = (
-            (hasattr(cls, 'plugin_name') and cls.plugin_name and cls.plugin_name != "Unnamed Plugin") or
-            (hasattr(cls, 'tab_name') and cls.tab_name and cls.tab_name != "Unnamed Tab")
-        )
+        has_name = bool(getattr(cls, 'plugin_name', None) and cls.plugin_name != "Unnamed Plugin")
         if not has_name:
-            errors.append("Plugin must define a valid plugin_name or tab_name")
+            errors.append("Plugin must define a valid plugin_name")
         
-        # Support both new (tab_title) and legacy (tab_name) for display title
-        has_title = (
-            (hasattr(cls, 'tab_title') and cls.tab_title and cls.tab_title != "Unnamed Tab") or
-            (hasattr(cls, 'tab_name') and cls.tab_name and cls.tab_name != "Unnamed Tab")
-        )
+        has_title = bool(getattr(cls, 'tab_title', None) and cls.tab_title != "Unnamed Tab")
         if not has_title:
-            errors.append("Plugin must define a valid tab_title or tab_name")
+            errors.append("Plugin must define a valid tab_title")
         
         # Note: supported_platforms is optional - empty means all platforms supported
         

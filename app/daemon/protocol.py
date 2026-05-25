@@ -115,12 +115,12 @@ def get_socket_path(uid: Optional[int] = None) -> str:
             pass
     
     # Last resort: /tmp (less secure but always available)
-    return '/tmp/privileged-daemon.sock'
+    return '/tmp/privileged-daemon/daemon.sock'
 
 
 # Default socket path (will be overridden at runtime with proper uid)
 # This is just for backwards compatibility - actual path is determined at daemon startup
-SOCKET_PATH = '/tmp/privileged-daemon.sock'
+SOCKET_PATH = '/tmp/privileged-daemon/daemon.sock'
 
 
 __all__ = [

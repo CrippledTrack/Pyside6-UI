@@ -376,8 +376,6 @@ class PluginService:
                 
                 name = getattr(plugin_class, 'plugin_name', None)
                 if not name or name == "Unnamed Plugin":
-                    name = getattr(plugin_class, 'tab_name', None)
-                if not name or name == "Unnamed Tab":
                     name = plugin_class.__name__
                 
                 logger.info(f"Registered core plugin: {name}")

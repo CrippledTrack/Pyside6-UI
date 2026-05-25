@@ -46,12 +46,12 @@ def _is_show_all_platforms() -> bool:
 
 
 def _create_prefixed_plugin(original_class: Type[Any], platform_prefix: str) -> Type[Any]:
-    """Create a wrapper plugin class with a prefixed tab_name/plugin_name."""
+    """Create a wrapper plugin class with a prefixed plugin_name."""
     original_name = getattr(original_class, 'plugin_name', None)
     if not original_name or original_name == "Unnamed Plugin":
-        original_name = getattr(original_class, 'tab_name', original_class.__name__)
+        original_name = original_class.__name__
 
-    original_title = getattr(original_class, 'tab_title', getattr(original_class, 'tab_name', original_name))
+    original_title = getattr(original_class, 'tab_title', original_name)
 
     prefixed_name = f"{platform_prefix} {original_name}"
     prefixed_title = f"{platform_prefix} {original_title}"
@@ -62,7 +62,6 @@ def _create_prefixed_plugin(original_class: Type[Any], platform_prefix: str) -> 
         {
             'plugin_name': prefixed_name,
             'tab_title': prefixed_title,
-            'tab_name': prefixed_name,
             '_original_tab_name': original_title,
             '_is_cross_platform': True,
         }
@@ -199,29 +198,8 @@ class PluginRegistry:
             is_core: Whether this is a core plugin
         """
         # Get plugin name - check for non-default values
-        # New plugins use plugin_name (v4.0+), legacy ones use tab_name
-        plugin_name = None
-        
-        # First check plugin_name (v4.0+) - prefer modern naming
-        pn = getattr(plugin_class, 'plugin_name', None)
-        if pn and pn != "Unnamed Plugin":
-            plugin_name = pn
-        
-        # Fall back to tab_name (legacy) for backward compat
-        if not plugin_name:
-            tab_name = getattr(plugin_class, 'tab_name', None)
-            if tab_name and tab_name != "Unnamed Tab":
-                plugin_name = tab_name
-                import warnings
-                warnings.warn(
-                    f"Plugin '{plugin_class.__name__}' uses deprecated 'tab_name' attribute. "
-                    f"Migrate to 'plugin_name' before the next major release.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-        
-        # Fallback to class name
-        if not plugin_name:
+        plugin_name = getattr(plugin_class, 'plugin_name', None)
+        if not plugin_name or plugin_name == "Unnamed Plugin":
             plugin_name = plugin_class.__name__
 
         # Validate plugin
@@ -286,8 +264,6 @@ class PluginRegistry:
         """Get the name this plugin class will be registered under."""
         name = getattr(plugin_class, 'plugin_name', None)
         if not name or name == "Unnamed Plugin":
-            name = getattr(plugin_class, 'tab_name', None)
-        if not name or name == "Unnamed Tab":
             name = plugin_class.__name__
 
         show_all = _is_show_all_platforms()
@@ -374,14 +350,10 @@ class PluginRegistry:
         errors = []
         
         # Check that plugin has a valid (non-default) name
-        tab_name = getattr(plugin_class, 'tab_name', None)
         pn = getattr(plugin_class, 'plugin_name', None)
-        has_valid_name = (
-            (tab_name and tab_name != "Unnamed Tab") or
-            (pn and pn != "Unnamed Plugin")
-        )
+        has_valid_name = bool(pn and pn != "Unnamed Plugin")
         if not has_valid_name:
-            errors.append("Plugin must define plugin_name or tab_name")
+            errors.append("Plugin must define plugin_name")
         
         # Check that plugin implements at least one extension interface
         has_interface = any([

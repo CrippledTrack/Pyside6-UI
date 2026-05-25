@@ -226,18 +226,9 @@ class PluginDiscovery:
         
         plugin_classes = self._find_plugin_classes_in_module(module)
         for plugin_class in plugin_classes:
-            # Prefer plugin_name, fall back to tab_name
             plugin_name = getattr(plugin_class, 'plugin_name', None)
             if not plugin_name or plugin_name == "Unnamed Plugin":
-                plugin_name = getattr(plugin_class, 'tab_name', "Unknown Plugin")
-                if plugin_name != "Unknown Plugin":
-                    import warnings
-                    warnings.warn(
-                        f"Plugin '{plugin_class.__name__}' uses deprecated 'tab_name' attribute. "
-                        f"Migrate to 'plugin_name' before the next major release.",
-                        DeprecationWarning,
-                        stacklevel=2,
-                    )
+                plugin_name = plugin_class.__name__
                 
             plugins.append((plugin_name, plugin_class, f"local:{py_file.name}"))
             logger.info(f"Successfully loaded local plugin: {plugin_name} from {py_file.name}")
@@ -286,11 +277,9 @@ class PluginDiscovery:
             if cls is BaseTabPlugin:
                 return False
 
-            # Must have a valid identifier (plugin_name OR tab_name)
-            # plugin_name is preferred, legacy uses tab_name
+            # Must have a valid identifier (plugin_name)
             has_plugin_name = bool(getattr(cls, 'plugin_name', None)) and getattr(cls, 'plugin_name') != "Unnamed Plugin"
-            has_tab_name = bool(getattr(cls, 'tab_name', None)) and getattr(cls, 'tab_name') != "Unnamed Tab"
-            if not has_plugin_name and not has_tab_name:
+            if not has_plugin_name:
                 return False
 
             # Must implement at least one extension surface.
@@ -345,7 +334,7 @@ class PluginDiscovery:
                 for plugin_class in self._find_plugin_classes_in_module(module):
                     plugin_name = getattr(plugin_class, 'plugin_name', None)
                     if not plugin_name or plugin_name == "Unnamed Plugin":
-                        plugin_name = getattr(plugin_class, 'tab_name', "Unknown Plugin")
+                        plugin_name = plugin_class.__name__
                     discovered.append((plugin_name, plugin_class, f"package:{source.package}"))
 
         self.discovered_plugins.extend(discovered)

@@ -6,6 +6,7 @@ import socket
 import logging
 import threading
 import time
+import subprocess
 from typing import Dict, Any, Optional
 from .protocol import create_request, serialize_message, deserialize_message, get_socket_path
 

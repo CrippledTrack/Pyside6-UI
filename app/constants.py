@@ -12,7 +12,7 @@ import platform
 # =============================================================================
 # GUI Internal Variables (app_plugins will NOT override these)
 # =============================================================================
-GUI_API_VERSION = "5.1.0-dev-4"
+GUI_API_VERSION = "5.1.0-dev-5"
 
 # =============================================================================
 # Version Information (can be overridden by app_plugins/constants.py)
@@ -46,7 +46,9 @@ NEW_UI_ENABLED_BY_DEFAULT = True
 # Hide the Admin menu/button by default (can be overridden by app_plugins/constants.py)
 HIDE_ADMIN_MENU_BY_DEFAULT = True
 
-# Use pipe daemon instead of socket daemon on Linux (default is False for compatibility)
+# Use pipe daemon instead of socket daemon on Linux (default is False for compatibility).
+# Note: This sets the daemon type used at launch when REQUIRE_ADMIN_BY_DEFAULT is True.
+# Otherwise, users can choose to activate either the legacy daemon or the pipe daemon if they want elevation after launch.
 USE_PIPE_DAEMON = False
 
 # =============================================================================

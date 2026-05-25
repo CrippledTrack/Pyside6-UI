@@ -278,17 +278,19 @@ class PrivilegedDaemon:
         # Ensure socket directory exists and has correct permissions/ownership
         socket_dir = os.path.dirname(self.socket_path)
         if socket_dir:
+            # Under no circumstances should we chmod/chown root directory or /tmp
+            is_critical_dir = socket_dir in ('/', '/tmp') or os.path.abspath(socket_dir) in ('/', '/tmp')
             try:
                 if not os.path.exists(socket_dir):
                     os.makedirs(socket_dir, mode=0o700, exist_ok=True)
                     logger.info(f"Created socket directory: {socket_dir}")
-                else:
+                elif not is_critical_dir:
                     # If it exists, ensure it has the correct permissions (0o700)
                     os.chmod(socket_dir, 0o700)
                     logger.info(f"Ensured socket directory permissions are 0o700: {socket_dir}")
                 
                 # Always set/correct ownership of the directory to the allowed user
-                if self.allowed_uid is not None and self.allowed_gid is not None:
+                if self.allowed_uid is not None and self.allowed_gid is not None and not is_critical_dir:
                     os.chown(socket_dir, self.allowed_uid, self.allowed_gid)
                     logger.info(f"Ensured socket directory ownership is UID {self.allowed_uid}, GID {self.allowed_gid}")
             except OSError as e:
