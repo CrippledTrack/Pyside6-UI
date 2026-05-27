@@ -159,7 +159,7 @@ def generate_stylesheet(
         
         /* ===== Loading Widget ===== */
         #loadingWidget {{
-            background-color: {base_bg};
+            background-color: {window_bg};
             border-radius: {border_radius};
         }}
         

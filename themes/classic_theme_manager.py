@@ -30,7 +30,7 @@ QWidget {{
     color: {text};
 }}
 #loadingWidget {{
-    background-color: {base};
+    background-color: {window};
 }}
 QTabWidget::pane {{
     border: {border_width} solid {border};
