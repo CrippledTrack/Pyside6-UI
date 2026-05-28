@@ -210,6 +210,8 @@ class PluginController(QObject):
                     try:
                         if target_menu and _qt_is_valid(target_menu):
                             target_menu.removeAction(action)
+                            if _qt_is_valid(action):
+                                action.deleteLater()
                             # If the menu is now empty, remove it from the menu bar (if it's a top-level menu on the menu bar)
                             if len(target_menu.actions()) == 0 and self._main_window:
                                 menu_bar = self._main_window.menuBar()
@@ -243,6 +245,10 @@ class PluginController(QObject):
                                     continue
                                 if action_menu == menu:
                                     menu_bar.removeAction(action)
+                                    if _qt_is_valid(action):
+                                        action.deleteLater()
+                                    if _qt_is_valid(menu):
+                                        menu.deleteLater()
                                     logger.debug(f"Removed created menu '{menu.title()}' for '{plugin_name}'")
                                     break
                         else:
@@ -257,6 +263,8 @@ class PluginController(QObject):
                     try:
                         if self._plugin_toolbar:
                             self._plugin_toolbar.removeAction(action)
+                            if _qt_is_valid(action):
+                                action.deleteLater()
                     except Exception as e:
                         logger.debug(f"Error removing toolbar action: {e}")
                 del self._plugin_toolbar_actions[plugin_name]
@@ -271,7 +279,9 @@ class PluginController(QObject):
                 for widget in self._plugin_status_widgets[plugin_name]:
                     try:
                         self._main_window.statusBar().removeWidget(widget)
-                        widget.hide()  # Hide instead of delete to avoid corruption
+                        widget.hide()
+                        if _qt_is_valid(widget):
+                            widget.deleteLater()
                     except Exception as e:
                         logger.debug(f"Error removing status widget: {e}")
                 del self._plugin_status_widgets[plugin_name]
@@ -502,6 +512,8 @@ class PluginController(QObject):
                     try:
                         if target_menu and _qt_is_valid(target_menu):
                             target_menu.removeAction(action)
+                            if _qt_is_valid(action):
+                                action.deleteLater()
                     except Exception as e:
                         logger.debug(f"Error removing menu action: {e}")
                 del self._plugin_menu_actions[plugin_name]
@@ -521,6 +533,10 @@ class PluginController(QObject):
                                 continue
                             if action_menu == menu:
                                 menu_bar.removeAction(action)
+                                if _qt_is_valid(action):
+                                    action.deleteLater()
+                                if _qt_is_valid(menu):
+                                    menu.deleteLater()
                                 logger.debug(f"Removed created menu '{menu.title()}' for '{plugin_name}'")
                                 break
                     except Exception as e:
@@ -533,6 +549,8 @@ class PluginController(QObject):
                     try:
                         if self._plugin_toolbar:
                             self._plugin_toolbar.removeAction(action)
+                            if _qt_is_valid(action):
+                                action.deleteLater()
                     except Exception as e:
                         logger.debug(f"Error removing toolbar action: {e}")
                 del self._plugin_toolbar_actions[plugin_name]
@@ -547,6 +565,8 @@ class PluginController(QObject):
                     try:
                         self._main_window.statusBar().removeWidget(widget)
                         widget.hide()
+                        if _qt_is_valid(widget):
+                            widget.deleteLater()
                     except Exception as e:
                         logger.debug(f"Error removing status widget: {e}")
                 del self._plugin_status_widgets[plugin_name]

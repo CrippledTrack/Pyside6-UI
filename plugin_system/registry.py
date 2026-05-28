@@ -160,6 +160,7 @@ class PluginRegistry:
         
         # Plugin instances cache
         self._plugin_instances: Dict[str, Any] = {}
+        self._lock = threading.Lock()
 
         # Optional async event delivery executor (opt-in)
         self._event_executor: Optional[ThreadPoolExecutor] = None
@@ -186,9 +187,10 @@ class PluginRegistry:
         Args:
             container: The application's service container
         """
-        self._container = container
-        # Clear instance cache when container changes
-        self._plugin_instances.clear()
+        with self._lock:
+            self._container = container
+            # Clear instance cache when container changes
+            self._plugin_instances.clear()
 
     def register_plugin(self, plugin_class: Type[Any], is_core: bool = False) -> None:
         """Register a plugin class in the registry.
@@ -306,21 +308,22 @@ class PluginRegistry:
         Raises:
             ValueError: If plugin not found or container not set
         """
-        if name in self._plugin_instances:
-            return self._plugin_instances[name]
-        
-        plugin_class = self._plugins.get(name)
-        if not plugin_class:
-            raise ValueError(f"Plugin '{name}' not found in registry")
-        
-        if not self._container:
-            raise ValueError("ServiceContainer not set - call set_container() first")
-        # Instantiate strict new-architecture plugin directly
-        instance = plugin_class(self._container)
-        self._plugin_instances[name] = instance
-        
-        logger.debug(f"Created instance for plugin: {name}")
-        return instance
+        with self._lock:
+            if name in self._plugin_instances:
+                return self._plugin_instances[name]
+            
+            plugin_class = self._plugins.get(name)
+            if not plugin_class:
+                raise ValueError(f"Plugin '{name}' not found in registry")
+            
+            if not self._container:
+                raise ValueError("ServiceContainer not set - call set_container() first")
+            # Instantiate strict new-architecture plugin directly
+            instance = plugin_class(self._container)
+            self._plugin_instances[name] = instance
+            
+            logger.debug(f"Created instance for plugin: {name}")
+            return instance
     
     def get_plugin_instances(self, enabled_only: bool = True) -> Dict[str, Any]:
         """Get instances for all (or enabled) plugins.
@@ -343,7 +346,8 @@ class PluginRegistry:
 
     def has_plugin_instance(self, name: str) -> bool:
         """Check if a plugin instance is cached."""
-        return name in self._plugin_instances
+        with self._lock:
+            return name in self._plugin_instances
 
     def _validate_extension_plugin(self, plugin_class: Type[Any], plugin_name: str) -> List[str]:
         """Validate an extension plugin."""
@@ -490,21 +494,22 @@ class PluginRegistry:
 
     def clear(self) -> None:
         """Clear all registered plugins and cached instances."""
-        self._plugins.clear()
-        self._core_plugins.clear()
-        self._external_plugins.clear()
-        self._disabled_plugins.clear()
-        self._plugin_instances.clear()
-        self._version_incompatibilities.clear()
-        self._seen_plugins.clear()
-        self._tab_plugins.clear()
-        self._menu_plugins.clear()
-        self._status_plugins.clear()
-        self._toolbar_plugins.clear()
-        self._service_plugins.clear()
-        self._event_subscriber_plugins.clear()
-        self._rejected_plugins.clear()
-        self._shutdown_event_executor()
+        with self._lock:
+            self._plugins.clear()
+            self._core_plugins.clear()
+            self._external_plugins.clear()
+            self._disabled_plugins.clear()
+            self._plugin_instances.clear()
+            self._version_incompatibilities.clear()
+            self._seen_plugins.clear()
+            self._tab_plugins.clear()
+            self._menu_plugins.clear()
+            self._status_plugins.clear()
+            self._toolbar_plugins.clear()
+            self._service_plugins.clear()
+            self._event_subscriber_plugins.clear()
+            self._rejected_plugins.clear()
+            self._shutdown_event_executor()
 
     def _get_event_executor(self) -> ThreadPoolExecutor:
         """Get/create the bounded executor used for async event delivery."""

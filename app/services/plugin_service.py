@@ -280,14 +280,15 @@ class PluginService:
                 local_discovered = discovery.discover_local_plugins()
                 local_registered = 0
                 for plugin_name, plugin_class, _src in local_discovered:
-                    if self._registry.get_plugin(plugin_name) is not None:
-                        logger.debug(f"Skipping local plugin '{plugin_name}' due to higher-priority registration")
+                    registered_name = self._registry.get_registered_name(plugin_class)
+                    if self._registry.get_plugin(registered_name) is not None:
+                        logger.debug(f"Skipping local plugin '{registered_name}' due to higher-priority registration")
                         continue
                     try:
                         self._registry.register_plugin(plugin_class, is_core=False)
                         local_registered += 1
                     except Exception as e:
-                        logger.warning(f"Failed to register local plugin '{plugin_name}': {e}")
+                        logger.warning(f"Failed to register local plugin '{registered_name}': {e}")
 
                 summary["total_discovered"] = summary.get("total_discovered", 0) + total_registered + local_registered
                 summary["builtin_plugins"] = builtin_registered

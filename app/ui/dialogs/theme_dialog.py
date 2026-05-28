@@ -167,6 +167,12 @@ class ThemeDialog(QDialog):
         self.settings_service = settings_service
         self.current_theme = theme_manager.get_current_theme()
         self.favorite_themes = set()  # Set of favorite theme names
+        if self.settings_service and hasattr(self.settings_service, 'get_favorite_themes'):
+            try:
+                self.favorite_themes = set(self.settings_service.get_favorite_themes())
+            except Exception as e:
+                logger.error(f"Failed to load favorite themes: {e}")
+        self.show_favorites_only = False  # Track if show favorites only is enabled
         self.setup_ui()
         self.load_themes()
     
@@ -288,6 +294,8 @@ class ThemeDialog(QDialog):
         theme_names = self.theme_manager.get_theme_names()
         
         for theme_name in sorted(theme_names):
+            if self.show_favorites_only and theme_name not in self.favorite_themes:
+                continue
             item = QListWidgetItem(theme_name)
             if theme_name == self.current_theme:
                 item.setText(f"{theme_name} (Current)")
@@ -302,7 +310,7 @@ class ThemeDialog(QDialog):
         if not current:
             return
         
-        theme_name = current.text().replace(" (Current)", "")
+        theme_name = current.text().replace(" (Current)", "").replace("⭐ ", "")
         theme_data = self.theme_manager.get_theme_data(theme_name)
         
         if theme_data:
@@ -330,7 +338,7 @@ class ThemeDialog(QDialog):
         if not current_item:
             return
         
-        theme_name = current_item.text().replace(" (Current)", "")
+        theme_name = current_item.text().replace(" (Current)", "").replace("⭐ ", "")
         
         if self.theme_manager.apply_theme(theme_name):
             self.current_theme = theme_name
@@ -391,7 +399,7 @@ class ThemeDialog(QDialog):
         if not current_item:
             return
         
-        theme_name = current_item.text().replace(" (Current)", "")
+        theme_name = current_item.text().replace(" (Current)", "").replace("⭐ ", "")
         theme_data = self.theme_manager.get_theme_data(theme_name)
         
         if not theme_data:
@@ -422,7 +430,7 @@ class ThemeDialog(QDialog):
         if not item:
             return
         
-        theme_name = item.text().replace(" (Current)", "")
+        theme_name = item.text().replace(" (Current)", "").replace("⭐ ", "")
         
         context_menu = QMenu(self)
         
@@ -439,6 +447,8 @@ class ThemeDialog(QDialog):
         # Show favorites only action
         show_favorites_action = QAction("Show Favorites Only", self)
         show_favorites_action.setCheckable(True)
+        show_favorites_action.setChecked(self.show_favorites_only)
+        show_favorites_action.setEnabled(bool(self.favorite_themes))
         show_favorites_action.triggered.connect(self.toggle_favorites_filter)
         context_menu.addAction(show_favorites_action)
         
@@ -448,17 +458,25 @@ class ThemeDialog(QDialog):
         """Toggle favorite status of a theme."""
         if theme_name in self.favorite_themes:
             self.favorite_themes.remove(theme_name)
+            if not self.favorite_themes:
+                self.show_favorites_only = False
         else:
             self.favorite_themes.add(theme_name)
+        
+        # Save to settings service if available
+        if self.settings_service and hasattr(self.settings_service, 'save_favorite_themes'):
+            try:
+                self.settings_service.save_favorite_themes(list(self.favorite_themes))
+            except Exception as e:
+                logger.error(f"Failed to save favorite themes: {e}")
         
         # Refresh the theme list
         self.load_themes()
         logger.debug(f"Toggled favorite for theme: {theme_name}")
     
-    def toggle_favorites_filter(self) -> None:
+    def toggle_favorites_filter(self, checked: bool) -> None:
         """Toggle showing only favorite themes."""
-        # This is a placeholder for future implementation
-        # For now, just refresh the list
+        self.show_favorites_only = checked
         self.load_themes()
 
 
