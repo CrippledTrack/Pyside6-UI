@@ -17,14 +17,9 @@ logger = logging.getLogger(__name__)
 # Only import Linux-specific modules on Linux
 if platform.system().lower() == "linux":
     from ..daemon import is_daemon_available, set_daemon_client
-    from ..daemon.client import DaemonClient
-    from ..daemon.protocol import get_socket_path
-    from ..utils.elevation_linux import is_daemon_running, start_daemon
+    from ..utils.elevation_linux import start_daemon
 else:
     # Dummy functions for non-Linux platforms
-    def is_daemon_running(*args, **kwargs) -> bool:
-        return False
-    
     def start_daemon(*args, **kwargs) -> Optional[object]:
         return None
 
@@ -71,12 +66,56 @@ class DaemonService:
                 logger.debug(f"Error checking if pipe daemon is running: {e}")
                 return False
         
+        return self._socket_is_running()
+
+    def _socket_is_running(self) -> bool:
+        """Check if the legacy socket daemon is running.
+        
+        NOTE: Legacy Socket Mode method. To be removed in 6.0.0.
+        """
         try:
+            from ..utils.elevation_linux import is_daemon_running
             return is_daemon_running()
         except Exception as e:
-            logger.debug(f"Error checking if daemon is running: {e}")
+            logger.debug(f"Error checking if socket daemon is running: {e}")
             return False
     
+    def start_socket(self) -> tuple[bool, Optional[str]]:
+        """Start the privileged daemon in legacy socket mode.
+        
+        Returns:
+            Tuple of (success: bool, error_message: Optional[str])
+        """
+        if not self._is_linux:
+            return False, "Daemon is only available on Linux"
+            
+        try:
+            from ..utils.imports import get_platforms_constants
+            constants = get_platforms_constants()
+            constants.USE_PIPE_DAEMON = False
+        except Exception as e:
+            logger.error(f"Failed to reset USE_PIPE_DAEMON constant: {e}")
+            
+        return self.start()
+
+    def start_pipe(self) -> tuple[bool, Optional[str]]:
+        """Start the privileged daemon in pipe mode.
+        
+        Returns:
+            Tuple of (success: bool, error_message: Optional[str])
+        """
+        if not self._is_linux:
+            return False, "Daemon is only available on Linux"
+            
+        try:
+            from ..utils.imports import get_platforms_constants
+            constants = get_platforms_constants()
+            constants.USE_PIPE_DAEMON = True
+        except Exception as e:
+            logger.error(f"Failed to set USE_PIPE_DAEMON constant: {e}")
+            
+        return self.start()
+
     def start(self) -> tuple[bool, Optional[str]]:
         """Start the privileged daemon.
         
@@ -97,13 +136,20 @@ class DaemonService:
             # We just start a new daemon.
             return self._start_new_daemon()
         
-        # Check if daemon is already running (Legacy Socket Mode specific checks, to be removed after 5.x)
+        # Check if daemon is already running (Legacy Socket Mode specific checks, to be removed in 6.0.0)
+        return self._socket_start_sequence()
+
+    def _socket_start_sequence(self) -> tuple[bool, Optional[str]]:
+        """Start sequence for legacy socket mode daemon.
+        
+        NOTE: Legacy Socket Mode method. To be removed in 6.0.0.
+        """
         if self.is_running():
             # Check if client is set globally
             if not self.is_available():
                 # Daemon is running but client not set - connect to it
                 logger.info("Daemon is running but client not set, connecting...")
-                if self._connect_to_existing_daemon():
+                if self._socket_connect_to_existing():
                     logger.info("Connected to existing daemon")
                     self._notify_refresh_callbacks()
                     return True, None
@@ -111,26 +157,27 @@ class DaemonService:
                     logger.warning(
                         "Failed to connect to existing daemon, attempting restart"
                     )
-                    return self._restart_daemon_from_stale_socket()
+                    return self._socket_restart_from_stale()
             else:
                 # Daemon is running and client is set
                 return True, None
 
         return self._start_new_daemon()
     
-    def _connect_to_existing_daemon(self) -> bool:
+    def _socket_connect_to_existing(self) -> bool:
         """Connect to an existing daemon and set the client globally.
         
-        NOTE: Legacy Socket Mode method. To be removed after 5.x.
-        
-        Returns:
-            True if connection succeeded, False otherwise
+        NOTE: Legacy Socket Mode method. To be removed in 6.0.0.
         """
         try:
             uid = os.getuid()
         except (AttributeError, OSError):
             uid = None
         
+        from ..daemon.client import DaemonClient
+        from ..daemon.protocol import get_socket_path
+        from ..daemon import set_daemon_client
+
         socket_path = get_socket_path(uid)
         client = DaemonClient(socket_path)
         
@@ -161,10 +208,10 @@ class DaemonService:
             logger.error(f"Error starting daemon: {e}", exc_info=True)
             return False, f"Error starting daemon: {e}"
 
-    def _restart_daemon_from_stale_socket(self) -> tuple[bool, Optional[str]]:
+    def _socket_restart_from_stale(self) -> tuple[bool, Optional[str]]:
         """Remove a stale socket and attempt to start a fresh daemon.
         
-        NOTE: Legacy Socket Mode method. To be removed after 5.x.
+        NOTE: Legacy Socket Mode method. To be removed in 6.0.0.
         """
 
         try:
@@ -172,6 +219,7 @@ class DaemonService:
         except (AttributeError, OSError):
             uid = None
 
+        from ..daemon.protocol import get_socket_path
         socket_path = get_socket_path(uid)
 
         if os.path.exists(socket_path):
