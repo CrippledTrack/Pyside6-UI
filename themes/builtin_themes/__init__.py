@@ -107,7 +107,6 @@ __all__ = [
     'get_dark_theme',
     'get_light_theme',
     'get_legacy_theme',
-    'get_legacy_original_theme',
     'get_purple_dark_theme',
     'get_blue_theme',
     'get_green_theme',
