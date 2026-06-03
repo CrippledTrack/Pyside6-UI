@@ -169,7 +169,10 @@ class DaemonClient:
                         
                         response = deserialize_message(response_line)
                         
-                        # If we have an expected ID and this response doesn't match it, discard and keep reading
+                        # If we have an expected ID and this response doesn't match it, discard and keep reading.
+                        # WARNING: Discarding stray responses is only safe because the server handles requests 
+                        # synchronously and sequentially (one at a time). If the server were async, discarding non-matching
+                        # IDs here would cause other waiting threads to miss their responses, leading to timeouts.
                         if expected_id is not None and response.get('id') != expected_id:
                             logger.debug(f"Discarding stray/out-of-order response (expected ID {expected_id}, got {response.get('id')})")
                             continue
@@ -207,7 +210,10 @@ class DaemonClient:
                         # Parse response
                         response = deserialize_message(response_data.split(b'\n', 1)[0])
                         
-                        # If we have an expected ID and this response doesn't match it, discard and keep reading
+                        # If we have an expected ID and this response doesn't match it, discard and keep reading.
+                        # WARNING: Discarding stray responses is only safe because the server handles requests 
+                        # synchronously and sequentially (one at a time). If the server were async, discarding non-matching
+                        # IDs here would cause other waiting threads to miss their responses, leading to timeouts.
                         if expected_id is not None and response.get('id') != expected_id:
                             logger.debug(f"Discarding stray/out-of-order socket response (expected ID {expected_id}, got {response.get('id')})")
                             continue

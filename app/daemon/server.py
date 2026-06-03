@@ -435,7 +435,10 @@ class PrivilegedDaemon:
                 # Parse request
                 request = deserialize_message(line)
                 
-                # Handle request in thread pool to allow async execution
+                # WARNING: Although self.executor is a thread pool, we must block on future.result()
+                # in the main thread select loop. This enforces synchronous request-response sequencing.
+                # Since stdout is a single shared pipe channel, asynchronous/concurrent writes would
+                # interleave lines or cause out-of-order responses, breaking the client's sequential expectations.
                 future = self.executor.submit(self._handle_request, request)
                 response = future.result()
                 

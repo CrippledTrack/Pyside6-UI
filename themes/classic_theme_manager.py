@@ -223,8 +223,6 @@ def get_classic_stylesheet(theme_data: Dict[str, Any]) -> str:
         text=palette.get('text', '#ffffff'),
         highlight=highlight,
         highlight_text=palette.get('highlighted_text', '#ffffff'),
-        highlight_hover=_adjust_color(highlight, 0.15),
-        highlight_pressed=_adjust_color(highlight, -0.15),
         border_width=border_width,
         border_radius=border_radius,
         scrollbar_size=scrollbar_size,

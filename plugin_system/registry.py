@@ -199,68 +199,69 @@ class PluginRegistry:
             plugin_class: The plugin class to register
             is_core: Whether this is a core plugin
         """
-        # Get plugin name - check for non-default values
-        plugin_name = getattr(plugin_class, 'plugin_name', None)
-        if not plugin_name or plugin_name == "Unnamed Plugin":
-            plugin_name = plugin_class.__name__
+        with self._lock:
+            # Get plugin name - check for non-default values
+            plugin_name = getattr(plugin_class, 'plugin_name', None)
+            if not plugin_name or plugin_name == "Unnamed Plugin":
+                plugin_name = plugin_class.__name__
 
-        # Validate plugin
-        if hasattr(plugin_class, 'validate_plugin'):
-            errors = plugin_class.validate_plugin()
-            if errors:
-                raise ValueError(f"Invalid plugin '{plugin_name}': {', '.join(errors)}")
-        else:
-            errors = self._validate_extension_plugin(plugin_class, plugin_name)
-            if errors:
-                raise ValueError(f"Invalid plugin '{plugin_name}': {', '.join(errors)}")
-
-        # Check platform compatibility
-        show_all = _is_show_all_platforms()
-        if hasattr(plugin_class, 'is_compatible'):
-            is_compatible = plugin_class.is_compatible()
-        else:
-            is_compatible = self._check_extension_plugin_compatibility(plugin_class)
-        
-        supported_platforms = getattr(plugin_class, 'supported_platforms', [])
-        
-        if not show_all and not is_compatible:
-            logger.debug(f"Skipping plugin '{plugin_name}' - not compatible with current platform.")
-            return
-
-        if show_all and not is_compatible:
-            # Determine platform prefix
-            platform_prefix = ""
-            if supported_platforms:
-                sp = supported_platforms[0].lower()
-                if "win" in sp:
-                    platform_prefix = "[Win]"
-                elif "linux" in sp:
-                    platform_prefix = "[Linux]"
-                elif "darwin" in sp or "mac" in sp:
-                    platform_prefix = "[macOS]"
-                else:
-                    platform_prefix = f"[{supported_platforms[0].capitalize()}]"
+            # Validate plugin
+            if hasattr(plugin_class, 'validate_plugin'):
+                errors = plugin_class.validate_plugin()
+                if errors:
+                    raise ValueError(f"Invalid plugin '{plugin_name}': {', '.join(errors)}")
             else:
-                platform_prefix = "[XPlatform]"
+                errors = self._validate_extension_plugin(plugin_class, plugin_name)
+                if errors:
+                    raise ValueError(f"Invalid plugin '{plugin_name}': {', '.join(errors)}")
 
-            plugin_class = _create_prefixed_plugin(plugin_class, platform_prefix)
-            plugin_name = plugin_class.plugin_name
-            logger.info(f"Loading cross-platform plugin '{plugin_name}' (supported: {supported_platforms})")
+            # Check platform compatibility
+            show_all = _is_show_all_platforms()
+            if hasattr(plugin_class, 'is_compatible'):
+                is_compatible = plugin_class.is_compatible()
+            else:
+                is_compatible = self._check_extension_plugin_compatibility(plugin_class)
+            
+            supported_platforms = getattr(plugin_class, 'supported_platforms', [])
+            
+            if not show_all and not is_compatible:
+                logger.debug(f"Skipping plugin '{plugin_name}' - not compatible with current platform.")
+                return
 
-        # Check version compatibility
-        if not self._check_plugin_compatibility(plugin_class, plugin_name):
-            return
+            if show_all and not is_compatible:
+                # Determine platform prefix
+                platform_prefix = ""
+                if supported_platforms:
+                    sp = supported_platforms[0].lower()
+                    if "win" in sp:
+                        platform_prefix = "[Win]"
+                    elif "linux" in sp:
+                        platform_prefix = "[Linux]"
+                    elif "darwin" in sp or "mac" in sp:
+                        platform_prefix = "[macOS]"
+                    else:
+                        platform_prefix = f"[{supported_platforms[0].capitalize()}]"
+                else:
+                    platform_prefix = "[XPlatform]"
 
-        # Handle name conflicts
-        if not self._handle_plugin_conflicts(plugin_name, is_core):
-            return
+                plugin_class = _create_prefixed_plugin(plugin_class, platform_prefix)
+                plugin_name = plugin_class.plugin_name
+                logger.info(f"Loading cross-platform plugin '{plugin_name}' (supported: {supported_platforms})")
 
-        # Register the plugin class
-        self._add_plugin_to_registry(plugin_name, plugin_class, is_core)
-        self._apply_default_disabled_state(plugin_class, plugin_name)
-        self._seen_plugins.add(plugin_name)
-        
-        logger.debug(f"Registered plugin: {plugin_name} (core={is_core})")
+            # Check version compatibility
+            if not self._check_plugin_compatibility(plugin_class, plugin_name):
+                return
+
+            # Handle name conflicts
+            if not self._handle_plugin_conflicts(plugin_name, is_core):
+                return
+
+            # Register the plugin class
+            self._add_plugin_to_registry(plugin_name, plugin_class, is_core)
+            self._apply_default_disabled_state(plugin_class, plugin_name)
+            self._seen_plugins.add(plugin_name)
+            
+            logger.debug(f"Registered plugin: {plugin_name} (core={is_core})")
 
     def get_registered_name(self, plugin_class: Type[Any]) -> str:
         """Get the name this plugin class will be registered under."""
@@ -554,14 +555,15 @@ class PluginRegistry:
         Raises:
             KeyError: If *name* is not in the rejected plugins list.
         """
-        if name not in self._rejected_plugins:
-            raise KeyError(f"Plugin '{name}' is not in the rejected plugins list")
+        with self._lock:
+            if name not in self._rejected_plugins:
+                raise KeyError(f"Plugin '{name}' is not in the rejected plugins list")
 
-        self._add_plugin_to_registry(name, plugin_class, is_core=False)
-        self.enable_plugin(name)
-        del self._rejected_plugins[name]
-        self._version_incompatibilities.pop(name, None)
-        logger.info(f"Force-registered rejected plugin: {name}")
+            self._add_plugin_to_registry(name, plugin_class, is_core=False)
+            self.enable_plugin(name)
+            del self._rejected_plugins[name]
+            self._version_incompatibilities.pop(name, None)
+            logger.info(f"Force-registered rejected plugin: {name}")
 
     # =========================================================================
     # Enable/Disable
