@@ -128,20 +128,12 @@ class MainWindow(QMainWindow):
         self._setup_ui_components()
         self._setup_controllers()
         
-        # ── Deferred init ───────────────────────────────────────────────
-        # PERF: Standard GUI architectures block the main thread while building menus,
-        # toolbars, and shortcuts. We yield to the Qt event loop instead using a 0ms 
-        # singleShot timer. This allows the OS to paint the window shell immediately 
-        # (reducing perceived load time by ~300ms) and schedules the remaining
-        # initialization for the very next event loop tick.
-        from ..qt_bindings import QTimer
-        QTimer.singleShot(0, self._complete_deferred_init)
+        # ── Complete initialization synchronously before window.show() ──
+        # This prevents the brief white/unthemed window and "python" title flash on startup
+        self._complete_deferred_init()
     
     def _complete_deferred_init(self) -> None:
-        """Finish initializing components that aren't needed for the first paint.
-        
-        Called via QTimer.singleShot(0) so the window shell is already visible.
-        """
+        """Finish initializing components that aren't needed for the first paint."""
         self._setup_managers()
         self._setup_status_bar()
         self.setup_toast_manager()
@@ -159,7 +151,9 @@ class MainWindow(QMainWindow):
         geom = self.settings_service.get_window_geometry()
         self.resize(geom.width, geom.height)
         if geom.maximized:
-            self.showMaximized()
+            self.setWindowState(Qt.WindowState.WindowMaximized)
+        elif geom.fullscreen:
+            self.setWindowState(Qt.WindowState.WindowFullScreen)
     
     def _setup_ui_components(self) -> None:
         """Create and configure all UI widgets and layouts."""
