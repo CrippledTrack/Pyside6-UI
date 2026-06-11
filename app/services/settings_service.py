@@ -54,7 +54,7 @@ class WindowGeometry:
 @dataclass
 class AppSettings:
     """Application settings with persistence"""
-    theme: str = "dark"  # Default theme (renamed from 'ocean_blue')
+    theme: str = ""  # Default theme (blank defaults to DEFAULT_THEME or auto-detection)
     disabled_plugins: List[str] = None  # User-disabled plugins (separate from disabled_by_default)
     logging_enabled: bool = True
     log_to_file: bool = True

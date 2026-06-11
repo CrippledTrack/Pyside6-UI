@@ -57,7 +57,7 @@ class WindowTitleManager:
             tab_name = None
             plugin_version = None
             
-            if self.tab_controller:
+            if not getattr(constants, "SINGLE_PLUGIN_MODE", False) and self.tab_controller:
                 tab_name = self.tab_controller.get_current_tab_name()
                 if tab_name:
                     tab_info = self.tab_controller.get_tab_info(tab_name)

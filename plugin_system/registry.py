@@ -205,6 +205,30 @@ class PluginRegistry:
             if not plugin_name or plugin_name == "Unnamed Plugin":
                 plugin_name = plugin_class.__name__
 
+            # Check if in single plugin mode and filter
+            from ..app.utils.imports import get_platforms_constants
+            constants = get_platforms_constants()
+            if getattr(constants, "SINGLE_PLUGIN_MODE", False):
+                single_name = getattr(constants, "SINGLE_PLUGIN_NAME", "")
+                if single_name:
+                    single_name_lower = single_name.lower().strip()
+                    class_name = plugin_class.__name__.lower()
+                    curr_name = getattr(plugin_class, 'plugin_name', '').lower()
+                    curr_title = getattr(plugin_class, 'tab_title', '').lower()
+                    
+                    if (single_name_lower != class_name and 
+                        single_name_lower != curr_name and 
+                        single_name_lower != curr_title and 
+                        single_name_lower not in class_name and 
+                        single_name_lower not in curr_name and 
+                        single_name_lower not in curr_title):
+                        logger.debug(f"Skipping plugin '{plugin_name}' in single plugin mode (target: '{single_name}')")
+                        return
+                else:
+                    if len(self._plugins) >= 1:
+                        logger.debug(f"Skipping plugin '{plugin_name}' in single plugin mode (already registered a plugin)")
+                        return
+
             # Validate plugin
             if hasattr(plugin_class, 'validate_plugin'):
                 errors = plugin_class.validate_plugin()

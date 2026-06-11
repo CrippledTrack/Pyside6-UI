@@ -170,6 +170,8 @@ class MainWindow(QMainWindow):
         self.tab_widget.hide()
         self.tab_widget.setMovable(True)
         self.tab_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        if getattr(constants, "SINGLE_PLUGIN_MODE", False):
+            self.tab_widget.tabBar().hide()
         layout.addWidget(self.tab_widget)
     
     def _setup_controllers(self) -> None:
@@ -306,6 +308,10 @@ class MainWindow(QMainWindow):
         self.loading_widget.hide()
         self.tab_widget.show()
         
+        # Hide tab bar if single plugin mode is active
+        if getattr(constants, "SINGLE_PLUGIN_MODE", False):
+            self.tab_widget.tabBar().hide()
+        
         # Fix for table header resizing issues (only in new UI)
         if self.settings_service and self.settings_service.get_new_ui_enabled():
             from ..qt_bindings import QTableView, QHeaderView, QTreeWidget
@@ -370,6 +376,8 @@ class MainWindow(QMainWindow):
         self.tab_controller.set_batch_loading(False)
         self.loading_widget.hide()
         self.tab_widget.show()
+        if getattr(constants, "SINGLE_PLUGIN_MODE", False):
+            self.tab_widget.tabBar().hide()
         logger.error(f"Error loading tabs: {error_msg}")
         QMessageBox.critical(self, "Error", f"Failed to load tabs: {error_msg}")
     
@@ -391,6 +399,9 @@ class MainWindow(QMainWindow):
     
     def open_plugin_management_dialog(self) -> None:
         """Open the plugin management dialog (non-modal)."""
+        if getattr(constants, "SINGLE_PLUGIN_MODE", False):
+            return
+
         if self._plugin_dialog and self._plugin_dialog.isVisible():
             self._plugin_dialog.raise_()
             self._plugin_dialog.activateWindow()

@@ -107,9 +107,12 @@ class MenuBarController(QObject):
         settings_menu = QMenu("Settings", self.parent_widget)
         self.menu_bar.addMenu(settings_menu)
         
-        self.manage_plugins_action = QAction("Manage Plugins...", self.parent_widget)
-        settings_menu.addAction(self.manage_plugins_action)
-        self.manage_plugins_action.triggered.connect(on_manage_plugins)
+        from ...utils.imports import get_platforms_constants
+        constants = get_platforms_constants()
+        if not getattr(constants, "SINGLE_PLUGIN_MODE", False):
+            self.manage_plugins_action = QAction("Manage Plugins...", self.parent_widget)
+            settings_menu.addAction(self.manage_plugins_action)
+            self.manage_plugins_action.triggered.connect(on_manage_plugins)
         
         self.select_theme_action = QAction("Select Theme...", self.parent_widget)
         settings_menu.addAction(self.select_theme_action)

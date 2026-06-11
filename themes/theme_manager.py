@@ -352,10 +352,22 @@ class ThemeManager:
             theme_name = saved_theme
             logger.info(f"Applying saved theme preference: {theme_name}")
         else:
-            # Auto-detect based on system preference
-            is_dark = self.detect_system_dark_mode()
-            theme_name = "dark" if is_dark else "light"
-            logger.info(f"Applying auto-detected theme: {theme_name}")
+            # Check for DEFAULT_THEME constant override
+            try:
+                from ..app.utils.imports import get_platforms_constants
+                platform_constants = get_platforms_constants()
+                default_theme = getattr(platform_constants, 'DEFAULT_THEME', '')
+            except Exception:
+                default_theme = ''
+            
+            if default_theme and default_theme in self._themes:
+                theme_name = default_theme
+                logger.info(f"Applying constant default theme override: {theme_name}")
+            else:
+                # Auto-detect based on system preference
+                is_dark = self.detect_system_dark_mode()
+                theme_name = "dark" if is_dark else "light"
+                logger.info(f"Applying auto-detected theme: {theme_name}")
         
         # apply_theme will automatically check settings_service for new_ui_enabled
         self.apply_theme(theme_name)
