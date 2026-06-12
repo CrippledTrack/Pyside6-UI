@@ -69,6 +69,31 @@ def _create_prefixed_plugin(original_class: Type[Any], platform_prefix: str) -> 
     return new_class
 
 
+
+def _create_prefixed_plugin(original_class: Type[Any], platform_prefix: str) -> Type[Any]:
+    """Create a wrapper plugin class with a prefixed plugin_name."""
+    original_name = getattr(original_class, 'plugin_name', None)
+    if not original_name or original_name == "Unnamed Plugin":
+        original_name = original_class.__name__
+
+    original_title = getattr(original_class, 'tab_title', original_name)
+
+    prefixed_name = f"{platform_prefix} {original_name}"
+    prefixed_title = f"{platform_prefix} {original_title}"
+
+    new_class = type(
+        f"CrossPlatform_{original_class.__name__}",
+        (original_class,),
+        {
+            'plugin_name': prefixed_name,
+            'tab_title': prefixed_title,
+            '_original_tab_name': original_title,
+            '_is_cross_platform': True,
+        }
+    )
+    return new_class
+
+
 def _check_implements_interface(plugin_class: Type[Any], interface: Type) -> bool:
     """Check if a plugin class implements an interface.
 
@@ -161,6 +186,7 @@ class PluginRegistry:
         # Plugin instances cache
         self._plugin_instances: Dict[str, Any] = {}
         self._lock = threading.Lock()
+        self._lock = threading.Lock()
 
         # Optional async event delivery executor (opt-in)
         self._event_executor: Optional[ThreadPoolExecutor] = None
@@ -187,6 +213,10 @@ class PluginRegistry:
         Args:
             container: The application's service container
         """
+        with self._lock:
+            self._container = container
+            # Clear instance cache when container changes
+            self._plugin_instances.clear()
         with self._lock:
             self._container = container
             # Clear instance cache when container changes
@@ -238,7 +268,28 @@ class PluginRegistry:
                 errors = self._validate_extension_plugin(plugin_class, plugin_name)
                 if errors:
                     raise ValueError(f"Invalid plugin '{plugin_name}': {', '.join(errors)}")
+            # Validate plugin
+            if hasattr(plugin_class, 'validate_plugin'):
+                errors = plugin_class.validate_plugin()
+                if errors:
+                    raise ValueError(f"Invalid plugin '{plugin_name}': {', '.join(errors)}")
+            else:
+                errors = self._validate_extension_plugin(plugin_class, plugin_name)
+                if errors:
+                    raise ValueError(f"Invalid plugin '{plugin_name}': {', '.join(errors)}")
 
+            # Check platform compatibility
+            show_all = _is_show_all_platforms()
+            if hasattr(plugin_class, 'is_compatible'):
+                is_compatible = plugin_class.is_compatible()
+            else:
+                is_compatible = self._check_extension_plugin_compatibility(plugin_class)
+            
+            supported_platforms = getattr(plugin_class, 'supported_platforms', [])
+            
+            if not show_all and not is_compatible:
+                logger.debug(f"Skipping plugin '{plugin_name}' - not compatible with current platform.")
+                return
             # Check platform compatibility
             show_all = _is_show_all_platforms()
             if hasattr(plugin_class, 'is_compatible'):
@@ -271,11 +322,36 @@ class PluginRegistry:
                 plugin_class = _create_prefixed_plugin(plugin_class, platform_prefix)
                 plugin_name = plugin_class.plugin_name
                 logger.info(f"Loading cross-platform plugin '{plugin_name}' (supported: {supported_platforms})")
+            if show_all and not is_compatible:
+                # Determine platform prefix
+                platform_prefix = ""
+                if supported_platforms:
+                    sp = supported_platforms[0].lower()
+                    if "win" in sp:
+                        platform_prefix = "[Win]"
+                    elif "linux" in sp:
+                        platform_prefix = "[Linux]"
+                    elif "darwin" in sp or "mac" in sp:
+                        platform_prefix = "[macOS]"
+                    else:
+                        platform_prefix = f"[{supported_platforms[0].capitalize()}]"
+                else:
+                    platform_prefix = "[XPlatform]"
+
+                plugin_class = _create_prefixed_plugin(plugin_class, platform_prefix)
+                plugin_name = plugin_class.plugin_name
+                logger.info(f"Loading cross-platform plugin '{plugin_name}' (supported: {supported_platforms})")
 
             # Check version compatibility
             if not self._check_plugin_compatibility(plugin_class, plugin_name):
                 return
+            # Check version compatibility
+            if not self._check_plugin_compatibility(plugin_class, plugin_name):
+                return
 
+            # Handle name conflicts
+            if not self._handle_plugin_conflicts(plugin_name, is_core):
+                return
             # Handle name conflicts
             if not self._handle_plugin_conflicts(plugin_name, is_core):
                 return
@@ -286,6 +362,44 @@ class PluginRegistry:
             self._seen_plugins.add(plugin_name)
             
             logger.debug(f"Registered plugin: {plugin_name} (core={is_core})")
+            # Register the plugin class
+            self._add_plugin_to_registry(plugin_name, plugin_class, is_core)
+            self._apply_default_disabled_state(plugin_class, plugin_name)
+            self._seen_plugins.add(plugin_name)
+            
+            logger.debug(f"Registered plugin: {plugin_name} (core={is_core})")
+
+    def get_registered_name(self, plugin_class: Type[Any]) -> str:
+        """Get the name this plugin class will be registered under."""
+        name = getattr(plugin_class, 'plugin_name', None)
+        if not name or name == "Unnamed Plugin":
+            name = plugin_class.__name__
+
+        show_all = _is_show_all_platforms()
+        if hasattr(plugin_class, 'is_compatible'):
+            is_compatible = plugin_class.is_compatible()
+        else:
+            is_compatible = self._check_extension_plugin_compatibility(plugin_class)
+
+        if show_all and not is_compatible:
+            supported_platforms = getattr(plugin_class, 'supported_platforms', [])
+            platform_prefix = ""
+            if supported_platforms:
+                sp = supported_platforms[0].lower()
+                if "win" in sp:
+                    platform_prefix = "[Win]"
+                elif "linux" in sp:
+                    platform_prefix = "[Linux]"
+                elif "darwin" in sp or "mac" in sp:
+                    platform_prefix = "[macOS]"
+                else:
+                    platform_prefix = f"[{supported_platforms[0].capitalize()}]"
+            else:
+                platform_prefix = "[XPlatform]"
+            
+            return f"{platform_prefix} {name}"
+        
+        return name
 
     def get_registered_name(self, plugin_class: Type[Any]) -> str:
         """Get the name this plugin class will be registered under."""
@@ -349,6 +463,22 @@ class PluginRegistry:
             
             logger.debug(f"Created instance for plugin: {name}")
             return instance
+        with self._lock:
+            if name in self._plugin_instances:
+                return self._plugin_instances[name]
+            
+            plugin_class = self._plugins.get(name)
+            if not plugin_class:
+                raise ValueError(f"Plugin '{name}' not found in registry")
+            
+            if not self._container:
+                raise ValueError("ServiceContainer not set - call set_container() first")
+            # Instantiate strict new-architecture plugin directly
+            instance = plugin_class(self._container)
+            self._plugin_instances[name] = instance
+            
+            logger.debug(f"Created instance for plugin: {name}")
+            return instance
     
     def get_plugin_instances(self, enabled_only: bool = True) -> Dict[str, Any]:
         """Get instances for all (or enabled) plugins.
@@ -373,6 +503,8 @@ class PluginRegistry:
         """Check if a plugin instance is cached."""
         with self._lock:
             return name in self._plugin_instances
+        with self._lock:
+            return name in self._plugin_instances
 
     def _validate_extension_plugin(self, plugin_class: Type[Any], plugin_name: str) -> List[str]:
         """Validate an extension plugin."""
@@ -381,7 +513,9 @@ class PluginRegistry:
         # Check that plugin has a valid (non-default) name
         pn = getattr(plugin_class, 'plugin_name', None)
         has_valid_name = bool(pn and pn != "Unnamed Plugin")
+        has_valid_name = bool(pn and pn != "Unnamed Plugin")
         if not has_valid_name:
+            errors.append("Plugin must define plugin_name")
             errors.append("Plugin must define plugin_name")
         
         # Check that plugin implements at least one extension interface
@@ -535,6 +669,22 @@ class PluginRegistry:
             self._event_subscriber_plugins.clear()
             self._rejected_plugins.clear()
             self._shutdown_event_executor()
+        with self._lock:
+            self._plugins.clear()
+            self._core_plugins.clear()
+            self._external_plugins.clear()
+            self._disabled_plugins.clear()
+            self._plugin_instances.clear()
+            self._version_incompatibilities.clear()
+            self._seen_plugins.clear()
+            self._tab_plugins.clear()
+            self._menu_plugins.clear()
+            self._status_plugins.clear()
+            self._toolbar_plugins.clear()
+            self._service_plugins.clear()
+            self._event_subscriber_plugins.clear()
+            self._rejected_plugins.clear()
+            self._shutdown_event_executor()
 
     def _get_event_executor(self) -> ThreadPoolExecutor:
         """Get/create the bounded executor used for async event delivery."""
@@ -582,7 +732,15 @@ class PluginRegistry:
         with self._lock:
             if name not in self._rejected_plugins:
                 raise KeyError(f"Plugin '{name}' is not in the rejected plugins list")
+        with self._lock:
+            if name not in self._rejected_plugins:
+                raise KeyError(f"Plugin '{name}' is not in the rejected plugins list")
 
+            self._add_plugin_to_registry(name, plugin_class, is_core=False)
+            self.enable_plugin(name)
+            del self._rejected_plugins[name]
+            self._version_incompatibilities.pop(name, None)
+            logger.info(f"Force-registered rejected plugin: {name}")
             self._add_plugin_to_registry(name, plugin_class, is_core=False)
             self.enable_plugin(name)
             del self._rejected_plugins[name]
@@ -603,6 +761,7 @@ class PluginRegistry:
 
     def is_enabled(self, name: str) -> bool:
         """Check if a plugin is enabled."""
+        return name in self._plugins and name not in self._disabled_plugins
         return name in self._plugins and name not in self._disabled_plugins
 
     def get_enabled_plugins(self) -> Dict[str, Type[Any]]:
@@ -681,6 +840,16 @@ class PluginRegistry:
             except Exception:
                 pass
 
+            # Check if Events extension is enabled for this plugin
+            try:
+                if self._container:
+                    from ..app.services.settings_service import SettingsService
+                    settings_svc = self._container.get(SettingsService)
+                    if settings_svc and not settings_svc.is_extension_enabled(plugin_name, "Events"):
+                        continue
+            except Exception:
+                pass
+
             try:
                 # Try to get instance first
                 try:
@@ -720,6 +889,16 @@ class PluginRegistry:
             except Exception:
                 pass
 
+            # Check if Events extension is enabled for this plugin
+            try:
+                if self._container:
+                    from ..app.services.settings_service import SettingsService
+                    settings_svc = self._container.get(SettingsService)
+                    if settings_svc and not settings_svc.is_extension_enabled(plugin_name, "Events"):
+                        continue
+            except Exception:
+                pass
+
             try:
                 try:
                     instance = self.get_plugin_instance(plugin_name)
@@ -745,4 +924,4 @@ class PluginRegistry:
         return futures
 
 
-__all__ = ['PluginRegistry']
+__all__ = ['PluginRegistry']
