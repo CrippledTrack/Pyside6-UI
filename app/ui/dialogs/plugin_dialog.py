@@ -1,4 +1,4 @@
-﻿"""
+"""
 Plugin management dialog for enabling, disabling, and configuring plugins.
 
 This module provides a GUI interface for managing plugin lifecycle, including
@@ -246,16 +246,13 @@ class PluginManagementDialog(QDialog):
         self._rejected_plugins = self._registry.get_rejected_plugins()
         self.apply_filters()
 
-    def toggle_plugin(self, name: str, state: int) -> None:
-        """Toggle plugin enabled/disabled state.
-        
-        Only emits the signal - the actual enable/disable is handled by
-        PluginController.toggle_plugin() which also handles dynamic
-        extension integration.
-        """
-        # Don't call registry directly - let the controller handle it
-        # This ensures dynamic extension integration runs for new plugins
-        self.plugin_toggled.emit(name, bool(state))
+    def toggle_plugin(self, name: str, state: int | bool) -> None:
+        """Toggle plugin enabled/disabled state."""
+        enabled = bool(state)
+        if self.plugin_controller:
+            self.plugin_controller.toggle_plugin(name, enabled)
+        else:
+            self.plugin_toggled.emit(name, enabled)
         
         # If this is the currently selected plugin, refresh the details panel
         # to update the extension checkboxes (grey out if disabled)
@@ -265,12 +262,7 @@ class PluginManagementDialog(QDialog):
     def _force_enable_plugin(self, name: str, state: int) -> None:
         """Force-enable a version-incompatible plugin."""
         if not state:
-            # Being disabled - let the controller handle it via signal
-            self.plugin_toggled.emit(name, False)
-            
-            # If this is the currently selected plugin, refresh the details panel
-            if name == self.get_selected_plugin_name():
-                self.on_selection_changed()
+            self.toggle_plugin(name, False)
             return
         
         # Show warning before force-enabling
@@ -293,7 +285,8 @@ class PluginManagementDialog(QDialog):
         if name in self._rejected_plugins:
             plugin_class, reason = self._rejected_plugins[name]
             self._registry.register_plugin_force(name, plugin_class)
-            self.plugin_toggled.emit(name, True)
+            self._registry.disable_plugin(name)  # Temporarily disable so toggle_plugin executes a full enable cycle
+            self.toggle_plugin(name, True)
             self.load_plugins()
 
     def reload_plugins(self) -> None:
@@ -613,76 +606,36 @@ class PluginManagementDialog(QDialog):
         return item.text() if item else None
 
     def enable_selected(self) -> None:
-        """Enable the currently selected plugin and call lifecycle hook."""
+        """Enable the currently selected plugin."""
         name = self.get_selected_plugin_name()
         if not name:
             return
-        # Only enable if not already enabled to avoid duplicates
-        if not self._registry.is_enabled(name):
-            self._registry.enable_plugin(name)
-            # Call lifecycle hook
-            plugin_class = self._registry.get_plugin(name)
-            if plugin_class and hasattr(plugin_class, 'on_plugin_enabled'):
-                try:
-                    plugin_class.on_plugin_enabled()
-                except Exception as e:
-                    logger.debug(f"Error calling on_plugin_enabled hook for {name}: {e}")
-            self.plugin_toggled.emit(name, True)
+        self.toggle_plugin(name, True)
         self.apply_filters()
-        self.on_selection_changed()  # Refresh extension checkboxes
+        self.on_selection_changed()
 
     def disable_selected(self) -> None:
-        """Disable the currently selected plugin and call lifecycle hook."""
+        """Disable the currently selected plugin."""
         name = self.get_selected_plugin_name()
         if not name:
             return
-        self._registry.disable_plugin(name)
-        # Call lifecycle hook
-        plugin_class = self._registry.get_plugin(name)
-        if plugin_class and hasattr(plugin_class, 'on_plugin_disabled'):
-            try:
-                plugin_class.on_plugin_disabled()
-            except Exception as e:
-                logger.debug(f"Error calling on_plugin_disabled hook for {name}: {e}")
-        self.plugin_toggled.emit(name, False)
+        self.toggle_plugin(name, False)
         self.apply_filters()
-        self.on_selection_changed()  # Refresh extension checkboxes
+        self.on_selection_changed()
 
     def enable_all(self) -> None:
-        """Enable all plugins and call lifecycle hooks."""
+        """Enable all plugins."""
         for name, _ in self._all_plugins:
-            # Only enable if not already enabled to avoid duplicates
-            if not self._registry.is_enabled(name):
-                self._registry.enable_plugin(name)
-                # Call lifecycle hook
-                plugin_class = self._registry.get_plugin(name)
-                if plugin_class and hasattr(plugin_class, 'on_plugin_enabled'):
-                    try:
-                        plugin_class.on_plugin_enabled()
-                    except Exception as e:
-                        logger.debug(f"Error calling on_plugin_enabled hook for {name}: {e}")
-                self.plugin_toggled.emit(name, True)
+            self.toggle_plugin(name, True)
         self.apply_filters()
-        self.on_selection_changed()  # Refresh extension checkboxes
+        self.on_selection_changed()
 
     def disable_all(self) -> None:
-        """Disable all plugins and call lifecycle hooks."""
+        """Disable all plugins."""
         for name, _ in self._all_plugins:
-            # Only process if actually enabled
-            if not self._registry.is_enabled(name):
-                continue
-            # Emit signal FIRST so plugin controller can remove extensions
-            # before the plugin is disabled in the registry
-            self.plugin_toggled.emit(name, False)
-            # Call lifecycle hook
-            plugin_class = self._registry.get_plugin(name)
-            if plugin_class and hasattr(plugin_class, 'on_plugin_disabled'):
-                try:
-                    plugin_class.on_plugin_disabled()
-                except Exception as e:
-                    logger.debug(f"Error calling on_plugin_disabled hook for {name}: {e}")
+            self.toggle_plugin(name, False)
         self.apply_filters()
-        self.on_selection_changed()  # Refresh extension checkboxes
+        self.on_selection_changed()
 
     def on_table_context_menu(self, pos: QPoint) -> None:
         index = self.table.indexAt(pos)

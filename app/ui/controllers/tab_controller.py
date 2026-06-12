@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional, Callable, TYPE_CHECKING, List
 
-from ...qt_bindings import Signal, QObject, QTabWidget, QWidget
+from ...qt_bindings import Signal, QObject, QTabWidget, QWidget, QMenu, QAction, QKeySequence, QMessageBox, QPoint
 
 from ...constants import CURRENT_PLATFORM
 
@@ -66,9 +66,22 @@ class TabController(QObject):
         self.loaded_tabs: Dict[str, Dict[str, Any]] = {}
         self.is_loading_tab = False
         self._previous_tab_index = -1
+        self._batch_loading = False
         
         # Connect tab widget signals
         self.tab_widget.currentChanged.connect(self.on_tab_changed)
+    
+    def set_batch_loading(self, enabled: bool) -> None:
+        """Set whether the controller is in batch loading mode.
+        
+        When in batch loading mode, tab activation and lazy loading
+        are suppressed to avoid loading tabs during initialization.
+        
+        Args:
+            enabled: True to enable batch loading, False to disable
+        """
+        self._batch_loading = enabled
+        logger.debug(f"Set tab controller batch loading to {enabled}")
     
     def add_tab(self, tab_name: str, plugin_class: Any) -> None:
         """Add a new tab to the tab widget.
@@ -132,7 +145,7 @@ class TabController(QObject):
         Args:
             index: Index of the newly selected tab
         """
-        if self.is_loading_tab or index < 0:
+        if self.is_loading_tab or index < 0 or self._batch_loading:
             return
         
         # Call deactivation hook for previously active tab
@@ -177,10 +190,10 @@ class TabController(QObject):
                     plugin_class = tab_info["plugin_class"]
                     requires_admin = getattr(plugin_class, 'requires_admin', False)
                     
-                    # Check if daemon is now available
-                    if self.daemon_service and self.daemon_service.is_available():
-                        if not needs_admin_for_plugin(False, requires_admin, False):
-                            # Daemon is available, reload the tab
+                    # Check if daemon is now available or running as root
+                    if (self.daemon_service and self.daemon_service.is_available()) or self.admin_service.is_admin():
+                        if not needs_admin_for_plugin(False, requires_admin, self.admin_service.is_admin()):
+                            # Daemon or root privilege is available, reload the tab
                             logger.info(f"Daemon available, reloading tab '{tab_name}'")
                             self._reload_tab(tab_name)
                             self._previous_tab_index = index
@@ -393,6 +406,141 @@ class TabController(QObject):
         if hasattr(self, '_restart_admin_callback') and self._restart_admin_callback:
             admin_widget.restartRequested.connect(self._restart_admin_callback)
         return admin_widget
+
+    def show_tab_context_menu(self, position: QPoint) -> None:
+        """Show context menu for tabs.
+        
+        Args:
+            position: Position where menu was requested
+        """
+        # Find the tab at the position
+        tab_index = self.tab_widget.tabBar().tabAt(position)
+        if tab_index < 0:
+            return
+        
+        tab_name = self.tab_widget.tabText(tab_index)
+        
+        # Create context menu
+        context_menu = QMenu(self.tab_widget)
+        
+        # Close tab action
+        close_action = QAction("Close Tab", context_menu)
+        close_action.setShortcut(QKeySequence("Ctrl+W"))
+        close_action.triggered.connect(lambda: self.close_tab_by_index(tab_index))
+        context_menu.addAction(close_action)
+        
+        # Close other tabs action
+        close_others_action = QAction("Close Other Tabs", context_menu)
+        close_others_action.triggered.connect(lambda: self.close_other_tabs(tab_index))
+        context_menu.addAction(close_others_action)
+        
+        # Close all tabs action
+        close_all_action = QAction("Close All Tabs", context_menu)
+        close_all_action.triggered.connect(self.close_all_tabs)
+        context_menu.addAction(close_all_action)
+        
+        context_menu.addSeparator()
+        
+        # Plugin info action
+        info_action = QAction("Plugin Info", context_menu)
+        info_action.triggered.connect(lambda: self.show_plugin_info(tab_name))
+        context_menu.addAction(info_action)
+        
+        # Show the context menu
+        context_menu.exec(self.tab_widget.mapToGlobal(position))
+    
+    def close_tab_by_index(self, index: int) -> None:
+        """Close tab by index.
+        
+        Args:
+            index: Index of the tab to close
+        """
+        if 0 <= index < self.tab_widget.count():
+            tab_name = self.tab_widget.tabText(index)
+            self.remove_tab_by_index(index)
+            self.title_update_requested.emit()
+            
+            # Show toast notification if parent has toast_manager
+            parent = self.parent()
+            if parent and hasattr(parent, 'toast_manager'):
+                parent.toast_manager.show_info(f"Closed tab: {tab_name}")
+    
+    def close_other_tabs(self, keep_index: int) -> None:
+        """Close all tabs except the one at keep_index.
+        
+        Args:
+            keep_index: Index of the tab to keep
+        """
+        if keep_index < 0 or keep_index >= self.tab_widget.count():
+            return
+        
+        keep_tab_name = self.tab_widget.tabText(keep_index)
+        
+        self.set_batch_loading(True)
+        try:
+            # Close tabs from right to left to avoid index shifting
+            for i in range(self.tab_widget.count() - 1, -1, -1):
+                if i != keep_index:
+                    self.close_tab_by_index(i)
+        finally:
+            self.set_batch_loading(False)
+            
+        # Find the new index of the kept tab
+        new_index = -1
+        for i in range(self.tab_widget.count()):
+            if self.tab_widget.tabText(i) == keep_tab_name:
+                new_index = i
+                break
+                
+        if new_index >= 0:
+            if self.tab_widget.currentIndex() == new_index:
+                self.on_tab_changed(new_index)
+            else:
+                self.tab_widget.setCurrentIndex(new_index)
+    
+    def close_all_tabs(self) -> None:
+        """Close all tabs."""
+        reply = QMessageBox.question(
+            self.tab_widget, "Close All Tabs",
+            "Are you sure you want to close all tabs?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            self.set_batch_loading(True)
+            try:
+                while self.tab_widget.count() > 0:
+                    self.close_tab_by_index(0)
+            finally:
+                self.set_batch_loading(False)
+    
+    def show_plugin_info(self, tab_name: str) -> None:
+        """Show information about the plugin in the tab.
+        
+        Args:
+            tab_name: Name of the tab plugin to query
+        """
+        from ...services.plugin_service import PluginService
+        
+        plugin_service = self.container.get(PluginService)
+        plugin_class = plugin_service.get_plugin(tab_name)
+        
+        if plugin_class:
+            plugin_info = plugin_class.get_plugin_info()
+            info_text = f"""Plugin Information:
+
+Name: {plugin_info.get('name', 'Unknown')}
+Description: {plugin_info.get('description', 'No description')}
+Version: {plugin_info.get('version', 'Unknown')}
+Author: {plugin_info.get('author', 'Unknown')}
+Supported Platforms: {', '.join(plugin_info.get('supported_platforms', []))}
+Requires Admin: {'Yes' if plugin_info.get('requires_admin', False) else 'No'}
+Compatible: {'Yes' if plugin_info.get('compatible', False) else 'No'}"""
+            
+            QMessageBox.information(self.tab_widget, f"Plugin Info - {tab_name}", info_text)
+        else:
+            QMessageBox.warning(self.tab_widget, "Plugin Info", f"Plugin '{tab_name}' not found.")
 
 
 __all__ = ['TabController']

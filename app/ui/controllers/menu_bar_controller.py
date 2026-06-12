@@ -58,6 +58,7 @@ class MenuBarController(QObject):
         self.select_theme_action: Optional[QAction] = None
         self.toggle_new_ui_action: Optional[QAction] = None
         self.restart_admin_action: Optional[QAction] = None
+        self.start_pipe_daemon_action: Optional[QAction] = None
         self.show_all_platforms_action: Optional[QAction] = None
         self.view_logs_action: Optional[QAction] = None
         self.about_action: Optional[QAction] = None
@@ -69,7 +70,8 @@ class MenuBarController(QObject):
         on_restart_admin: Callable[[], None],
         on_view_logs: Optional[Callable[[], None]] = None,
         on_about: Optional[Callable[[], None]] = None,
-        on_toggle_new_ui: Optional[Callable[[], None]] = None
+        on_toggle_new_ui: Optional[Callable[[], None]] = None,
+        on_start_pipe_daemon: Optional[Callable[[], None]] = None
     ) -> None:
         """Setup the menu bar with all menus and actions.
         
@@ -80,9 +82,10 @@ class MenuBarController(QObject):
             on_view_logs: Optional callback for view logs action
             on_about: Optional callback for about action
             on_toggle_new_ui: Optional callback for toggle new UI action
+            on_start_pipe_daemon: Optional callback for starting pipe daemon
         """
         self._create_settings_menu(on_manage_plugins, on_select_theme, on_toggle_new_ui)
-        self._create_admin_menu(on_restart_admin)
+        self._create_admin_menu(on_restart_admin, on_start_pipe_daemon)
         self._create_dev_menu()
         self._create_help_menu(on_view_logs, on_about)
         self._setup_tooltips()
@@ -135,11 +138,16 @@ class MenuBarController(QObject):
             self._update_new_ui_action_text()
             self.toggle_new_ui_action.blockSignals(False)
     
-    def _create_admin_menu(self, on_restart_admin: Callable[[], None]) -> None:
+    def _create_admin_menu(
+        self,
+        on_restart_admin: Callable[[], None],
+        on_start_pipe_daemon: Optional[Callable[[], None]] = None
+    ) -> None:
         """Create the Admin menu if needed.
         
         Args:
             on_restart_admin: Callback for restart admin action
+            on_start_pipe_daemon: Optional callback for starting pipe daemon
             
         Note:
             On Windows: Shows when not running as administrator.
@@ -182,24 +190,48 @@ class MenuBarController(QObject):
             # Platform-specific menu text
             if CURRENT_PLATFORM == "linux":
                 # Check if daemon is already running
-                if self.daemon_service and self.daemon_service.is_available():
-                    action_text = "Daemon Running"
+                is_running = self.daemon_service and self.daemon_service.is_available()
+                
+                # Check which daemon is active
+                from ...utils.imports import get_platforms_constants
+                use_pipe_daemon = getattr(get_platforms_constants(), 'USE_PIPE_DAEMON', False)
+                
+                if is_running:
+                    if use_pipe_daemon:
+                        action_text = "Pipe Daemon Running (Beta)"
+                    else:
+                        action_text = "Daemon Running"
                     tooltip_text = "The privileged daemon is currently running"
                     enabled = False
                 else:
                     action_text = "Start Privileged Daemon"
                     tooltip_text = "Start the privileged daemon for root operations"
                     enabled = True
+                
+                self.restart_admin_action = QAction(action_text, self.parent_widget)
+                self.restart_admin_action.setToolTip(tooltip_text)
+                self.restart_admin_action.setEnabled(enabled)
+                self.restart_admin_action.triggered.connect(on_restart_admin)
+                admin_menu.addAction(self.restart_admin_action)
+                
+                # Add Pipe Daemon action
+                self.start_pipe_daemon_action = QAction("Start Pipe Daemon (Beta)", self.parent_widget)
+                self.start_pipe_daemon_action.setToolTip("Start the experimental pipe-based daemon")
+                self.start_pipe_daemon_action.setEnabled(not is_running)
+                if on_start_pipe_daemon:
+                    self.start_pipe_daemon_action.triggered.connect(on_start_pipe_daemon)
+                admin_menu.addAction(self.start_pipe_daemon_action)
             else:
                 action_text = "Restart as Administrator"
                 tooltip_text = "Restart the application with administrator privileges"
                 enabled = True
-            
-            self.restart_admin_action = QAction(action_text, self.parent_widget)
-            self.restart_admin_action.setToolTip(tooltip_text)
-            self.restart_admin_action.setEnabled(enabled)
-            self.restart_admin_action.triggered.connect(on_restart_admin)
-            admin_menu.addAction(self.restart_admin_action)
+                
+                self.restart_admin_action = QAction(action_text, self.parent_widget)
+                self.restart_admin_action.setToolTip(tooltip_text)
+                self.restart_admin_action.setEnabled(enabled)
+                self.restart_admin_action.triggered.connect(on_restart_admin)
+                admin_menu.addAction(self.restart_admin_action)
+                
             logger.debug(f"Admin menu created (platform: {CURRENT_PLATFORM})")
     
     def _create_dev_menu(self) -> None:
@@ -347,11 +379,21 @@ class MenuBarController(QObject):
         
         if CURRENT_PLATFORM == "linux":
             if self.daemon_service and self.daemon_service.is_available():
-                self.restart_admin_action.setText("Daemon Running")
+                from ...utils.imports import get_platforms_constants
+                use_pipe_daemon = getattr(get_platforms_constants(), 'USE_PIPE_DAEMON', False)
+                if use_pipe_daemon:
+                    self.restart_admin_action.setText("Pipe Daemon Running (Beta)")
+                else:
+                    self.restart_admin_action.setText("Daemon Running")
                 self.restart_admin_action.setEnabled(False)
                 self.restart_admin_action.setToolTip(
                     "The privileged daemon is currently running"
                 )
+                if self.start_pipe_daemon_action:
+                    self.start_pipe_daemon_action.setEnabled(False)
+                    self.start_pipe_daemon_action.setToolTip(
+                        "The privileged daemon is currently running"
+                    )
                 logger.debug("Admin menu updated: daemon running")
             else:
                 self.restart_admin_action.setText("Start Privileged Daemon")
@@ -359,6 +401,11 @@ class MenuBarController(QObject):
                 self.restart_admin_action.setToolTip(
                     "Start the privileged daemon for root operations"
                 )
+                if self.start_pipe_daemon_action:
+                    self.start_pipe_daemon_action.setEnabled(True)
+                    self.start_pipe_daemon_action.setToolTip(
+                        "Start the experimental pipe-based daemon"
+                    )
                 logger.debug("Admin menu updated: daemon not running")
 
 

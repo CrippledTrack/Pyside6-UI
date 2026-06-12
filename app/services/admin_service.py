@@ -133,6 +133,9 @@ class AdminService:
         Returns:
             True if admin is available, False otherwise
         """
+        if self.is_admin():
+            return True
+            
         from ..qt_bindings import QMessageBox
         
         if CURRENT_PLATFORM == "windows":
@@ -186,21 +189,27 @@ class AdminService:
                 return reply == QMessageBox.StandardButton.Yes
         return False
     
-    def restart_as_admin(self) -> None:
+    def restart_as_admin(self) -> tuple[bool, Optional[str]]:
         """Restart the application with administrator/root privileges.
         
         On Windows: Restarts the entire application as administrator.
         On Linux: Starts the privileged daemon (GUI continues running as normal user).
+        
+        Returns:
+            Tuple of (success: bool, error_message: Optional[str])
         """
         if CURRENT_PLATFORM == "windows":
-            run_as_admin()
+            try:
+                run_as_admin()
+                return True, None
+            except Exception as e:
+                return False, str(e)
         elif CURRENT_PLATFORM == "linux":
-            # Linux admin restart is handled by daemon service
-            # This method is kept for API consistency but shouldn't be called directly
-            # Use daemon_service.start() instead
-            logger.warning("restart_as_admin() called on Linux - use daemon_service.start() instead")
+            if self._daemon_service:
+                return self._daemon_service.start()
+            return False, "Daemon service not available"
         else:
-            raise RuntimeError(f"Admin elevation not supported on {CURRENT_PLATFORM}")
+            return False, f"Admin elevation not supported on {CURRENT_PLATFORM}"
 
 
 __all__ = ['AdminService']

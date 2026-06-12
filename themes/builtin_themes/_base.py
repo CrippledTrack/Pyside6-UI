@@ -48,6 +48,18 @@ def generate_stylesheet(
     # Style variants
     is_dark: bool = True,
     border_radius: str = BORDER_RADIUS_DEFAULT,
+    # v5.1.0 structural control parameters
+    border_width: str = "1px",
+    flat_containers: bool = False,
+    winforms_label_quirk: bool = False,
+    # v5.1.0 tab colour overrides (for inverted/themed tab selections)
+    tab_selected_bg: str = None,
+    tab_selected_text: str = None,
+    tab_selected_indicator: str = None,
+    tab_hover_bg: str = None,
+    tab_hover_text: str = None,
+    # v5.1.0 scrollbar handle radius (e.g. 0px for cyberpunk sharp style)
+    scrollbar_handle_radius: str = "6px",
 ) -> str:
     """Generate an enhanced stylesheet with consistent styling patterns.
     
@@ -75,6 +87,15 @@ def generate_stylesheet(
         button_pressed: Button pressed color
         is_dark: Whether this is a dark theme
         border_radius: Default border radius for elements
+        border_width: Uniform border thickness applied to inputs and cards (default "1px")
+        flat_containers: If True, card frames render as transparent/borderless (legacy-style)
+        winforms_label_quirk: If True, injects bordered styling onto QLabel[variant="field_label"]
+        tab_selected_bg: Background of selected tab (defaults to base_bg)
+        tab_selected_text: Text colour of selected tab (defaults to text_color)
+        tab_selected_indicator: Top-border accent on selected tab (defaults to accent_color)
+        tab_hover_bg: Background of hovered unselected tab (defaults to hover_overlay)
+        tab_hover_text: Text colour of hovered unselected tab (defaults to text_color)
+        scrollbar_handle_radius: Border-radius of scrollbar handles (default "6px")
     
     Returns:
         Complete Qt stylesheet string
@@ -84,6 +105,9 @@ def generate_stylesheet(
     button_text = button_text or ("#ffffff" if is_dark else window_bg)
     button_hover = button_hover or accent_hover
     button_pressed = button_pressed or accent_pressed
+
+    # Default tab appearance — resolved after hover_overlay is calculated below
+    # (these are resolved after the overlay block so hover_overlay is available)
     
     # Calculate overlay colors based on theme
     if is_dark:
@@ -96,9 +120,30 @@ def generate_stylesheet(
         pressed_overlay = "rgba(0, 0, 0, 0.08)"
         disabled_bg = "rgba(0, 0, 0, 0.05)"
         shadow_color = "rgba(0, 0, 0, 0.15)"
+
+    # Resolve tab colour defaults now that hover_overlay is available
+    _tab_selected_bg        = tab_selected_bg        or base_bg
+    _tab_selected_text      = tab_selected_text      or text_color
+    _tab_selected_indicator = tab_selected_indicator or accent_color
+    _tab_hover_bg           = tab_hover_bg           or hover_overlay
+    _tab_hover_text         = tab_hover_text         or text_color
     
-    # Card container background (slightly different from base for depth)
-    card_bg = alt_bg if is_dark else base_bg
+    # Card container style — flat_containers drops modern card rendering for legacy-style layouts
+    if flat_containers:
+        card_style = "background-color: transparent; border: none; margin: 0px;"
+    else:
+        card_bg = alt_bg if is_dark else base_bg
+        card_style = f"background-color: {card_bg}; border: {border_width} solid {border_color}; margin: 4px;"
+
+    # Scoped WinForms-style label quirk values
+    if winforms_label_quirk:
+        label_quirk_border = "1px solid #d9d9d9"
+        label_quirk_bg = "#ffffff"
+        label_quirk_padding = "4px 8px"
+    else:
+        label_quirk_border = "none"
+        label_quirk_bg = "transparent"
+        label_quirk_padding = "0px"
     
     return f"""
         /* ===== Base Widgets ===== */
@@ -114,13 +159,13 @@ def generate_stylesheet(
         
         /* ===== Loading Widget ===== */
         #loadingWidget {{
-            background-color: {base_bg};
+            background-color: {window_bg};
             border-radius: {border_radius};
         }}
         
         /* ===== Tab Widget ===== */
         QTabWidget::pane {{
-            border: 1px solid {border_color};
+            border: {border_width} solid {border_color};
             background-color: {base_bg};
             border-radius: {border_radius};
             border-top-left-radius: 0;
@@ -137,8 +182,8 @@ def generate_stylesheet(
         QTabBar::tab {{
             background-color: {alt_bg};
             color: {text_secondary};
-            border: 1px solid {border_color};
-            border-bottom: 1px solid {border_color};
+            border: {border_width} solid {border_color};
+            border-bottom: {border_width} solid {border_color};
             padding: 8px 12px; /* Reduced from 16px to fit more tabs */
             margin-right: 2px;
             border-top-left-radius: {border_radius};
@@ -147,14 +192,14 @@ def generate_stylesheet(
             font-weight: 500;
         }}
         QTabBar::tab:selected {{
-            background-color: {base_bg};
-            color: {text_color};
-            border-bottom-color: {base_bg};
-            border-top: 2px solid {accent_color};
+            background-color: {_tab_selected_bg};
+            color: {_tab_selected_text};
+            border-bottom-color: {_tab_selected_bg};
+            border-top: 2px solid {_tab_selected_indicator};
         }}
         QTabBar::tab:hover:!selected {{
-            background-color: {hover_overlay};
-            color: {text_color};
+            background-color: {_tab_hover_bg};
+            color: {_tab_hover_text};
             border-color: {border_hover};
         }}
         QTabBar::tab:disabled {{
@@ -195,7 +240,7 @@ def generate_stylesheet(
         
         /* ===== Input Fields ===== */
         QLineEdit, QTextEdit, QPlainTextEdit {{
-            border: 1px solid {border_color};
+            border: {border_width} solid {border_color};
             border-radius: {border_radius};
             padding: 6px 8px; /* Reduced from 8px 12px */
             background-color: {base_bg};
@@ -276,7 +321,7 @@ def generate_stylesheet(
         
         /* ===== ComboBox ===== */
         QComboBox {{
-            border: 1px solid {border_color};
+            border: {border_width} solid {border_color};
             border-radius: {border_radius};
             padding: 6px 12px;
             background-color: {base_bg};
@@ -338,6 +383,14 @@ def generate_stylesheet(
             border-radius: 0;
         }}
         
+        /* ===== Scoped Form Labels Quirk (winforms_label_quirk) ===== */
+        /* Apply bordered style only to widgets with setProperty("variant", "field_label") */
+        QLabel[variant="field_label"] {{
+            border: {label_quirk_border};
+            background-color: {label_quirk_bg};
+            padding: {label_quirk_padding};
+        }}
+        
         /* ===== Group Box ===== */
         QGroupBox {{
             border: 1px solid {border_color};
@@ -357,19 +410,9 @@ def generate_stylesheet(
         }}
         
         /* ===== Card Containers ===== */
-        QFrame#card, QFrame[card="true"] {{
-            background-color: {card_bg};
-            border: 1px solid {border_color};
-            border-radius: {border_radius};
-            margin: 4px;
-        }}
-        QFrame#cardElevated {{
-            background-color: {base_bg};
-            border: 1px solid {border_color};
-            border-radius: {border_radius};
-            /* Attempt simple shadow simulation via border-bottom/right */
-            border-bottom: 2px solid {border_color};
-            border-right: 2px solid {border_color};
+        /* flat_containers=True renders frames as transparent/borderless (legacy-style) */
+        QFrame#card, QFrame[card="true"], QFrame#cardElevated {{
+            {card_style}
         }}
         
         /* ===== Scrollbars ===== */
@@ -382,7 +425,7 @@ def generate_stylesheet(
         QScrollBar::handle:vertical {{
             background-color: {border_color};
             min-height: 20px;
-            border-radius: 6px;
+            border-radius: {scrollbar_handle_radius};
             margin: 2px;
         }}
         QScrollBar::handle:vertical:hover {{
@@ -406,7 +449,7 @@ def generate_stylesheet(
         QScrollBar::handle:horizontal {{
             background-color: {border_color};
             min-width: 30px;
-            border-radius: 6px;
+            border-radius: {scrollbar_handle_radius};
             margin: 2px;
         }}
         QScrollBar::handle:horizontal:hover {{

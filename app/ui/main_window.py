@@ -128,20 +128,12 @@ class MainWindow(QMainWindow):
         self._setup_ui_components()
         self._setup_controllers()
         
-        # ── Deferred init ───────────────────────────────────────────────
-        # PERF: Standard GUI architectures block the main thread while building menus,
-        # toolbars, and shortcuts. We yield to the Qt event loop instead using a 0ms 
-        # singleShot timer. This allows the OS to paint the window shell immediately 
-        # (reducing perceived load time by ~300ms) and schedules the remaining
-        # initialization for the very next event loop tick.
-        from ..qt_bindings import QTimer
-        QTimer.singleShot(0, self._complete_deferred_init)
+        # ── Complete initialization synchronously before window.show() ──
+        # This prevents the brief white/unthemed window and "python" title flash on startup
+        self._complete_deferred_init()
     
     def _complete_deferred_init(self) -> None:
-        """Finish initializing components that aren't needed for the first paint.
-        
-        Called via QTimer.singleShot(0) so the window shell is already visible.
-        """
+        """Finish initializing components that aren't needed for the first paint."""
         self._setup_managers()
         self._setup_status_bar()
         self.setup_toast_manager()
@@ -159,7 +151,9 @@ class MainWindow(QMainWindow):
         geom = self.settings_service.get_window_geometry()
         self.resize(geom.width, geom.height)
         if geom.maximized:
-            self.showMaximized()
+            self.setWindowState(Qt.WindowState.WindowMaximized)
+        elif geom.fullscreen:
+            self.setWindowState(Qt.WindowState.WindowFullScreen)
     
     def _setup_ui_components(self) -> None:
         """Create and configure all UI widgets and layouts."""
@@ -176,7 +170,6 @@ class MainWindow(QMainWindow):
         self.tab_widget.hide()
         self.tab_widget.setMovable(True)
         self.tab_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.tab_widget.customContextMenuRequested.connect(self.show_tab_context_menu)
         layout.addWidget(self.tab_widget)
     
     def _setup_controllers(self) -> None:
@@ -190,6 +183,9 @@ class MainWindow(QMainWindow):
         # Connect tab controller signals
         self.tab_controller.title_update_requested.connect(self._update_window_title)
         self.tab_controller.set_restart_admin_callback(self.restart_as_admin)
+        
+        # Connect context menu directly to tab_controller
+        self.tab_widget.customContextMenuRequested.connect(self.tab_controller.show_tab_context_menu)
         
         # Create plugin controller - now accepts container directly
         self.plugin_controller = PluginController(
@@ -257,7 +253,8 @@ class MainWindow(QMainWindow):
             on_restart_admin=self.restart_as_admin,
             on_view_logs=self.open_log_viewer_dialog,
             on_about=self.show_about_dialog,
-            on_toggle_new_ui=None  # Moved to theme dialog
+            on_toggle_new_ui=None,  # Moved to theme dialog
+            on_start_pipe_daemon=self.start_pipe_daemon
         )
     
         # Connect dev menu signals
@@ -292,6 +289,11 @@ class MainWindow(QMainWindow):
         self.tab_loader.finished.connect(self.on_tabs_loaded)
         self.tab_loader.error.connect(self.on_tab_load_error)
         self.tab_loader.add_tab.connect(self.tab_controller.add_tab)
+        
+        # Enable batch loading mode in tab controller to prevent premature tab activation/lazy loading
+        # when the first tab is added or during bulk addition.
+        self.tab_controller.set_batch_loading(True)
+        
         self.tab_loader.start()
     
     def _update_window_title(self) -> None:
@@ -335,24 +337,37 @@ class MainWindow(QMainWindow):
                     except Exception:
                         pass
 
+        # Disable batch loading so tab activation/loading can proceed
+        self.tab_controller.set_batch_loading(False)
+
         logger.info("All tabs loaded successfully")
         self._update_window_title()
         
-        # Restore last active tab
+        # Restore last active tab or activate first tab
+        desired_index = 0 if self.tab_widget.count() > 0 else -1
         if self.settings_service:
             last_active = self.settings_service.get_last_active_tab()
             if last_active:
                 # Find index of this tab
                 for i in range(self.tab_widget.count()):
                     if self.tab_widget.tabText(i) == last_active:
-                        self.tab_widget.setCurrentIndex(i)
+                        desired_index = i
                         break
+        
+        if desired_index >= 0:
+            if self.tab_widget.currentIndex() == desired_index:
+                # If current index is already desired_index, setCurrentIndex won't trigger currentChanged signal,
+                # so we manually trigger the tab changed slot to lazy load and activate the tab.
+                self.tab_controller.on_tab_changed(desired_index)
+            else:
+                self.tab_widget.setCurrentIndex(desired_index)
         
         # Integrate extension plugins (Menu, Status, Toolbar, Service)
         self.plugin_controller.integrate_extensions(self)
     
     def on_tab_load_error(self, error_msg: str) -> None:
         """Handle tab loading error."""
+        self.tab_controller.set_batch_loading(False)
         self.loading_widget.hide()
         self.tab_widget.show()
         logger.error(f"Error loading tabs: {error_msg}")
@@ -532,27 +547,44 @@ class MainWindow(QMainWindow):
         On Linux: Starts the privileged daemon (GUI continues running as normal user).
         """
         try:
-            if CURRENT_PLATFORM == "windows":
-                from ..utils.elevation_windows import run_as_admin
-                run_as_admin()
-            elif CURRENT_PLATFORM == "linux":
-                # Use daemon service to start the daemon
-                success, error_msg = self.daemon_service.start()
-                
+            success, error_msg = self.admin_service.restart_as_admin()
+            
+            if CURRENT_PLATFORM == "linux":
                 if success:
                     self.toast_manager.show_success("Privileged daemon started successfully")
                 else:
                     self.toast_manager.show_error(
                         f"Failed to start daemon: {error_msg or 'Check system permissions'}"
                     )
+            elif CURRENT_PLATFORM != "windows":
+                if not success:
+                    self.toast_manager.show_warning(
+                        f"Not supported or failed: {error_msg}"
+                    )
+        except Exception as e:
+            logger.error(f"Failed to restart as administrator: {e}")
+            self.toast_manager.show_error(f"Failed to restart as administrator: {e}")
+
+    def start_pipe_daemon(self) -> None:
+        """Start the privileged daemon in pipe mode (Beta)."""
+        try:
+            if CURRENT_PLATFORM == "linux":
+                success, error_msg = self.daemon_service.start_pipe()
+                
+                if success:
+                    self.toast_manager.show_success("Pipe daemon (Beta) started successfully")
+                else:
+                    self.toast_manager.show_error(
+                        f"Failed to start pipe daemon: {error_msg or 'Check system permissions'}"
+                    )
             else:
-                logger.warning(f"Restart as admin not supported on platform: {CURRENT_PLATFORM}")
+                logger.warning(f"Pipe daemon not supported on platform: {CURRENT_PLATFORM}")
                 self.toast_manager.show_warning(
                     f"Not supported on {CURRENT_PLATFORM}"
                 )
         except Exception as e:
-            logger.error(f"Failed to restart as administrator: {e}")
-            self.toast_manager.show_error(f"Failed to restart as administrator: {e}")
+            logger.error(f"Failed to start pipe daemon: {e}")
+            self.toast_manager.show_error(f"Failed to start pipe daemon: {e}")
     
     def _refresh_admin_tabs(self) -> None:
         """Refresh tabs that require admin privileges.
@@ -595,15 +627,6 @@ class MainWindow(QMainWindow):
         ]
         other_text = ", ".join(other_platforms) if other_platforms else "other platforms"
         
-        # Always clear the cross-platform plugin cache so that any subsequent
-        # discovery run reflects the new toggle state and (for dev mode) the
-        # correct mock modules installed by PluginService.
-        try:
-            from ..utils.dev_mode_utils.cross_platform_plugins import clear_cross_platform_cache
-            clear_cross_platform_cache()
-        except ImportError:
-            logger.warning("Could not clear cross-platform plugin cache")
-        
         # Reload plugins with the new cross-platform setting applied.
         self._reload_all_plugins()
         
@@ -626,6 +649,9 @@ class MainWindow(QMainWindow):
         # This prevents duplicate menu items, toolbar actions, and status widgets
         # and ensures ServiceExtension plugins are properly shut down
         self.plugin_controller.cleanup_all_extensions()
+        
+        # Set batch loading on tab controller to prevent lazy loading during removals
+        self.tab_controller.set_batch_loading(True)
         
         # Clear existing tabs
         while self.tab_widget.count() > 0:
@@ -685,7 +711,7 @@ class MainWindow(QMainWindow):
         """Close the current tab."""
         current = self.tab_widget.currentIndex()
         if current >= 0:
-            self.close_tab_by_index(current)
+            self.tab_controller.close_tab_by_index(current)
     
     def toggle_fullscreen(self) -> None:
         """Toggle fullscreen mode."""
@@ -718,96 +744,6 @@ class MainWindow(QMainWindow):
         
         event.accept()
     
-    def show_tab_context_menu(self, position: QPoint) -> None:
-        """Show context menu for tabs."""
-        # Find the tab at the position
-        tab_index = self.tab_widget.tabBar().tabAt(position)
-        if tab_index < 0:
-            return
-        
-        tab_name = self.tab_widget.tabText(tab_index)
-        
-        # Create context menu
-        context_menu = QMenu(self)
-        
-        # Close tab action
-        close_action = QAction("Close Tab", self)
-        close_action.setShortcut(QKeySequence("Ctrl+W"))
-        close_action.triggered.connect(lambda: self.close_tab_by_index(tab_index))
-        context_menu.addAction(close_action)
-        
-        # Close other tabs action
-        close_others_action = QAction("Close Other Tabs", self)
-        close_others_action.triggered.connect(lambda: self.close_other_tabs(tab_index))
-        context_menu.addAction(close_others_action)
-        
-        # Close all tabs action
-        close_all_action = QAction("Close All Tabs", self)
-        close_all_action.triggered.connect(self.close_all_tabs)
-        context_menu.addAction(close_all_action)
-        
-        context_menu.addSeparator()
-        
-        # Plugin info action
-        info_action = QAction("Plugin Info", self)
-        info_action.triggered.connect(lambda: self.show_plugin_info(tab_name))
-        context_menu.addAction(info_action)
-        
-        # Show the context menu
-        context_menu.exec(self.tab_widget.mapToGlobal(position))
-    
-    def close_tab_by_index(self, index: int) -> None:
-        """Close tab by index."""
-        if 0 <= index < self.tab_widget.count():
-            tab_name = self.tab_widget.tabText(index)
-            self.tab_controller.remove_tab_by_index(index)
-            self._update_window_title()
-            
-            # Show toast notification
-            if hasattr(self, 'toast_manager'):
-                self.toast_manager.show_info(f"Closed tab: {tab_name}")
-    
-    def close_other_tabs(self, keep_index: int) -> None:
-        """Close all tabs except the one at keep_index."""
-        if keep_index < 0 or keep_index >= self.tab_widget.count():
-            return
-        
-        # Close tabs from right to left to avoid index shifting
-        for i in range(self.tab_widget.count() - 1, -1, -1):
-            if i != keep_index:
-                self.close_tab_by_index(i)
-    
-    def close_all_tabs(self) -> None:
-        """Close all tabs."""
-        reply = QMessageBox.question(
-            self, "Close All Tabs",
-            "Are you sure you want to close all tabs?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            while self.tab_widget.count() > 0:
-                self.close_tab_by_index(0)
-    
-    def show_plugin_info(self, tab_name: str) -> None:
-        """Show information about the plugin in the tab."""
-        plugin_info = self.plugin_controller.get_plugin_info(tab_name)
-        
-        if plugin_info:
-            info_text = f"""Plugin Information:
-
-Name: {plugin_info.get('name', 'Unknown')}
-Description: {plugin_info.get('description', 'No description')}
-Version: {plugin_info.get('version', 'Unknown')}
-Author: {plugin_info.get('author', 'Unknown')}
-Supported Platforms: {', '.join(plugin_info.get('supported_platforms', []))}
-Requires Admin: {'Yes' if plugin_info.get('requires_admin', False) else 'No'}
-Compatible: {'Yes' if plugin_info.get('compatible', False) else 'No'}"""
-            
-            QMessageBox.information(self, f"Plugin Info - {tab_name}", info_text)
-        else:
-            QMessageBox.warning(self, "Plugin Info", f"Plugin '{tab_name}' not found.")
     
     def show_status(self, message: str, timeout: int = 0) -> None:
         """Show a status message in the status bar.

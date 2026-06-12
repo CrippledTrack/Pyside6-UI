@@ -85,6 +85,31 @@ def _python_version_line() -> str:
         pass
     return ""
 
+
+def _git_commit_line() -> str:
+    """Return a Git commit line, only visible in dev mode."""
+    try:
+        from .admin import is_dev_mode
+        from ..build_info import GIT_COMMIT
+
+        if not is_dev_mode():
+            return ""
+
+        if GIT_COMMIT and GIT_COMMIT != "unknown":
+            is_dirty = GIT_COMMIT.endswith("-dirty")
+            base_commit = GIT_COMMIT[:-6] if is_dirty else GIT_COMMIT
+            
+            # Shorten base commit if it looks like a full SHA
+            if len(base_commit) == 40:
+                base_commit = base_commit[:8]
+                
+            commit_str = f"{base_commit}-dirty" if is_dirty else base_commit
+            return f"<p><b>Git Commit:</b> {commit_str}</p>"
+    except Exception:
+        pass
+    return ""
+
+
 def create_about_dialog(
     parent,
     *,
@@ -145,6 +170,7 @@ def build_about_info(
 
     build_distro_line = _build_distro_line(str(platform_name))
     python_line = _python_version_line()
+    git_line = _git_commit_line()
 
     # Use a human-friendly platform label (e.g., map 'darwin' -> 'macOS').
     from .display_utils import _format_platform_name
@@ -158,6 +184,7 @@ def build_about_info(
         f"{distro_line}"
         f"{build_distro_line}"
         f"{python_line}"
+        f"{git_line}"
         f"{binding_line}"
     )
 

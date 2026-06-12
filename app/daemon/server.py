@@ -31,6 +31,21 @@ MAX_WORKERS = 8
 SHUTDOWN_REQUESTED = threading.Event()
 
 
+def monitor_parent_process(parent_pid: int):
+    """Monitor parent process and shutdown if it exits."""
+    logger.info(f"Starting parent process monitor thread for PID {parent_pid}")
+    import time
+    while not SHUTDOWN_REQUESTED.is_set():
+        try:
+            # os.kill(pid, 0) checks if process exists on Unix
+            os.kill(parent_pid, 0)
+        except OSError:
+            logger.warning(f"Parent process {parent_pid} has exited. Shutting down daemon...")
+            SHUTDOWN_REQUESTED.set()
+            break
+        time.sleep(2.0)
+
+
 class PrivilegedDaemon:
     """Daemon server for executing privileged operations."""
     
@@ -128,6 +143,9 @@ class PrivilegedDaemon:
                 result = self._execute_command(params)
                 return create_response(request_id, True, result)
             
+            elif operation == 'ping':
+                return create_response(request_id, True, 'pong')
+
             elif operation == OPERATION_SHUTDOWN:
                 logger.info("Shutdown requested")
                 SHUTDOWN_REQUESTED.set()
@@ -233,7 +251,7 @@ class PrivilegedDaemon:
             logger.debug(f"Client disconnected: {addr}")
     
     def start(self):
-        """Start the daemon server."""
+        """Start the daemon server in legacy socket mode (To be removed after 5.x)."""
         # Log immediately to stderr so we can see what's happening
         print("[Daemon] Starting privileged daemon...", file=sys.stderr, flush=True)
         print(f"[Daemon] Current EUID: {os.geteuid()}, UID: {os.getuid()}", file=sys.stderr, flush=True)
@@ -257,17 +275,40 @@ class PrivilegedDaemon:
         # Cleanup old socket
         self._cleanup_socket()
         
-        # Ensure socket directory exists
+        # Ensure socket directory exists and has correct permissions/ownership
         socket_dir = os.path.dirname(self.socket_path)
-        if socket_dir and not os.path.exists(socket_dir):
+        if socket_dir:
+            # Under no circumstances should we chmod/chown root directory or /tmp
+            is_critical_dir = socket_dir in ('/', '/tmp') or os.path.abspath(socket_dir) in ('/', '/tmp')
             try:
-                os.makedirs(socket_dir, mode=0o700, exist_ok=True)
-                logger.info(f"Created socket directory: {socket_dir}")
+                if not os.path.exists(socket_dir):
+                    os.makedirs(socket_dir, mode=0o700, exist_ok=True)
+                    logger.info(f"Created socket directory: {socket_dir}")
+                elif not is_critical_dir:
+                    # If it exists, ensure it has the correct permissions (0o700)
+                    os.chmod(socket_dir, 0o700)
+                    logger.info(f"Ensured socket directory permissions are 0o700: {socket_dir}")
+                
+                # Always set/correct ownership of the directory to the allowed user
+                if self.allowed_uid is not None and self.allowed_gid is not None and not is_critical_dir:
+                    os.chown(socket_dir, self.allowed_uid, self.allowed_gid)
+                    logger.info(f"Ensured socket directory ownership is UID {self.allowed_uid}, GID {self.allowed_gid}")
             except OSError as e:
-                logger.error(f"Failed to create socket directory {socket_dir}: {e}")
+                logger.error(f"Failed to create/chown/chmod socket directory {socket_dir}: {e}")
                 raise
         
-        # Create socket
+        # Start parent PID monitor if configured
+        if hasattr(self, 'parent_pid') and self.parent_pid is not None:
+            monitor_thread = threading.Thread(
+                target=monitor_parent_process,
+                args=(self.parent_pid,),
+                name="parent-monitor",
+                daemon=True
+            )
+            monitor_thread.start()
+
+        # Create socket with safe umask
+        orig_umask = os.umask(0o177)
         try:
             print(f"[Daemon] Creating socket at: {self.socket_path}", file=sys.stderr, flush=True)
             self.server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -281,6 +322,8 @@ class PrivilegedDaemon:
             logger.error(error_msg)
             print(f"[Daemon] ERROR: {error_msg}", file=sys.stderr, flush=True)
             raise
+        finally:
+            os.umask(orig_umask)
         
         # Set socket ownership and permissions to only allow the original user
         if self.allowed_uid is not None and self.allowed_gid is not None:
@@ -308,6 +351,7 @@ class PrivilegedDaemon:
                 client_thread = threading.Thread(
                     target=self._handle_client,
                     args=(client_socket, addr),
+                    name="SocketClientHandler",
                     daemon=True
                 )
                 client_thread.start()
@@ -333,12 +377,81 @@ class PrivilegedDaemon:
                 pass
         
         # Wait for active tasks to complete
-        self.executor.shutdown(wait=True, timeout=5.0)
+        try:
+            self.executor.shutdown(wait=True, cancel_futures=True)
+        except TypeError:
+            self.executor.shutdown(wait=True)
         
         # Cleanup socket file
         self._cleanup_socket()
         
         logger.info("Daemon stopped")
+
+    # =========================================================================
+    # Pipe Mode Worker Execution
+    # =========================================================================
+    def start_pipe_mode(self):
+        """Start the daemon in standard I/O pipe mode."""
+        print("[Daemon] Starting privileged daemon in pipe mode...", file=sys.stderr, flush=True)
+        print(f"[Daemon] Current EUID: {os.geteuid()}, UID: {os.getuid()}", file=sys.stderr, flush=True)
+        
+        # Verify we're running as root
+        if os.geteuid() != 0:
+            error_msg = f"Daemon must run as root (current EUID: {os.geteuid()})"
+            logger.error(error_msg)
+            print(f"[Daemon] ERROR: {error_msg}", file=sys.stderr, flush=True)
+            sys.exit(1)
+            
+        # Setup signal handlers
+        self._setup_signal_handlers()
+        
+        # Start parent PID monitor if configured
+        if hasattr(self, 'parent_pid') and self.parent_pid is not None:
+            monitor_thread = threading.Thread(
+                target=monitor_parent_process,
+                args=(self.parent_pid,),
+                name="parent-monitor",
+                daemon=True
+            )
+            monitor_thread.start()
+            
+        logger.info("Pipe daemon started and ready")
+        print("[Daemon] Pipe daemon started and ready", file=sys.stderr, flush=True)
+        
+        # Read from stdin.buffer line-by-line
+        import select
+        while not SHUTDOWN_REQUESTED.is_set():
+            try:
+                # Poll stdin with a 1.0s timeout to allow checking shutdown event
+                r, _, _ = select.select([sys.stdin.buffer], [], [], 1.0)
+                if not r:
+                    continue  # Timeout, check shutdown flag
+                
+                line = sys.stdin.buffer.readline()
+                if not line:
+                    logger.info("Pipe EOF reached, shutting down")
+                    break
+                
+                # Parse request
+                request = deserialize_message(line)
+                
+                # WARNING: Although self.executor is a thread pool, we must block on future.result()
+                # in the main thread select loop. This enforces synchronous request-response sequencing.
+                # Since stdout is a single shared pipe channel, asynchronous/concurrent writes would
+                # interleave lines or cause out-of-order responses, breaking the client's sequential expectations.
+                future = self.executor.submit(self._handle_request, request)
+                response = future.result()
+                
+                # Serialize and write response
+                response_data = serialize_message(response)
+                sys.stdout.buffer.write(response_data)
+                sys.stdout.buffer.flush()
+                
+            except Exception as e:
+                logger.error(f"Error in pipe mode loop: {e}", exc_info=True)
+                break
+                
+        self.shutdown()
 
 
 def run_daemon(argv: Optional[List[str]] = None) -> int:
@@ -375,6 +488,16 @@ def run_daemon(argv: Optional[List[str]] = None) -> int:
                 logger.info(f"Parsed GID from command line: {gid}")
             except (ValueError, IndexError) as e:
                 logger.warning(f"Failed to parse GID from command line: {e}")
+                
+    parent_pid = None
+    if '--parent-pid' in argv:
+        idx = argv.index('--parent-pid')
+        if idx + 1 < len(argv):
+            try:
+                parent_pid = int(argv[idx + 1])
+                logger.info(f"Parsed parent PID: {parent_pid}")
+            except (ValueError, IndexError) as e:
+                logger.warning(f"Failed to parse parent PID: {e}")
     
     # Set environment variables from command-line if not already set
     # (helps with socket path determination)
@@ -401,10 +524,18 @@ def run_daemon(argv: Optional[List[str]] = None) -> int:
             daemon.socket_path = get_socket_path(uid)
             print(f"[Daemon] Set socket_path to {daemon.socket_path}", file=sys.stderr, flush=True)
         
-        print("[Daemon] Calling daemon.start()...", file=sys.stderr, flush=True)
-        daemon.start()
-        print("[Daemon] daemon.start() returned (should not happen)", file=sys.stderr, flush=True)
-        return 0
+        daemon.parent_pid = parent_pid
+        
+        if '--pipe' in argv:
+            print("[Daemon] Calling daemon.start_pipe_mode()...", file=sys.stderr, flush=True)
+            daemon.start_pipe_mode()
+            return 0
+        else:
+            # Legacy Socket Mode (To be removed after 5.x)
+            print("[Daemon] Calling daemon.start()...", file=sys.stderr, flush=True)
+            daemon.start()
+            print("[Daemon] daemon.start() returned (should not happen)", file=sys.stderr, flush=True)
+            return 0
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
         return 0

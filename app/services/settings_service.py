@@ -80,6 +80,7 @@ class AppSettings:
     # Dev mode flags (persisted for convenience)
     dev_mode: bool = False
     show_all_platforms: bool = False
+    favorite_themes: List[str] = None
     # Session state
     tab_order: List[str] = None
     last_active_tab: str = None
@@ -94,6 +95,8 @@ class AppSettings:
             self.plugin_settings = {}
         if self.tab_order is None:
             self.tab_order = []
+        if self.favorite_themes is None:
+            self.favorite_themes = []
 
 
 class SettingsService:
@@ -193,6 +196,9 @@ class SettingsService:
             if 'last_active_tab' in data and isinstance(data['last_active_tab'], str):
                 self._settings.last_active_tab = data['last_active_tab']
             
+            if 'favorite_themes' in data and isinstance(data['favorite_themes'], list):
+                self._settings.favorite_themes = data['favorite_themes']
+            
             logger.info(f"Settings loaded from {self._settings_file}")
         except Exception as e:
             logger.error(f"Failed to load settings: {e}")
@@ -227,7 +233,8 @@ class SettingsService:
                 'dev_mode': self._settings.dev_mode,
                 'show_all_platforms': self._settings.show_all_platforms,
                 'tab_order': self._settings.tab_order,
-                'last_active_tab': self._settings.last_active_tab
+                'last_active_tab': self._settings.last_active_tab,
+                'favorite_themes': self._settings.favorite_themes
             }
             
             # Write to file
@@ -508,6 +515,16 @@ class SettingsService:
     def get_last_active_tab(self) -> Optional[str]:
         """Get saved last active tab."""
         return self._settings.last_active_tab
+
+    def save_favorite_themes(self, favorite_themes: List[str]) -> None:
+        """Save favorite theme names"""
+        self._settings.favorite_themes = list(favorite_themes)
+        self._save_settings()
+        logger.debug(f"Favorite themes saved: {favorite_themes}")
+    
+    def get_favorite_themes(self) -> List[str]:
+        """Get saved favorite theme names"""
+        return self._settings.favorite_themes.copy()
 
 
 def load_settings() -> SettingsService:
