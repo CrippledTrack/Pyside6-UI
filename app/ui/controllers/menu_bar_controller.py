@@ -251,6 +251,12 @@ class MenuBarController(QObject):
         
         if not is_dev_mode():
             return
+            
+        from ...utils.imports import get_platforms_constants
+        constants = get_platforms_constants()
+        if getattr(constants, "SINGLE_PLUGIN_MODE", False):
+            logger.debug("Single plugin mode active, skipping dev menu")
+            return
         
         dev_menu = QMenu("Dev", self.parent_widget)
         self.menu_bar.addMenu(dev_menu)
@@ -280,6 +286,7 @@ class MenuBarController(QObject):
             f"Show tabs from {other_text} for testing purposes. "
             "Requires application restart to take effect."
         )
+        
         self.show_all_platforms_action.triggered.connect(self._on_show_all_platforms_toggled)
         dev_menu.addAction(self.show_all_platforms_action)
         
