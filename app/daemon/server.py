@@ -390,6 +390,27 @@ class PrivilegedDaemon:
     # =========================================================================
     # Pipe Mode Worker Execution
     # =========================================================================
+    def _handle_async_pipe_request(self, request: Dict[str, Any]):
+        """Handle a pipe request asynchronously and write the response thread-safely."""
+        try:
+            response = self._handle_request(request)
+            response_data = serialize_message(response)
+            with self._stdout_lock:
+                sys.stdout.buffer.write(response_data)
+                sys.stdout.buffer.flush()
+        except Exception as e:
+            logger.error(f"Error in async pipe handler: {e}", exc_info=True)
+            # Attempt to send an error response
+            try:
+                request_id = request.get('id', 'unknown')
+                error_response = create_response(request_id, False, error=str(e))
+                error_data = serialize_message(error_response)
+                with self._stdout_lock:
+                    sys.stdout.buffer.write(error_data)
+                    sys.stdout.buffer.flush()
+            except Exception:
+                logger.error("Failed to send error response", exc_info=True)
+
     def start_pipe_mode(self):
         """Start the daemon in standard I/O pipe mode."""
         print("[Daemon] Starting privileged daemon in pipe mode...", file=sys.stderr, flush=True)
@@ -414,6 +435,9 @@ class PrivilegedDaemon:
                 daemon=True
             )
             monitor_thread.start()
+
+        # Stdout lock for thread-safe response writing
+        self._stdout_lock = threading.Lock()
             
         logger.info("Pipe daemon started and ready")
         print("[Daemon] Pipe daemon started and ready", file=sys.stderr, flush=True)
@@ -435,17 +459,10 @@ class PrivilegedDaemon:
                 # Parse request
                 request = deserialize_message(line)
                 
-                # WARNING: Although self.executor is a thread pool, we must block on future.result()
-                # in the main thread select loop. This enforces synchronous request-response sequencing.
-                # Since stdout is a single shared pipe channel, asynchronous/concurrent writes would
-                # interleave lines or cause out-of-order responses, breaking the client's sequential expectations.
-                future = self.executor.submit(self._handle_request, request)
-                response = future.result()
-                
-                # Serialize and write response
-                response_data = serialize_message(response)
-                sys.stdout.buffer.write(response_data)
-                sys.stdout.buffer.flush()
+                # Hand off to thread pool — do NOT block on result.
+                # Responses are written back by _handle_async_pipe_request
+                # under _stdout_lock, so they never interleave.
+                self.executor.submit(self._handle_async_pipe_request, request)
                 
             except Exception as e:
                 logger.error(f"Error in pipe mode loop: {e}", exc_info=True)

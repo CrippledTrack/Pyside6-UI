@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import queue
 import socket
 import logging
 import threading
@@ -41,6 +42,15 @@ class DaemonClient:
         if self._process is not None:
             self.socket_path = None
             self._connected = True
+            # Multiplexed pipe infrastructure
+            self._pending_requests: Dict[str, queue.Queue] = {}
+            self._pending_lock = threading.Lock()
+            self._write_lock = threading.Lock()
+            self._reader_running = False
+            self._reader_thread: Optional[threading.Thread] = None
+            # Start reader thread immediately — callers may skip connect()
+            # because _connected is already True from above.
+            self._start_reader_thread()
         # =====================================================================
         # Legacy Socket Mode Setup (To be removed after 5.x)
         # =====================================================================
@@ -70,11 +80,60 @@ class DaemonClient:
             return self._connected and self._process.poll() is None
         return self._connected and self._socket is not None
     
+    def _start_reader_thread(self):
+        """Start the background pipe reader thread if not already running."""
+        if self._reader_thread is not None and self._reader_thread.is_alive():
+            return
+        self._reader_running = True
+        self._reader_thread = threading.Thread(
+            target=self._pipe_reader_loop,
+            name="PipeDaemonReader",
+            daemon=True,
+        )
+        self._reader_thread.start()
+        logger.info("Pipe reader thread started")
+
+    def _pipe_reader_loop(self):
+        """Dedicated reader loop that dispatches responses to per-request queues."""
+        try:
+            while self._reader_running and self._process.poll() is None:
+                line = self._process.stdout.readline()
+                if not line:
+                    break
+                try:
+                    response = deserialize_message(line)
+                except Exception:
+                    logger.warning("Failed to deserialize pipe response, skipping")
+                    continue
+                resp_id = response.get('id')
+                if resp_id:
+                    with self._pending_lock:
+                        q = self._pending_requests.get(resp_id)
+                    if q:
+                        q.put(response)
+                    else:
+                        logger.debug(f"No pending request for response ID {resp_id}, discarding")
+                else:
+                    logger.debug("Received response with no ID, discarding")
+        except Exception as e:
+            logger.error(f"Pipe reader loop error: {e}", exc_info=True)
+        finally:
+            self._reader_running = False
+            self._connected = False
+            # Drain all pending queues with None sentinel so waiting threads unblock
+            with self._pending_lock:
+                for rid, q in self._pending_requests.items():
+                    q.put(None)
+                self._pending_requests.clear()
+            logger.info("Pipe reader loop exited")
+
     def connect(self, timeout: float = None) -> bool:
         """Connect to daemon."""
         if self._process is not None:
             with self._lock:
                 self._connected = self._process.poll() is None
+                if self._connected:
+                    self._start_reader_thread()
                 return self._connected
         
         timeout = timeout or self.CONNECT_TIMEOUT
@@ -108,6 +167,7 @@ class DaemonClient:
         """Disconnect from daemon."""
         with self._lock:
             if self._process is not None:
+                self._reader_running = False
                 if self._process.poll() is None:
                     try:
                         self._process.terminate()
@@ -117,6 +177,10 @@ class DaemonClient:
                             self._process.kill()
                         except Exception:
                             pass
+                # Reader thread will exit on EOF/poll; join briefly
+                if self._reader_thread is not None:
+                    self._reader_thread.join(timeout=2.0)
+                    self._reader_thread = None
                 self._connected = False
                 logger.info("Disconnected from pipe daemon")
                 return
@@ -140,91 +204,81 @@ class DaemonClient:
         if not self.is_connected():
             raise DaemonConnectionError("Not connected to daemon")
         
-        with self._lock:
-            # =================================================================
-            # Pipe Mode Send/Receive
-            # =================================================================
-            if self._process is not None:
-                try:
-                    # Write message to stdin
+        # =================================================================
+        # Pipe Mode Send/Receive (Multiplexed)
+        # =================================================================
+        if self._process is not None:
+            q: queue.Queue = queue.Queue()
+            # Register this request's queue so the reader thread can route the response
+            with self._pending_lock:
+                self._pending_requests[expected_id] = q
+
+            try:
+                # Write under write lock (prevents line interleaving between threads)
+                with self._write_lock:
                     self._process.stdin.write(message)
                     self._process.stdin.flush()
-                    
-                    start_time = time.time()
-                    while True:
-                        # Wait for response with timeout
-                        if timeout is not None:
-                            elapsed = time.time() - start_time
-                            remaining = max(0.1, timeout - elapsed)
-                            import select
-                            # Check if data is available to read
-                            r, _, _ = select.select([self._process.stdout], [], [], remaining)
-                            if not r:
-                                raise DaemonTimeoutError(f"Operation timed out after {timeout} seconds")
-                        
-                        # Read response (one line ending with newline)
-                        response_line = self._process.stdout.readline()
-                        if not response_line:
-                            raise DaemonConnectionError("Connection closed by daemon (pipe EOF)")
-                        
-                        response = deserialize_message(response_line)
-                        
-                        # If we have an expected ID and this response doesn't match it, discard and keep reading.
-                        # WARNING: Discarding stray responses is only safe because the server handles requests 
-                        # synchronously and sequentially (one at a time). If the server were async, discarding non-matching
-                        # IDs here would cause other waiting threads to miss their responses, leading to timeouts.
-                        if expected_id is not None and response.get('id') != expected_id:
-                            logger.debug(f"Discarding stray/out-of-order response (expected ID {expected_id}, got {response.get('id')})")
-                            continue
-                            
-                        return response
-                except (OSError, ValueError) as e:
-                    self._connected = False
-                    raise DaemonConnectionError(f"Pipe error: {e}")
-            
-            # =================================================================
-            # Legacy Socket Mode Send/Receive (To be removed after 5.x)
-            # =================================================================
-            else:
+
+                # Wait for OUR specific response (reader thread routes it)
                 try:
-                    self._socket.settimeout(timeout)
-                    
-                    # Send request
-                    self._socket.sendall(message)
-                    
-                    start_time = time.time()
-                    while True:
-                        if timeout is not None:
-                            elapsed = time.time() - start_time
-                            remaining = max(0.1, timeout - elapsed)
-                            self._socket.settimeout(remaining)
-                            
-                        # Receive response (read until newline)
-                        response_data = b''
-                        while b'\n' not in response_data:
-                            chunk = self._socket.recv(4096)
-                            if not chunk:
-                                raise DaemonConnectionError("Connection closed by daemon")
-                            response_data += chunk
+                    response = q.get(timeout=timeout)
+                except queue.Empty:
+                    raise DaemonTimeoutError(
+                        f"Operation timed out after {timeout} seconds"
+                    )
+                if response is None:
+                    raise DaemonConnectionError(
+                        "Connection closed by daemon (pipe EOF)"
+                    )
+                return response
+            finally:
+                # Always clean up the pending entry
+                with self._pending_lock:
+                    self._pending_requests.pop(expected_id, None)
+
+        # =================================================================
+        # Legacy Socket Mode Send/Receive (To be removed after 5.x)
+        # =================================================================
+        with self._lock:
+            try:
+                self._socket.settimeout(timeout)
+                
+                # Send request
+                self._socket.sendall(message)
+                
+                start_time = time.time()
+                while True:
+                    if timeout is not None:
+                        elapsed = time.time() - start_time
+                        remaining = max(0.1, timeout - elapsed)
+                        self._socket.settimeout(remaining)
                         
-                        # Parse response
-                        response = deserialize_message(response_data.split(b'\n', 1)[0])
-                        
-                        # If we have an expected ID and this response doesn't match it, discard and keep reading.
-                        # WARNING: Discarding stray responses is only safe because the server handles requests 
-                        # synchronously and sequentially (one at a time). If the server were async, discarding non-matching
-                        # IDs here would cause other waiting threads to miss their responses, leading to timeouts.
-                        if expected_id is not None and response.get('id') != expected_id:
-                            logger.debug(f"Discarding stray/out-of-order socket response (expected ID {expected_id}, got {response.get('id')})")
-                            continue
-                            
-                        return response
+                    # Receive response (read until newline)
+                    response_data = b''
+                    while b'\n' not in response_data:
+                        chunk = self._socket.recv(4096)
+                        if not chunk:
+                            raise DaemonConnectionError("Connection closed by daemon")
+                        response_data += chunk
                     
-                except socket.timeout:
-                    raise DaemonTimeoutError(f"Operation timed out after {timeout} seconds")
-                except (socket.error, OSError) as e:
-                    self._connected = False
-                    raise DaemonConnectionError(f"Socket error: {e}")
+                    # Parse response
+                    response = deserialize_message(response_data.split(b'\n', 1)[0])
+                    
+                    # If we have an expected ID and this response doesn't match it, discard and keep reading.
+                    # WARNING: Discarding stray responses is only safe because the server handles requests 
+                    # synchronously and sequentially (one at a time). If the server were async, discarding non-matching
+                    # IDs here would cause other waiting threads to miss their responses, leading to timeouts.
+                    if expected_id is not None and response.get('id') != expected_id:
+                        logger.debug(f"Discarding stray/out-of-order socket response (expected ID {expected_id}, got {response.get('id')})")
+                        continue
+                        
+                    return response
+                
+            except socket.timeout:
+                raise DaemonTimeoutError(f"Operation timed out after {timeout} seconds")
+            except (socket.error, OSError) as e:
+                self._connected = False
+                raise DaemonConnectionError(f"Socket error: {e}")
     
     def request(self, operation: str, params: Dict[str, Any], 
                 timeout: float = None) -> Dict[str, Any]:
