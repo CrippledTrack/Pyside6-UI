@@ -43,6 +43,7 @@ from .builtin_themes import (
     get_cyberpunk_theme,
     get_minimal_theme,
     get_purple_dark_theme,
+    get_oled_theme,
 )
 
 if TYPE_CHECKING:
@@ -118,6 +119,7 @@ class ThemeManager:
             "red": get_red_theme(),
             "cyberpunk": get_cyberpunk_theme(),
             "minimal": get_minimal_theme(),
+            "oled": get_oled_theme(),
             "legacy": get_legacy_theme(),
         }
         self.builtin_theme_names = set(builtin_themes.keys())

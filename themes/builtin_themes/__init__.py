@@ -23,6 +23,7 @@ from . import (
     red,
     cyberpunk,
     minimal,
+    oled,
 )
 
 # Import base utilities for external use
@@ -97,6 +98,11 @@ def get_minimal_theme() -> Dict[str, Any]:
     return minimal.get_theme()
 
 
+def get_oled_theme() -> Dict[str, Any]:
+    """Get OLED Dark theme data."""
+    return oled.get_theme()
+
+
 __all__ = [
     # Base utilities
     'BORDER_RADIUS_DEFAULT',
@@ -115,5 +121,6 @@ __all__ = [
     'get_red_theme',
     'get_cyberpunk_theme',
     'get_minimal_theme',
+    'get_oled_theme',
 ]
 
