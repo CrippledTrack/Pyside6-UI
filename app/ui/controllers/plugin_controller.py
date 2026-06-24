@@ -132,8 +132,6 @@ class PluginController(QObject):
                         instance = self.registry.get_plugin_instance(plugin_name)
                         if hasattr(instance, 'on_plugin_disabled'):
                             instance.on_plugin_disabled()
-                        if hasattr(instance, '_cleanup_plugin_resources'):
-                            instance._cleanup_plugin_resources()
                 except Exception as e:
                     logger.error(f"Error calling on_plugin_disabled for '{plugin_name}': {e}")
                 self.plugin_service.disable_plugin(plugin_name)

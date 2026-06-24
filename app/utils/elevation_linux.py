@@ -491,10 +491,15 @@ def start_daemon(socket_path: Optional[str] = None) -> Optional[object]:
     # Check if already running
     if is_daemon_running(socket_path):
         logger.info("Daemon already running")
-        from ..daemon.client import DaemonClient
         if use_pipe_daemon:
-            return DaemonClient(process=_daemon_process)
+            from ..daemon import get_daemon_client, is_daemon_available
+            if is_daemon_available():
+                return get_daemon_client()
+            else:
+                from ..daemon.client import DaemonClient
+                return DaemonClient(process=_daemon_process)
         else:
+            from ..daemon.client import DaemonClient
             client = DaemonClient(socket_path)
             if client.connect():
                 return client
@@ -738,11 +743,22 @@ def stop_daemon(socket_path: Optional[str] = None):
             return
         
         try:
-            from ..daemon.client import DaemonClient
-            client = DaemonClient(process=_daemon_process)
-            logger.info("Sending shutdown request to pipe daemon...")
-            client.request('shutdown', {}, timeout=2.0)
-            client.disconnect()
+            from ..daemon import get_daemon_client, is_daemon_available
+            if is_daemon_available():
+                client = get_daemon_client()
+                logger.info("Sending shutdown request to pipe daemon...")
+                client.request('shutdown', {}, timeout=2.0)
+                client.disconnect()
+            else:
+                logger.info("No active daemon client, terminating pipe daemon process...")
+                _daemon_process.terminate()
+                try:
+                    _daemon_process.wait(timeout=2.0)
+                except Exception:
+                    try:
+                        _daemon_process.kill()
+                    except Exception:
+                        pass
         except Exception as e:
             if "Connection closed by daemon" in str(e) or "pipe EOF" in str(e):
                 logger.info(f"Pipe daemon already stopped or shutting down (connection closed: {e})")

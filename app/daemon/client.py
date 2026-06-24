@@ -466,6 +466,10 @@ class DaemonClient:
                 return False
             
             # Transplant the new process and state
+            # Stop the new client's reader thread before stealing its process
+            new_client._reader_running = False
+            if new_client._reader_thread:
+                new_client._reader_thread.join(timeout=2.0)
             self._process = new_client._process
             self._connected = True
             self._pending_requests = {}
