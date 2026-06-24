@@ -22,6 +22,30 @@ DAEMON_QUICK_TIMEOUT = 1      # Quick daemon status check
 _daemon_process: Optional[subprocess.Popen] = None
 
 
+def _set_pdeathsig():
+    """Ask the Linux kernel to send SIGTERM when our parent process dies.
+    
+    Uses prctl(PR_SET_PDEATHSIG, SIGTERM) to register a kernel-level parent
+    death signal. This ensures the privileged daemon is cleaned up even if the
+    GUI process hangs, is killed with SIGKILL, or otherwise exits abnormally.
+    
+    This function is intended to be passed as preexec_fn to subprocess.Popen,
+    where it runs in the child process after fork() but before exec().
+    """
+    import ctypes
+    libc = ctypes.CDLL("libc.so.6", use_errno=True)
+    PR_SET_PDEATHSIG = 1
+    SIGTERM = 15
+    result = libc.prctl(PR_SET_PDEATHSIG, SIGTERM)
+    if result != 0:
+        import ctypes.util
+        errno = ctypes.get_errno()
+        # Log to stderr since this runs in child before exec
+        import sys
+        print(f"[Daemon-preexec] WARNING: prctl(PR_SET_PDEATHSIG) failed with errno {errno}",
+              file=sys.stderr, flush=True)
+
+
 def _drain_stderr(process: subprocess.Popen):
     """Continuously reads and logs/discards stderr of the given process to prevent deadlock."""
     logger.info(f"Starting stderr draining thread for PID {process.pid}")
@@ -537,9 +561,6 @@ def start_daemon(socket_path: Optional[str] = None) -> Optional[object]:
         logger.info(f"Daemon script path: {script_path}")
         daemon_cmd = [exe_path, str(script_path), '--pipe' if use_pipe_daemon else '--daemon']
     
-    # Pass parent process PID to daemon to monitor orphan status
-    daemon_cmd.extend(['--parent-pid', str(os.getpid())])
-    
     # Get UID/GID before starting daemon (needed for socket path and permissions)
     # When running normally (not via sudo/pkexec), we need to get current user's UID
     uid_str = os.environ.get('SUDO_UID') or os.environ.get('PKEXEC_UID')
@@ -587,7 +608,8 @@ def start_daemon(socket_path: Optional[str] = None) -> Optional[object]:
                 stdin=subprocess.PIPE if use_pipe_daemon else None,
                 stdout=subprocess.PIPE if use_pipe_daemon else None,
                 stderr=subprocess.PIPE,
-                start_new_session=True  # Detach from parent
+                start_new_session=True,  # Detach from parent
+                preexec_fn=_set_pdeathsig
             )
             _daemon_process = process
             logger.info(f"Daemon process started via pkexec with PID {process.pid}")
@@ -609,7 +631,8 @@ def start_daemon(socket_path: Optional[str] = None) -> Optional[object]:
                 stdin=subprocess.PIPE if use_pipe_daemon else None,
                 stdout=subprocess.PIPE if use_pipe_daemon else None,
                 stderr=subprocess.PIPE,
-                start_new_session=True  # Detach from parent
+                start_new_session=True,  # Detach from parent
+                preexec_fn=_set_pdeathsig
             )
             _daemon_process = process
             logger.info(f"Daemon process started via sudo with PID {process.pid}")

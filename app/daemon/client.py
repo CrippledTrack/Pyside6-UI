@@ -8,7 +8,7 @@ import logging
 import threading
 import time
 import subprocess
-from typing import Dict, Any, Optional
+from typing import Callable, Dict, Any, Optional
 from .protocol import create_request, serialize_message, deserialize_message, get_socket_path
 
 logger = logging.getLogger(__name__)
@@ -48,6 +48,9 @@ class DaemonClient:
             self._write_lock = threading.Lock()
             self._reader_running = False
             self._reader_thread: Optional[threading.Thread] = None
+            # Streaming callback dispatch
+            self._stream_callbacks: Dict[str, Callable[[str], None]] = {}
+            self._stream_callbacks_lock = threading.Lock()
             # Start reader thread immediately — callers may skip connect()
             # because _connected is already True from above.
             self._start_reader_thread()
@@ -94,7 +97,11 @@ class DaemonClient:
         logger.info("Pipe reader thread started")
 
     def _pipe_reader_loop(self):
-        """Dedicated reader loop that dispatches responses to per-request queues."""
+        """Dedicated reader loop that dispatches responses to per-request queues.
+        
+        For streaming responses (status == 'running'), invokes the registered
+        stream callback instead of putting the response in the queue.
+        """
         try:
             while self._reader_running and self._process.poll() is None:
                 line = self._process.stdout.readline()
@@ -107,6 +114,20 @@ class DaemonClient:
                     continue
                 resp_id = response.get('id')
                 if resp_id:
+                    # Check if this is a streaming chunk
+                    if response.get('status') == 'running':
+                        with self._stream_callbacks_lock:
+                            callback = self._stream_callbacks.get(resp_id)
+                        if callback:
+                            try:
+                                callback(response.get('chunk', ''))
+                            except Exception as e:
+                                logger.warning(f"Stream callback error for {resp_id}: {e}")
+                        else:
+                            logger.debug(f"Streaming chunk for {resp_id} but no callback registered, discarding")
+                        continue
+                    
+                    # Final response — route to pending queue
                     with self._pending_lock:
                         q = self._pending_requests.get(resp_id)
                     if q:
@@ -125,6 +146,9 @@ class DaemonClient:
                 for rid, q in self._pending_requests.items():
                     q.put(None)
                 self._pending_requests.clear()
+            # Clear stream callbacks
+            with self._stream_callbacks_lock:
+                self._stream_callbacks.clear()
             logger.info("Pipe reader loop exited")
 
     def connect(self, timeout: float = None) -> bool:
@@ -294,7 +318,7 @@ class DaemonClient:
         
         # Retry on connection errors (only in socket mode)
         last_error = None
-        retries = self.RECONNECT_RETRIES if self._process is None else 1
+        retries = 2 if self._process is not None else self.RECONNECT_RETRIES
         for attempt in range(retries):
             try:
                 response = self._send_recv(message, expected_id=request['id'], timeout=timeout)
@@ -314,10 +338,17 @@ class DaemonClient:
                 
                 # Try to reconnect
                 if attempt < retries - 1:
-                    time.sleep(self.RECONNECT_DELAY)
-                    if self.connect():
-                        message = serialize_message(request)  # Re-serialize
-                        continue
+                    if self._process is not None:
+                        # Pipe mode: restart the daemon process
+                        if self._restart_pipe_daemon():
+                            message = serialize_message(request)  # Re-serialize
+                            continue
+                    else:
+                        # Socket mode: simple reconnect
+                        time.sleep(self.RECONNECT_DELAY)
+                        if self.connect():
+                            message = serialize_message(request)  # Re-serialize
+                            continue
                 
                 # If all retries failed, raise
                 raise last_error
@@ -327,6 +358,130 @@ class DaemonClient:
             except Exception as e:
                 logger.error(f"Unexpected error in request: {str(e)}", exc_info=True)
                 raise
+    
+    def request_stream(self, operation: str, params: Dict[str, Any],
+                       on_chunk: Callable[[str], None],
+                       timeout: float = None) -> Dict[str, Any]:
+        """Send a streaming request to the daemon.
+        
+        Like request(), but for operations that produce incremental output
+        (e.g. run_command_stream). The on_chunk callback is invoked for each
+        intermediate line of output as it arrives from the daemon.
+        
+        The final response (containing aggregated output and return code) is
+        returned when the operation completes.
+        
+        This method is only supported in pipe mode.
+        
+        Args:
+            operation: The operation to perform (e.g. 'run_command_stream').
+            params: Operation parameters.
+            on_chunk: Callback invoked with each line of streaming output.
+            timeout: Optional timeout in seconds for the entire operation.
+        
+        Returns:
+            The final response dict from the daemon.
+        
+        Raises:
+            DaemonConnectionError: If not connected or connection lost.
+            DaemonTimeoutError: If the operation times out.
+            RuntimeError: If called in socket mode.
+        """
+        if self._process is None:
+            raise RuntimeError("request_stream() is only supported in pipe mode")
+        
+        if not self.is_connected():
+            if not self.connect():
+                raise DaemonConnectionError("Could not connect to daemon")
+        
+        request = create_request(operation, params)
+        request_id = request['id']
+        message = serialize_message(request)
+        
+        # Register the streaming callback before sending the request
+        with self._stream_callbacks_lock:
+            self._stream_callbacks[request_id] = on_chunk
+        
+        try:
+            response = self._send_recv(message, expected_id=request_id, timeout=timeout)
+            
+            if response.get('id') != request_id:
+                logger.warning(f"Response ID mismatch: {request_id} != {response.get('id')}")
+            
+            return response
+        finally:
+            # Always clean up the streaming callback
+            with self._stream_callbacks_lock:
+                self._stream_callbacks.pop(request_id, None)
+    
+    def cancel_request(self, target_id: str, timeout: float = 5.0) -> Dict[str, Any]:
+        """Cancel a running request by its ID.
+        
+        Sends a cancel operation to the daemon, which will SIGTERM the
+        subprocess associated with the given request ID (with a 2-second
+        grace period before SIGKILL).
+        
+        Args:
+            target_id: The ID of the request to cancel.
+            timeout: Timeout for the cancel request itself.
+        
+        Returns:
+            Response dict with 'cancelled' (bool) and 'target_id' fields.
+        """
+        return self.request('cancel', {'target_id': target_id}, timeout=timeout)
+    
+    def _restart_pipe_daemon(self) -> bool:
+        """Restart the pipe daemon after a crash or disconnection.
+        
+        Kills the old process (if still alive), spawns a new daemon via
+        elevation_linux.start_daemon(), and re-establishes the reader loop.
+        
+        Returns:
+            True if the restart succeeded, False otherwise.
+        """
+        logger.info("Attempting to restart pipe daemon...")
+        
+        # Kill old process if still alive
+        if self._process and self._process.poll() is None:
+            try:
+                self._process.terminate()
+                self._process.wait(timeout=2.0)
+            except Exception:
+                try:
+                    self._process.kill()
+                except Exception:
+                    pass
+        
+        # Stop old reader thread
+        self._reader_running = False
+        if self._reader_thread is not None:
+            self._reader_thread.join(timeout=2.0)
+            self._reader_thread = None
+        
+        try:
+            from ..utils.elevation_linux import start_daemon
+            new_client = start_daemon()
+            if new_client is None:
+                logger.error("Failed to restart pipe daemon: start_daemon returned None")
+                return False
+            
+            # Transplant the new process and state
+            self._process = new_client._process
+            self._connected = True
+            self._pending_requests = {}
+            self._stream_callbacks = {}
+            self._start_reader_thread()
+            
+            # Update the global daemon client reference
+            from ..daemon import set_daemon_client
+            set_daemon_client(self)
+            
+            logger.info("Pipe daemon restarted successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to restart pipe daemon: {e}", exc_info=True)
+            self._connected = False
+            return False
     
     def __enter__(self):
         """Context manager entry."""

@@ -47,7 +47,31 @@ def deserialize_message(data: bytes) -> Dict[str, Any]:
 
 # Operation types
 OPERATION_RUN_COMMAND = 'run_command'
+OPERATION_RUN_COMMAND_STREAM = 'run_command_stream'
+OPERATION_CANCEL = 'cancel'
 OPERATION_SHUTDOWN = 'shutdown'
+
+
+def create_stream_chunk(request_id: str, chunk: str) -> Dict[str, Any]:
+    """Create a streaming progress chunk response.
+    
+    These intermediate responses are sent during a run_command_stream operation
+    for each line of output produced by the subprocess. The final response is
+    sent via create_response() once the subprocess completes.
+    
+    Args:
+        request_id: The ID of the originating request.
+        chunk: A line of subprocess output.
+    
+    Returns:
+        A dict representing the streaming chunk message.
+    """
+    return {
+        'id': request_id,
+        'success': True,
+        'status': 'running',
+        'chunk': chunk
+    }
 
 
 def get_socket_path(uid: Optional[int] = None) -> str:
@@ -126,9 +150,12 @@ SOCKET_PATH = '/tmp/privileged-daemon/daemon.sock'
 __all__ = [
     'create_request',
     'create_response',
+    'create_stream_chunk',
     'serialize_message',
     'deserialize_message',
     'OPERATION_RUN_COMMAND',
+    'OPERATION_RUN_COMMAND_STREAM',
+    'OPERATION_CANCEL',
     'OPERATION_SHUTDOWN',
     'SOCKET_PATH',
     'get_socket_path',

@@ -221,6 +221,7 @@ class MenuBarController(QObject):
                 self.start_pipe_daemon_action = QAction("Start Pipe Daemon (Beta)", self.parent_widget)
                 self.start_pipe_daemon_action.setToolTip("Start the experimental pipe-based daemon")
                 self.start_pipe_daemon_action.setEnabled(not is_running)
+                self.start_pipe_daemon_action.setVisible(not is_running)
                 if on_start_pipe_daemon:
                     self.start_pipe_daemon_action.triggered.connect(on_start_pipe_daemon)
                 admin_menu.addAction(self.start_pipe_daemon_action)
@@ -401,6 +402,7 @@ class MenuBarController(QObject):
                 )
                 if self.start_pipe_daemon_action:
                     self.start_pipe_daemon_action.setEnabled(False)
+                    self.start_pipe_daemon_action.setVisible(False)
                     self.start_pipe_daemon_action.setToolTip(
                         "The privileged daemon is currently running"
                     )
@@ -413,6 +415,7 @@ class MenuBarController(QObject):
                 )
                 if self.start_pipe_daemon_action:
                     self.start_pipe_daemon_action.setEnabled(True)
+                    self.start_pipe_daemon_action.setVisible(True)
                     self.start_pipe_daemon_action.setToolTip(
                         "Start the experimental pipe-based daemon"
                     )

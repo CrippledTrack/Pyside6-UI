@@ -206,7 +206,7 @@ class AdminService:
                 return False, str(e)
         elif CURRENT_PLATFORM == "linux":
             if self._daemon_service:
-                return self._daemon_service.start()
+                return self._daemon_service.start_socket()
             return False, "Daemon service not available"
         else:
             return False, f"Admin elevation not supported on {CURRENT_PLATFORM}"
