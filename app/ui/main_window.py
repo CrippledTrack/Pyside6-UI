@@ -446,7 +446,7 @@ class MainWindow(QMainWindow):
             return
 
         from .dialogs.theme_dialog import ThemeDialog
-        dialog = ThemeDialog(self.theme_manager, self.settings_service, self)
+        dialog = ThemeDialog(self.container, self)
         dialog.setWindowModality(Qt.WindowModality.NonModal)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.theme_selected.connect(self.on_theme_selected)
@@ -486,7 +486,7 @@ class MainWindow(QMainWindow):
             return
 
         from .dialogs.log_viewer_dialog import LogViewerDialog
-        dialog = LogViewerDialog(self)
+        dialog = LogViewerDialog(self.container, self)
         dialog.setWindowModality(Qt.WindowModality.NonModal)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.destroyed.connect(lambda: setattr(self, "_log_viewer_dialog", None))

@@ -21,7 +21,7 @@ from ...qt_bindings import (
     QAbstractItemView, QCheckBox, QComboBox, QDialog, QFormLayout, QGroupBox,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMenu, QMessageBox,
     QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QTextEdit,
-    QVBoxLayout, QWidget
+    QVBoxLayout, QWidget, QTabWidget, QFrame
 )
 
 from ....plugin_system.base import BaseTabPlugin
@@ -42,13 +42,13 @@ class PluginManagementDialog(QDialog):
         self._rejected_plugins = {}  # Dict of name -> (plugin_class, reason)
         self.settings_service = settings_service
         self.plugin_controller = plugin_controller
-        # Get registry from plugin controller's service (injected)
+        # Get plugin service cleanly from controller
         if plugin_controller and hasattr(plugin_controller, 'plugin_service'):
-            self._registry = plugin_controller.plugin_service._registry
+            self.plugin_service = plugin_controller.plugin_service
         else:
-            # Fallback: create a standalone registry (should not happen in practice)
-            from ....plugin_system.registry import PluginRegistry
-            self._registry = PluginRegistry()
+            # Fallback: create a standalone service (should not happen in practice)
+            from ....services.plugin_service import PluginService
+            self.plugin_service = PluginService(settings_service=settings_service)
         self.setup_ui()
         self.load_plugins()
 
@@ -92,11 +92,14 @@ class PluginManagementDialog(QDialog):
         table_layout = QVBoxLayout(table_container)
         table_layout.setContentsMargins(0, 0, 0, 0)
         self.table = QTableWidget()
-        self.table.setColumnCount(6)
+        self.table.setColumnCount(3)
         self.table.setHorizontalHeaderLabels([
-            "Enabled", "Name", "Version", "Authors", "Type", "Requires Admin"
+            "Enabled", "Name", "Type"
         ])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setSortingEnabled(True)
@@ -111,36 +114,40 @@ class PluginManagementDialog(QDialog):
         details_container = QWidget()
         details_layout = QVBoxLayout(details_container)
         details_layout.setContentsMargins(8, 8, 8, 8)
+        details_layout.setSpacing(10)
 
-        form = QFormLayout()
+        # Details header
+        header_widget = QWidget()
+        header_layout = QVBoxLayout(header_widget)
+        header_layout.setContentsMargins(0, 0, 0, 8)
+        header_layout.setSpacing(4)
+
         self.details_name = QLabel("-")
-        self.details_version = QLabel("-")
-        self.details_author = QLabel("-")
-        self.details_type = QLabel("-")
-        self.details_requires_admin = QLabel("-")
-        self.details_platforms = QLabel("-")
-        self.details_module = QLabel("-")
-        self.details_min_gui_version = QLabel("-")
-        self.details_required_gui_version = QLabel("-")
-        self.details_types = QLabel("-")  # Show plugin types
-        form.addRow("Name:", self.details_name)
-        form.addRow("Version:", self.details_version)
-        form.addRow("Authors:", self.details_author)
-        form.addRow("Type:", self.details_type)
-        form.addRow("Types:", self.details_types)  # New row for types
-        form.addRow("Requires Admin:", self.details_requires_admin)
-        form.addRow("Platforms:", self.details_platforms)
-        form.addRow("Module:", self.details_module)
-        form.addRow("Min GUI Version:", self.details_min_gui_version)
-        form.addRow("Required GUI Version:", self.details_required_gui_version)
+        name_font = self.details_name.font()
+        name_font.setBold(True)
+        name_font.setPointSize(14)
+        self.details_name.setFont(name_font)
 
-        details_layout.addLayout(form)
-        details_layout.addWidget(QLabel("Description:"))
+        self.details_version_author = QLabel("-")
+        header_layout.addWidget(self.details_name)
+        header_layout.addWidget(self.details_version_author)
+        details_layout.addWidget(header_widget)
+
+        # Tab Widget
+        self.tab_widget = QTabWidget()
+        details_layout.addWidget(self.tab_widget)
+
+        # Tab 1: Overview
+        overview_tab = QWidget()
+        overview_tab_layout = QVBoxLayout(overview_tab)
+        overview_tab_layout.setContentsMargins(4, 8, 4, 8)
+        overview_tab_layout.setSpacing(8)
+
+        overview_tab_layout.addWidget(QLabel("Description:"))
         self.details_description = QTextEdit()
         self.details_description.setReadOnly(True)
-        self.details_description.setFixedHeight(100)
-        details_layout.addWidget(self.details_description)
-        
+        overview_tab_layout.addWidget(self.details_description)
+
         # Extension type toggles section
         # NOTE: Keep a single checkbox group and a single handler. We always use
         # `stateChanged(int)` so the handler receives Qt checkbox states (0/2).
@@ -158,7 +165,34 @@ class PluginManagementDialog(QDialog):
             ext_layout.addWidget(cb)
 
         ext_layout.addStretch()
-        details_layout.addWidget(self.extensions_group)
+        overview_tab_layout.addWidget(self.extensions_group)
+        self.tab_widget.addTab(overview_tab, "Overview")
+
+        # Tab 2: Technical Details
+        tech_tab = QWidget()
+        tech_tab_layout = QVBoxLayout(tech_tab)
+        tech_tab_layout.setContentsMargins(4, 8, 4, 8)
+
+        form = QFormLayout()
+        self.details_type = QLabel("-")
+        self.details_types = QLabel("-")  # Show plugin types
+        self.details_requires_admin = QLabel("-")
+        self.details_platforms = QLabel("-")
+        self.details_module = QLabel("-")
+        self.details_min_gui_version = QLabel("-")
+        self.details_required_gui_version = QLabel("-")
+
+        form.addRow("Type:", self.details_type)
+        form.addRow("Supported Interfaces:", self.details_types)
+        form.addRow("Requires Admin:", self.details_requires_admin)
+        form.addRow("Platforms:", self.details_platforms)
+        form.addRow("Module Path:", self.details_module)
+        form.addRow("Min GUI Version:", self.details_min_gui_version)
+        form.addRow("Required GUI Version:", self.details_required_gui_version)
+
+        tech_tab_layout.addLayout(form)
+        tech_tab_layout.addStretch()
+        self.tab_widget.addTab(tech_tab, "Technical Details")
 
         # Action buttons for details
         action_layout = QHBoxLayout()
@@ -239,11 +273,11 @@ class PluginManagementDialog(QDialog):
         return ", ".join(extensions) if extensions else ""
 
     def load_plugins(self) -> None:
-        """Load all plugins from the registry, including rejected ones."""
-        plugins = self._registry.get_all_plugins()
+        """Load all plugins from the service, including rejected ones."""
+        plugins = self.plugin_service.get_all_plugins()
         self._all_plugins = list(plugins.items())
         # Also load rejected (version-incompatible) plugins
-        self._rejected_plugins = self._registry.get_rejected_plugins()
+        self._rejected_plugins = self.plugin_service.get_rejected_plugins()
         self.apply_filters()
 
     def toggle_plugin(self, name: str, state: int | bool) -> None:
@@ -284,8 +318,8 @@ class PluginManagementDialog(QDialog):
         
         if name in self._rejected_plugins:
             plugin_class, reason = self._rejected_plugins[name]
-            self._registry.register_plugin_force(name, plugin_class)
-            self._registry.disable_plugin(name)  # Temporarily disable so toggle_plugin executes a full enable cycle
+            self.plugin_service.register_plugin_force(name, plugin_class)
+            self.plugin_service.disable_plugin(name)  # Temporarily disable so toggle_plugin executes a full enable cycle
             self.toggle_plugin(name, True)
             self.load_plugins()
 
@@ -299,7 +333,7 @@ class PluginManagementDialog(QDialog):
             )
             return
 
-        self._registry.clear()
+        self.plugin_service.clear()
         # Use the comprehensive plugin discovery from the service
         self.plugin_controller.plugin_service.discover_and_register_all_plugins()
         QMessageBox.information(self, "Plugins Reloaded", "Plugins have been reloaded.")
@@ -315,7 +349,7 @@ class PluginManagementDialog(QDialog):
         selected_name = self.get_selected_plugin_name()
 
         filtered = []
-        core_names = set(self._registry.get_core_plugins().keys())
+        core_names = set(self.plugin_service.get_core_plugins().keys())
         
         # Combine registered plugins with rejected plugins
         all_plugins_combined = list(self._all_plugins)
@@ -340,7 +374,7 @@ class PluginManagementDialog(QDialog):
                 continue
 
             # Status filter
-            is_enabled = self._registry.is_enabled(name)
+            is_enabled = self.plugin_service.is_enabled(name)
             if status_sel == "Enabled" and (not is_enabled or is_rejected):
                 continue
             if status_sel == "Disabled" and (is_enabled or is_rejected):
@@ -374,10 +408,10 @@ class PluginManagementDialog(QDialog):
 
     def populate_table(self, data: List[Tuple[str, Type[BaseTabPlugin]]]) -> None:
         self.table.setRowCount(len(data))
-        core_names = set(self._registry.get_core_plugins().keys())
+        core_names = set(self.plugin_service.get_core_plugins().keys())
         for row, (name, plugin_class) in enumerate(data):
             info = plugin_class.get_plugin_info()
-            is_enabled = self._registry.is_enabled(name)
+            is_enabled = self.plugin_service.is_enabled(name)
             is_core = name in core_names
             is_rejected = name in self._rejected_plugins
 
@@ -397,12 +431,12 @@ class PluginManagementDialog(QDialog):
                 is_loaded = name in dict(self._all_plugins)
                 cb.setChecked(is_enabled and is_loaded)  # Only check if actually loaded
                 cb.setEnabled(True)   # But can be enabled
-                cb.setToolTip(f"âš  Incompatible: {rejection_reason}\nClick to force-enable anyway")
+                cb.setToolTip(f"⚠ Incompatible: {rejection_reason}\nClick to force-enable anyway")
                 cb.stateChanged.connect(lambda state, n=name: self._force_enable_plugin(n, state))
                 container_layout.addWidget(cb)
                 
                 # Add warning label
-                warn_label = QLabel("âš ")
+                warn_label = QLabel("⚠")
                 warn_label.setToolTip(f"Incompatible: {rejection_reason}")
                 warn_label.setStyleSheet("color: #FFA500; font-weight: bold;")  # Orange warning
                 container_layout.addWidget(warn_label)
@@ -423,14 +457,8 @@ class PluginManagementDialog(QDialog):
                 font.setItalic(True)
                 name_item.setFont(font)
             self.table.setItem(row, 1, name_item)
-            # Version
-            self.table.setItem(row, 2, QTableWidgetItem(str(info['version'])))
-            # Authors
-            self.table.setItem(row, 3, QTableWidgetItem(info.get('author', '')))
             # Type
-            self.table.setItem(row, 4, QTableWidgetItem("Core" if is_core else "External"))
-            # Requires Admin
-            self.table.setItem(row, 5, QTableWidgetItem("Yes" if info.get('requires_admin') else "No"))
+            self.table.setItem(row, 2, QTableWidgetItem("Core" if is_core else "External"))
 
     def on_selection_changed(self) -> None:
         name = self.get_selected_plugin_name()
@@ -438,8 +466,8 @@ class PluginManagementDialog(QDialog):
             self.clear_details()
             return
         
-        # Try to get plugin from registry first, then from rejected plugins
-        plugin_class = self._registry.get_plugin(name)
+        # Try to get plugin from service first, then from rejected plugins
+        plugin_class = self.plugin_service.get_plugin(name)
         is_rejected = False
         if not plugin_class:
             # Check if it's a rejected plugin
@@ -452,11 +480,13 @@ class PluginManagementDialog(QDialog):
         
         info = plugin_class.get_plugin_info()
         self.details_name.setText(info['name'])
-        self.details_version.setText(str(info['version']))
+        
         authors_list = info.get('authors') or []
         authors_text = ", ".join(authors_list) if authors_list else info.get('author', '')
-        self.details_author.setText(authors_text)
-        self.details_type.setText("Core" if name in self._registry.get_core_plugins() else "External")
+        author_str = f" by {authors_text}" if authors_text else ""
+        self.details_version_author.setText(f"Version {info['version']}{author_str}")
+        
+        self.details_type.setText("Core" if name in self.plugin_service.get_core_plugins() else "External")
         self.details_platforms.setText(', '.join(info['supported_platforms']))
         self.details_requires_admin.setText("Yes" if info.get('requires_admin') else "No")
         self.details_module.setText(plugin_class.__module__)
@@ -480,8 +510,7 @@ class PluginManagementDialog(QDialog):
         # Update extension checkboxes
         extension_types = self._get_extension_types(plugin_class).split(", ")
         detected_types = [t.strip() for t in extension_types] if extension_types else []
-        is_plugin_enabled = self._registry.is_enabled(name)
-        
+        is_plugin_enabled = self.plugin_service.is_enabled(name)
         
         any_visible = False
         for ext_type, cb in self.ext_checkboxes.items():
@@ -518,8 +547,7 @@ class PluginManagementDialog(QDialog):
 
     def clear_details(self) -> None:
         self.details_name.setText("-")
-        self.details_version.setText("-")
-        self.details_author.setText("-")
+        self.details_version_author.setText("-")
         self.details_type.setText("-")
         self.details_types.setText("-")
         self.details_requires_admin.setText("-")
@@ -565,7 +593,7 @@ class PluginManagementDialog(QDialog):
     def update_status_label(self) -> None:
         total = len(self._all_plugins)
         shown = self.table.rowCount()
-        enabled_count = sum(1 for name, _ in self._all_plugins if self._registry.is_enabled(name))
+        enabled_count = sum(1 for name, _ in self._all_plugins if self.plugin_service.is_enabled(name))
         self.status_label.setText(f"Showing {shown}/{total} plugins  |  Enabled: {enabled_count}")
 
     def get_selected_plugin_name(self) -> Optional[str]:
@@ -645,11 +673,11 @@ class PluginManagementDialog(QDialog):
         name = self.get_selected_plugin_name()
         if not name:
             return
-        plugin_class = self._registry.get_plugin(name)
+        plugin_class = self.plugin_service.get_plugin(name)
         if not plugin_class:
             return
         info = plugin_class.get_plugin_info()
-        is_enabled = self._registry.is_enabled(name)
+        is_enabled = self.plugin_service.is_enabled(name)
 
         menu = QMenu(self)
         toggle_action = menu.addAction("Disable" if is_enabled else "Enable")
@@ -683,7 +711,7 @@ class PluginManagementDialog(QDialog):
                 f"Name: {info['name']}",
                 f"Version: {info['version']}",
                 f"Author: {info['author']}",
-                f"Type: {'Core' if name in self._registry.get_core_plugins() else 'External'}",
+                f"Type: {'Core' if name in self.plugin_service.get_core_plugins() else 'External'}",
                 f"Requires Admin: {'Yes' if info.get('requires_admin') else 'No'}",
                 f"Compatible: {'Yes' if info.get('compatible', True) else 'No'}",
                 f"Platforms: {', '.join(info['supported_platforms'])}",
@@ -698,13 +726,13 @@ class PluginManagementDialog(QDialog):
         name = self.get_selected_plugin_name()
         if not name:
             return
-        plugin_class = self._registry.get_plugin(name)
+        plugin_class = self.plugin_service.get_plugin(name)
         if not plugin_class:
             return
         
         plugin_target: Any = plugin_class
         try:
-            plugin_target = self._registry.get_plugin_instance(name)
+            plugin_target = self.plugin_service.get_plugin_instance(name)
         except Exception as e:
             logger.debug(f"Using plugin class for settings (instance unavailable) '{name}': {e}")
         

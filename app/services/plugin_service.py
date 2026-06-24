@@ -92,6 +92,10 @@ class PluginService:
         """Get a specific plugin by name."""
         return self._registry.get_plugin(name)
     
+    def get_plugin_instance(self, name: str) -> Any:
+        """Get or create a plugin instance by name."""
+        return self._registry.get_plugin_instance(name)
+    
     def list_plugin_names(self) -> List[str]:
         """Get list of all plugin names."""
         return self._registry.list_plugin_names()
@@ -126,6 +130,14 @@ class PluginService:
     def get_version_incompatibility(self, name: str) -> Optional[str]:
         """Get the version incompatibility reason for a plugin, if any."""
         return self._registry.get_version_incompatibility(name)
+    
+    def get_rejected_plugins(self) -> Dict[str, Tuple[Type[Any], str]]:
+        """Get rejected plugins and reasons."""
+        return self._registry.get_rejected_plugins()
+    
+    def register_plugin_force(self, name: str, plugin_class: Type[Any]) -> None:
+        """Force register a version-incompatible plugin."""
+        self._registry.register_plugin_force(name, plugin_class)
     
     # =========================================================================
     # Discovery Methods

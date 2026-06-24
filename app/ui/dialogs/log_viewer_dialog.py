@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Any
 
 from ...qt_bindings import (
     Qt,
@@ -29,9 +29,11 @@ from ...qt_bindings import (
     QCheckBox,
     QWidget,
     QFileDialog,
+    QPalette,
 )
 
 from ...utils.paths import logs_dir
+from ...services.logging_service import CustomFormatter, LOG_FORMAT
 
 logger = logging.getLogger(__name__)
 
@@ -44,9 +46,7 @@ class SignalHandler(QObject, logging.Handler):
     def __init__(self):
         QObject.__init__(self)
         logging.Handler.__init__(self)
-        self.setFormatter(logging.Formatter(
-            "%(asctime)s - %(levelname)s - [%(threadName)s] - %(name)s - %(message)s"
-        ))
+        self.setFormatter(CustomFormatter(LOG_FORMAT))
     
     def emit(self, record: logging.LogRecord) -> None:
         try:
@@ -59,16 +59,25 @@ class SignalHandler(QObject, logging.Handler):
 class LogViewerDialog(QDialog):
     """Dialog for viewing application logs with live tail functionality."""
     
-    # Log level colors
-    LEVEL_COLORS = {
-        logging.DEBUG: "#6c757d",     # Gray
-        logging.INFO: "#28a745",      # Green
-        logging.WARNING: "#ffc107",   # Yellow/Orange
-        logging.ERROR: "#dc3545",     # Red
-        logging.CRITICAL: "#9c27b0",  # Purple
+    # Log level colors for dark backgrounds
+    LEVEL_COLORS_DARK = {
+        logging.DEBUG: "#a0aec0",     # Light gray
+        logging.INFO: "#48bb78",      # Light green
+        logging.WARNING: "#ecc94b",   # Light yellow
+        logging.ERROR: "#f56565",     # Light red
+        logging.CRITICAL: "#ed64a6",  # Pink/Magenta
     }
     
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    # Log level colors for light backgrounds
+    LEVEL_COLORS_LIGHT = {
+        logging.DEBUG: "#4a5568",     # Dark gray
+        logging.INFO: "#2f855a",      # Dark green
+        logging.WARNING: "#c05621",   # Dark orange/brown (readable warning)
+        logging.ERROR: "#c53030",     # Dark red
+        logging.CRITICAL: "#9b2c2c",  # Deep red/purple
+    }
+    
+    def __init__(self, container: Any, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Log Viewer")
         self.setMinimumSize(900, 600)
@@ -79,6 +88,7 @@ class LogViewerDialog(QDialog):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         
         # State
+        self.container = container
         self._auto_scroll = True
         self._min_level = logging.DEBUG
         self._paused = False
@@ -86,6 +96,7 @@ class LogViewerDialog(QDialog):
         self._current_log_file: Optional[Path] = None
         self._is_viewing_current = True  # True if viewing the most recent log
         self._available_logs: List[Path] = []
+        self._last_guessed_level = logging.INFO
         
         # Setup UI
         self._setup_ui()
@@ -200,7 +211,13 @@ class LogViewerDialog(QDialog):
     def _font_exists(self, font_name: str) -> bool:
         """Check if a font exists on the system."""
         from ...qt_bindings import QFontDatabase
-        return font_name in QFontDatabase.families()
+        try:
+            return font_name in QFontDatabase().families()
+        except Exception:
+            try:
+                return font_name in QFontDatabase.families()
+            except Exception:
+                return False
     
     def _refresh_log_files(self) -> None:
         """Refresh the list of available log files."""
@@ -211,8 +228,9 @@ class LogViewerDialog(QDialog):
                 return
             
             # Find all log files, sorted by modification time (newest first)
+            # Use app_*.log* and ensure they are files to include rotated files (.log.1, etc.)
             self._available_logs = sorted(
-                log_path.glob("app_*.log"),
+                [p for p in log_path.glob("app_*.log*") if p.is_file()],
                 key=lambda p: p.stat().st_mtime,
                 reverse=True
             )
@@ -311,15 +329,26 @@ class LogViewerDialog(QDialog):
     def _guess_level(self, line: str) -> int:
         """Guess the log level from a log line."""
         if " - DEBUG - " in line:
+            self._last_guessed_level = logging.DEBUG
             return logging.DEBUG
         elif " - INFO - " in line:
+            self._last_guessed_level = logging.INFO
             return logging.INFO
         elif " - WARNING - " in line:
+            self._last_guessed_level = logging.WARNING
             return logging.WARNING
         elif " - ERROR - " in line:
+            self._last_guessed_level = logging.ERROR
             return logging.ERROR
         elif " - CRITICAL - " in line:
+            self._last_guessed_level = logging.CRITICAL
             return logging.CRITICAL
+        
+        # Continuation line check (e.g. traceback, multi-line error)
+        # If it doesn't start with a timestamp (digits), we reuse the last guessed level.
+        if line and not line[0].isdigit():
+            return self._last_guessed_level
+            
         return logging.INFO
     
     def _append_log_line(self, text: str, level: int) -> None:
@@ -327,8 +356,14 @@ class LogViewerDialog(QDialog):
         if level < self._min_level:
             return
         
-        # Get color for level
-        color = self.LEVEL_COLORS.get(level, "#000000")
+        # Determine background lightness to choose readable level colors
+        bg_color = self._log_display.palette().color(QPalette.ColorRole.Base)
+        is_dark = bg_color.lightness() < 128
+        
+        # Get color map
+        colors = self.LEVEL_COLORS_DARK if is_dark else self.LEVEL_COLORS_LIGHT
+        default_color = "#ffffff" if is_dark else "#000000"
+        color = colors.get(level, default_color)
         
         # Create formatted text
         cursor = self._log_display.textCursor()

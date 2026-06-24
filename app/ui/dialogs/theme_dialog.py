@@ -103,6 +103,13 @@ class ThemePreviewWidget(QFrame):
             else:
                 stylesheet = preview_data.get('stylesheet', '')
 
+            if not stylesheet:
+                # If there's no custom stylesheet, use a clean fallback to prevent
+                # the active global application theme from leaking into the preview
+                if self._theme_manager is not None:
+                    light_theme = self._theme_manager.themes.get("light", {})
+                    stylesheet = light_theme.get("stylesheet", "")
+
             if stylesheet:
                 self.setStyleSheet(stylesheet)
             
@@ -158,14 +165,16 @@ class ThemeDialog(QDialog):
     
     def __init__(
         self, 
-        theme_manager: ThemeManager, 
-        settings_service: Optional[Any] = None,
+        container: Any,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
-        self.theme_manager = theme_manager
-        self.settings_service = settings_service
-        self.current_theme = theme_manager.get_current_theme()
+        from ....themes.theme_manager import ThemeManager
+        from ...services.settings_service import SettingsService
+        
+        self.theme_manager = container.get(ThemeManager)
+        self.settings_service = container.get(SettingsService)
+        self.current_theme = self.theme_manager.get_current_theme()
         self.favorite_themes = set()  # Set of favorite theme names
         if self.settings_service and hasattr(self.settings_service, 'get_favorite_themes'):
             try:
