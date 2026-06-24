@@ -55,6 +55,11 @@ class PrivilegedDaemon:
         # Active subprocess jobs (for cancellation support)
         self._active_jobs: Dict[str, subprocess.Popen] = {}
         self._jobs_lock = threading.Lock()
+        
+        # Connection tracking for automatic shutdown
+        self._active_connections = 0
+        self._connections_lock = threading.Lock()
+        self._has_had_connections = False
     
     def _get_original_uid(self) -> Optional[int]:
         """Get the original user's UID from environment variables."""
@@ -151,6 +156,11 @@ class PrivilegedDaemon:
 
             elif operation == OPERATION_SHUTDOWN:
                 logger.info("Shutdown requested")
+                with self._connections_lock:
+                    active = self._active_connections
+                if active > 1:
+                    logger.info(f"Ignored shutdown request: {active} active connections exist")
+                    return create_response(request_id, True, {'message': f'Kept alive, {active} connections active'})
                 SHUTDOWN_REQUESTED.set()
                 return create_response(request_id, True, {'message': 'Shutting down'})
             
@@ -341,6 +351,10 @@ class PrivilegedDaemon:
             client_socket.close()
             return
         
+        with self._connections_lock:
+            self._active_connections += 1
+            self._has_had_connections = True
+        
         try:
             while not SHUTDOWN_REQUESTED.is_set():
                 # Read request
@@ -370,6 +384,13 @@ class PrivilegedDaemon:
         finally:
             client_socket.close()
             logger.debug(f"Client disconnected: {addr}")
+            with self._connections_lock:
+                self._active_connections -= 1
+                active = self._active_connections
+            
+            if self._has_had_connections and active == 0:
+                logger.info("No active connections remaining. Initiating automatic daemon shutdown...")
+                SHUTDOWN_REQUESTED.set()
     
     def start(self):
         """Start the daemon server in legacy socket mode (To be removed after 5.x)."""

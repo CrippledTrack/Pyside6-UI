@@ -237,9 +237,26 @@ class SettingsService:
                 'favorite_themes': self._settings.favorite_themes
             }
             
-            # Write to file
-            with open(self._settings_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+            # Write to file atomically
+            import os
+            import tempfile
+            
+            settings_dir = os.path.dirname(self._settings_file)
+            if settings_dir:
+                os.makedirs(settings_dir, exist_ok=True)
+            
+            temp_fd, temp_path = tempfile.mkstemp(dir=settings_dir or ".", prefix=".settings_json_")
+            try:
+                with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
+                os.replace(temp_path, self._settings_file)
+            except Exception as e:
+                if os.path.exists(temp_path):
+                    try:
+                        os.unlink(temp_path)
+                    except Exception:
+                        pass
+                raise e
             
             logger.debug(f"Settings saved to {self._settings_file}")
         except Exception as e:

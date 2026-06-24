@@ -175,8 +175,20 @@ class ThemeManager:
         
         theme_path = self.themes_dir / f"{theme_name}.json"
         try:
-            with open(theme_path, 'w', encoding='utf-8') as f:
-                json.dump(theme_data, f, indent=2, ensure_ascii=False)
+            import os
+            import tempfile
+            temp_fd, temp_path = tempfile.mkstemp(dir=str(self.themes_dir), prefix=f".theme_{theme_name}_")
+            try:
+                with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
+                    json.dump(theme_data, f, indent=2, ensure_ascii=False)
+                os.replace(temp_path, theme_path)
+            except Exception as e:
+                if os.path.exists(temp_path):
+                    try:
+                        os.unlink(temp_path)
+                    except Exception:
+                        pass
+                raise e
             self._themes[theme_name] = theme_data
             logger.info(f"Saved custom theme: {theme_name}")
             return True
