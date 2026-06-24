@@ -661,15 +661,8 @@ class MainWindow(QMainWindow):
         # and ensures ServiceExtension plugins are properly shut down
         self.plugin_controller.cleanup_all_extensions()
         
-        # Set batch loading on tab controller to prevent lazy loading during removals
-        self.tab_controller.set_batch_loading(True)
-        
-        # Clear existing tabs
-        while self.tab_widget.count() > 0:
-            self.tab_widget.removeTab(0)
-        
-        # Clear tab controller state
-        self.tab_controller.clear_loaded_tabs()
+        # Clear all tabs, closing and deleting their widgets
+        self.tab_controller.clear_all_tabs()
         
         # Clear plugin registry
         self.container.get(PluginService).clear()
@@ -750,6 +743,9 @@ class MainWindow(QMainWindow):
             active_tab = self.tab_controller.get_current_tab_name()
             self.settings_service.save_session_state(tab_order, active_tab)
             
+        # Cleanly close and destroy all tabs to trigger their closeEvents and stop threads/timers
+        self.tab_controller.clear_all_tabs()
+
         # Shutdown ServiceExtension plugins
         self.plugin_controller.shutdown_service_extensions()
         

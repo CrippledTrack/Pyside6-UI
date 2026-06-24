@@ -3,6 +3,7 @@ Base plugin classes for the Basic UI Application.
 """
 from __future__ import annotations
 
+import logging
 import platform
 import re
 from abc import abstractmethod
@@ -23,6 +24,9 @@ from .interfaces import (
     EventSubscriberExtension,
     SettingsExtension,
 )
+
+logger = logging.getLogger(__name__)
+
 
 
 def _normalize_platform_name_for_matching(name: str) -> str:
@@ -125,6 +129,87 @@ class BaseTabPlugin:
     def on_plugin_disabled(self) -> None:
         """Called when the plugin is disabled."""
         pass
+    
+    def _cleanup_plugin_resources(self) -> None:
+        """Framework-level cleanup of common resources (QTimers, QThreads, QWidgets).
+        
+        This is called automatically when the plugin is disabled or unloaded to prevent leaks.
+        Scans both the plugin instance and its associated tab widget (self._widget) for
+        active QTimers, QThreads, and QWidgets that need to be stopped or destroyed.
+        """
+        try:
+            from ..app.qt_bindings import QTimer, QThread, QWidget
+        except ImportError:
+            # Fallback for environments where qt_bindings is mocked or unavailable
+            try:
+                from PySide6.QtCore import QTimer, QThread
+                from PySide6.QtWidgets import QWidget
+            except ImportError:
+                return
+
+        try:
+            # Scan the plugin instance and the tab widget's attributes,
+            # since threads/timers typically live on the widget (e.g. QuickSetupTab),
+            # not on the plugin class (e.g. QuickSetupPlugin).
+            targets = [self]
+            if getattr(self, "_widget", None) is not None:
+                targets.append(self._widget)
+
+            for target in targets:
+                target_label = target.__class__.__name__
+                for attr_name in list(target.__dict__.keys()):
+                    try:
+                        attr = getattr(target, attr_name, None)
+                    except Exception:
+                        continue
+                    if attr is None:
+                        continue
+                    
+                    # Stop active QTimers
+                    if isinstance(attr, QTimer):
+                        try:
+                            if attr.isActive():
+                                attr.stop()
+                                logger.debug(f"Automatically stopped active QTimer '{attr_name}' on {target_label} for plugin '{self.plugin_name}'")
+                        except Exception as e:
+                            logger.warning(f"Error stopping QTimer '{attr_name}': {e}")
+                    
+                    # Stop active QThreads
+                    elif isinstance(attr, QThread):
+                        try:
+                            if attr.isRunning():
+                                attr.quit()
+                                if not attr.wait(1000):  # Wait up to 1 second
+                                    logger.warning(
+                                        f"QThread '{attr_name}' on {target_label} for plugin '{self.plugin_name}' "
+                                        f"failed to exit gracefully within timeout"
+                                    )
+                                else:
+                                    logger.debug(f"Automatically stopped active QThread '{attr_name}' on {target_label} for plugin '{self.plugin_name}'")
+                        except Exception as e:
+                            logger.warning(f"Error stopping QThread '{attr_name}': {e}")
+                    
+                    # Delete QWidgets (skip self._widget itself, it's handled below)
+                    elif isinstance(attr, QWidget) and attr is not self._widget:
+                        try:
+                            attr.close()
+                            attr.deleteLater()
+                            logger.debug(f"Automatically requested deletion of QWidget '{attr_name}' on {target_label} for plugin '{self.plugin_name}'")
+                        except Exception as e:
+                            logger.warning(f"Error deleting QWidget '{attr_name}': {e}")
+
+            # Close and schedule deletion of the tab widget itself
+            if self._widget is not None:
+                try:
+                    self._widget.close()
+                    self._widget.deleteLater()
+                except Exception as e:
+                    logger.warning(f"Error closing/deleting plugin widget for '{self.plugin_name}': {e}")
+            
+            # Reset the framework-defined widget reference
+            self._widget = None
+        except Exception as e:
+            logger.error(f"Error during framework cleanup of '{self.plugin_name}': {e}")
     
     def on_settings_changed(self, settings_dict: Dict[str, Any]) -> None:
         """Called when plugin settings are changed."""

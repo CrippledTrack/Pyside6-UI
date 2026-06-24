@@ -253,7 +253,7 @@ class ToastNotification(QFrame):
     
     def setup_animation(self) -> None:
         """Setup slide-in animation."""
-        self.animation = QPropertyAnimation(self, b"geometry")
+        self.animation = QPropertyAnimation(self, b"geometry", self)
         self.animation.setDuration(250)
         self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         

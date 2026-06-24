@@ -625,15 +625,44 @@ class PluginManagementDialog(QDialog):
 
     def enable_all(self) -> None:
         """Enable all plugins."""
-        for name, _ in self._all_plugins:
-            self.toggle_plugin(name, True)
+        tab_controller = None
+        if self.parent() and hasattr(self.parent(), "tab_controller"):
+            tab_controller = self.parent().tab_controller
+            tab_controller.set_batch_loading(True)
+            
+        try:
+            for name, _ in self._all_plugins:
+                self.toggle_plugin(name, True)
+        finally:
+            if tab_controller:
+                tab_controller.set_batch_loading(False)
+                # Load the currently active tab since batch loading is now off
+                if hasattr(self.parent(), "tab_widget"):
+                    current_index = self.parent().tab_widget.currentIndex()
+                    if current_index >= 0:
+                        tab_controller.on_tab_changed(current_index)
+                        
         self.apply_filters()
         self.on_selection_changed()
 
     def disable_all(self) -> None:
         """Disable all plugins."""
-        for name, _ in self._all_plugins:
-            self.toggle_plugin(name, False)
+        tab_controller = None
+        if self.parent() and hasattr(self.parent(), "tab_controller"):
+            tab_controller = self.parent().tab_controller
+            tab_controller.set_batch_loading(True)
+            
+        try:
+            for name, _ in self._all_plugins:
+                self.toggle_plugin(name, False)
+        finally:
+            if tab_controller:
+                tab_controller.set_batch_loading(False)
+                if hasattr(self.parent(), "tab_widget"):
+                    current_index = self.parent().tab_widget.currentIndex()
+                    if current_index >= 0:
+                        tab_controller.on_tab_changed(current_index)
+                        
         self.apply_filters()
         self.on_selection_changed()
 

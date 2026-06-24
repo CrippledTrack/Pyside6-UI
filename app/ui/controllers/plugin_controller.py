@@ -132,6 +132,8 @@ class PluginController(QObject):
                         instance = self.registry.get_plugin_instance(plugin_name)
                         if hasattr(instance, 'on_plugin_disabled'):
                             instance.on_plugin_disabled()
+                        if hasattr(instance, '_cleanup_plugin_resources'):
+                            instance._cleanup_plugin_resources()
                 except Exception as e:
                     logger.error(f"Error calling on_plugin_disabled for '{plugin_name}': {e}")
                 self.plugin_service.disable_plugin(plugin_name)
@@ -147,6 +149,13 @@ class PluginController(QObject):
         self._save_plugin_states()
         self.plugin_toggled.emit(plugin_name, enabled)
         self.plugin_state_changed.emit()
+        
+        # Clear plugin instance from cache if disabling to prevent resource leaks
+        if not enabled:
+            try:
+                self.registry.unload_plugin_instance(plugin_name)
+            except Exception as e:
+                logger.error(f"Error unloading plugin instance '{plugin_name}': {e}")
         
         return True
     

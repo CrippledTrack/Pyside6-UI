@@ -29,6 +29,10 @@ class PluginRegistryFacade:
         """Get or create a plugin instance by name."""
         return self._registry.get_plugin_instance(name)
 
+    def unload_plugin_instance(self, name: str) -> None:
+        """Remove a plugin instance from the cache."""
+        self._registry.unload_plugin_instance(name)
+
     def has_plugin_instance(self, name: str) -> bool:
         """Check if a plugin instance is cached."""
         return self._registry.has_plugin_instance(name)

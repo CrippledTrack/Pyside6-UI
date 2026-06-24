@@ -520,6 +520,13 @@ class PluginRegistry:
     def clear(self) -> None:
         """Clear all registered plugins and cached instances."""
         with self._lock:
+            # Clean up all cached instances before clearing
+            for name, instance in list(self._plugin_instances.items()):
+                if hasattr(instance, '_cleanup_plugin_resources'):
+                    try:
+                        instance._cleanup_plugin_resources()
+                    except Exception as e:
+                        logger.error(f"Error cleaning up resources during clear of '{name}': {e}")
             self._plugins.clear()
             self._core_plugins.clear()
             self._external_plugins.clear()
@@ -596,6 +603,18 @@ class PluginRegistry:
     def disable_plugin(self, name: str) -> None:
         """Disable a plugin by name."""
         self._disabled_plugins.add(name)
+
+    def unload_plugin_instance(self, name: str) -> None:
+        """Remove a plugin instance from the cache and trigger its framework cleanup."""
+        with self._lock:
+            instance = self._plugin_instances.pop(name, None)
+            if instance is not None:
+                if hasattr(instance, '_cleanup_plugin_resources'):
+                    try:
+                        instance._cleanup_plugin_resources()
+                    except Exception as e:
+                        logger.error(f"Error cleaning up resources during unload of '{name}': {e}")
+                logger.debug(f"Unloaded plugin instance: {name}")
 
     def enable_plugin(self, name: str) -> None:
         """Enable a plugin by name."""

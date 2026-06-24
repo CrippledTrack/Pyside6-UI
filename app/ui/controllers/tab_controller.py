@@ -109,7 +109,14 @@ class TabController(QObject):
         """
         for i in range(self.tab_widget.count()):
             if self.tab_widget.tabText(i) == tab_name:
+                widget = self.tab_widget.widget(i)
                 self.tab_widget.removeTab(i)
+                if widget:
+                    try:
+                        widget.close()
+                        widget.deleteLater()
+                    except Exception as e:
+                        logger.error(f"Error closing/deleting tab widget '{tab_name}': {e}")
                 break
         
         if tab_name in self.loaded_tabs:
@@ -218,11 +225,20 @@ class TabController(QObject):
                     # Create the actual plugin widget using instance
                     plugin_instance = self.registry.get_plugin_instance(tab_name)
                     tab_info["instance"] = plugin_instance.create_widget(self.tab_widget)
+                    # Store reference on plugin so _cleanup_plugin_resources can find it
+                    plugin_instance._widget = tab_info["instance"]
                 
                 # Replace placeholder with actual widget
                 current_index = self.tab_widget.currentIndex()
                 if current_index >= 0:
+                    old_widget = self.tab_widget.widget(current_index)
                     self.tab_widget.removeTab(current_index)
+                    if old_widget:
+                        try:
+                            old_widget.close()
+                            old_widget.deleteLater()
+                        except Exception as e:
+                            logger.debug(f"Error closing/deleting placeholder widget: {e}")
                     self.tab_widget.insertTab(current_index, tab_info["instance"], tab_name)
                     self.tab_widget.setCurrentIndex(current_index)
                 
@@ -296,9 +312,18 @@ class TabController(QObject):
             plugin_instance = self.registry.get_plugin_instance(tab_name)
             widget = plugin_instance.create_widget(self.tab_widget)
             tab_info["instance"] = widget
+            # Store reference on plugin so _cleanup_plugin_resources can find it
+            plugin_instance._widget = widget
             
             # Replace the tab widget
+            old_widget = self.tab_widget.widget(index)
             self.tab_widget.removeTab(index)
+            if old_widget:
+                try:
+                    old_widget.close()
+                    old_widget.deleteLater()
+                except Exception as e:
+                    logger.debug(f"Error closing/deleting old widget during tab reload: {e}")
             self.tab_widget.insertTab(index, widget, tab_name)
             
             # If this was the current tab, make sure it's still selected
@@ -372,6 +397,27 @@ class TabController(QObject):
         self.loaded_tabs.clear()
         self._previous_tab_index = -1
         logger.info("Cleared all loaded tab state")
+
+    def clear_all_tabs(self) -> None:
+        """Clear all tabs, closing and deleting their widgets and resetting state."""
+        self.set_batch_loading(True)
+        try:
+            # First, call deactivation hooks and clear dict tracking
+            self.clear_loaded_tabs()
+            
+            # Close and delete all tab widgets in the tab bar
+            while self.tab_widget.count() > 0:
+                widget = self.tab_widget.widget(0)
+                self.tab_widget.removeTab(0)
+                if widget:
+                    try:
+                        widget.close()
+                        widget.deleteLater()
+                    except Exception as e:
+                        logger.debug(f"Error closing/deleting tab widget: {e}")
+        finally:
+            self.set_batch_loading(False)
+        logger.info("Cleared and destroyed all tab widgets and state")
     
     def set_restart_admin_callback(self, callback: Callable[[], None]) -> None:
         """Set callback for restart as admin action.
