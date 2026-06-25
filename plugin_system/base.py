@@ -137,15 +137,7 @@ class BaseTabPlugin:
         Scans both the plugin instance and its associated tab widget (self._widget) for
         active QTimers, QThreads, and QWidgets that need to be stopped or destroyed.
         """
-        try:
-            from ..app.qt_bindings import QTimer, QThread, QWidget
-        except ImportError:
-            # Fallback for environments where qt_bindings is mocked or unavailable
-            try:
-                from PySide6.QtCore import QTimer, QThread
-                from PySide6.QtWidgets import QWidget
-            except ImportError:
-                return
+        from ..app.qt_bindings import QTimer, QThread, QWidget
 
         try:
             # Scan the plugin instance and the tab widget's attributes,

@@ -90,6 +90,21 @@ elif _binding in {"pyside6", "pyside"}:
 else:
     raise ImportError(f"Unsupported QT_BINDING: {_binding}")
 
+def is_valid(obj: object) -> bool:
+    """Check if a Qt object's underlying C++ object is still valid (not deleted)."""
+    if _binding in {"pyqt6", "pyqt"}:
+        try:
+            from PyQt6 import sip
+            return not sip.isdeleted(obj)
+        except (ImportError, TypeError):
+            return obj is not None
+    else:
+        try:
+            import shiboken6
+            return shiboken6.isValid(obj)
+        except (ImportError, TypeError):
+            return obj is not None
+
 def __getattr__(name: str):
     """Resolve Qt symbols from QtCore/QtGui/QtWidgets."""
     for module in (QtCore, QtGui, QtWidgets):
@@ -97,4 +112,4 @@ def __getattr__(name: str):
             return getattr(module, name)
     raise AttributeError(f"qt_bindings has no attribute {name!r}")
 
-__all__ = ["QtCore", "QtGui", "QtWidgets", "Signal", "Slot", "Property"]
+__all__ = ["QtCore", "QtGui", "QtWidgets", "Signal", "Slot", "Property", "is_valid"]

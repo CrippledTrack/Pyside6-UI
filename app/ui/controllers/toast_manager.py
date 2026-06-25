@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from ....themes.theme_manager import ThemeManager
     from ..widgets.toast_notification import ToastNotification
     from ...services.notification_service import NotificationService
+    from ...services.container import ServiceContainer
 
 logger = logging.getLogger(__name__)
 
@@ -23,14 +24,18 @@ class ToastManager(QObject):
     
     def __init__(
         self,
-        parent_widget: Optional["QWidget"] = None,
-        theme_manager: Optional["ThemeManager"] = None,
-        notification_service: Optional["NotificationService"] = None
+        container: "ServiceContainer",
+        parent_widget: Optional["QWidget"] = None
     ) -> None:
         super().__init__(parent_widget)
         self.parent_widget = parent_widget
-        self.theme_manager = theme_manager
-        self.notification_service = notification_service
+        self.container = container
+        
+        from ....themes.theme_manager import ThemeManager
+        from ...services.notification_service import NotificationService
+        
+        self.theme_manager = container.get(ThemeManager)
+        self.notification_service = container.get(NotificationService)
         self.active_toasts: list["ToastNotification"] = []
         
         if self.parent_widget:

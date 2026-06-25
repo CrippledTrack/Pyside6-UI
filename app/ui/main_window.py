@@ -211,17 +211,12 @@ class MainWindow(QMainWindow):
         self.setStatusBar(status_bar)
         status_bar.setMaximumHeight(20)
         
-        # Get notification service
-        from ..services.notification_service import NotificationService
-        notification_service = self.container.get(NotificationService)
-        
-        # Create status bar manager
+        # Create status bar manager - now passes container directly
         from .controllers.status_bar_manager import StatusBarManager
         self.status_bar_manager = StatusBarManager(
             status_bar, 
-            self, 
-            notification_service,
-            self.theme_manager
+            self.container, 
+            self
         )
     
     def _setup_menu_bar(self) -> None:
@@ -677,10 +672,8 @@ class MainWindow(QMainWindow):
     
     def setup_toast_manager(self) -> None:
         """Setup the toast notification manager."""
-        from ..services.notification_service import NotificationService
-        notification_service = self.container.get(NotificationService)
         from .controllers.toast_manager import ToastManager
-        self.toast_manager = ToastManager(self, self.theme_manager, notification_service)
+        self.toast_manager = ToastManager(self.container, self)
     
     def setup_shortcuts(self) -> None:
         """Setup keyboard shortcuts."""

@@ -12,23 +12,7 @@ from typing import Any, Dict, Optional, Callable, TYPE_CHECKING
 
 from ...qt_bindings import QObject, Signal, Qt, QAction, QToolBar, QIcon
 
-try:
-    from shiboken6 import isValid as _qt_is_valid
-except Exception:  # pragma: no cover - shiboken6 unavailable (PyQt6 path)
-    try:
-        from PyQt6 import sip as _sip
-
-        def _qt_is_valid(obj: object) -> bool:
-            if obj is None:
-                return False
-            try:
-                return not _sip.isdeleted(obj)
-            except TypeError:
-                # obj is not a wrapped C++ object; treat as valid.
-                return True
-    except Exception:
-        def _qt_is_valid(obj: object) -> bool:  # type: ignore[misc]
-            return obj is not None
+from ...qt_bindings import is_valid as _qt_is_valid
 
 from ...services.plugin_service import PluginService
 from ...services.settings_service import SettingsService
