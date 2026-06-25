@@ -57,6 +57,19 @@ class ToastNotification(QFrame):
         self.setup_animation()
         self.apply_theme()
     
+    def _font_exists(self, font_name: str) -> bool:
+        """Check if a font exists on the system."""
+        from ...qt_bindings import QFontDatabase
+        try:
+            return font_name in QFontDatabase().families()
+        except TypeError:
+            try:
+                return font_name in QFontDatabase.families()
+            except Exception:
+                return False
+        except Exception:
+            return False
+
     def setup_ui(self) -> None:
         """Setup the toast notification UI."""
         # Set parent to establish window hierarchy (Tool windows stay above their parent)
@@ -80,17 +93,21 @@ class ToastNotification(QFrame):
         content_layout.setContentsMargins(15, 10, 12, 10)
         content_layout.setSpacing(8)
         
+        # Cross-platform font setup
+        msg_font = QFont("Segoe UI" if self._font_exists("Segoe UI") else "Arial", 9)
+        close_font = QFont("Segoe UI" if self._font_exists("Segoe UI") else "Arial", 10, QFont.Weight.Bold)
+        
         # Message label (no icon)
         self.message_label = QLabel(self.message)
         self.message_label.setWordWrap(True)
-        self.message_label.setFont(QFont("Segoe UI", 9))
+        self.message_label.setFont(msg_font)
         self.message_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         content_layout.addWidget(self.message_label)
         
         # Close button (needs to be clickable while toast is click-through)
         self.close_button = QPushButton("×")
         self.close_button.setFixedSize(18, 18)
-        self.close_button.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        self.close_button.setFont(close_font)
         self.close_button.clicked.connect(self.close_toast)
         self.close_button.setObjectName("closeButton")
         content_layout.addWidget(self.close_button)
@@ -169,39 +186,11 @@ class ToastNotification(QFrame):
         # Extract theme colors
         window_color = palette.get('window', '#2d2d2d' if is_dark else '#ffffff')
         text_color = palette.get('window_text', '#ffffff' if is_dark else '#000000')
-        base_color = palette.get('base', '#1e1e1e' if is_dark else '#f5f5f5')
         highlight_color = palette.get('highlight', '#0078d4')
-        button_color = palette.get('button', '#3d3d3d' if is_dark else '#e0e0e0')
         
-        # Parse highlight color to get RGB
-        def parse_hex_color(hex_color: str) -> tuple:
-            """Parse hex color to RGB tuple."""
-            hex_color = hex_color.lstrip('#')
-            if len(hex_color) == 3:
-                hex_color = ''.join(c + c for c in hex_color)
-            if len(hex_color) == 6:
-                return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-            return (0, 120, 212)  # Default blue
-        
-        def adjust_hue(r: int, g: int, b: int, notification_type: str) -> tuple:
-            """Adjust hue based on notification type."""
-            if notification_type == "success":
-                # Shift toward green
-                return (max(0, r - 30), min(255, g + 40), max(0, b - 30))
-            elif notification_type == "warning":
-                # Shift toward orange/yellow
-                return (min(255, r + 50), min(255, g + 20), max(0, b - 50))
-            elif notification_type == "error":
-                # Shift toward red
-                return (min(255, r + 60), max(0, g - 60), max(0, b - 60))
-            elif notification_type == "loading":
-                # Shift toward purple
-                return (min(255, r + 20), max(0, g - 40), min(255, b + 40))
-            else:  # info - keep original
-                return (r, g, b)
-        
-        r, g, b = parse_hex_color(highlight_color)
-        r, g, b = adjust_hue(r, g, b, notification_type)
+        from ....themes.theme_manager import ThemeManager
+        adjusted_hex = ThemeManager.adjust_notification_color(highlight_color, notification_type)
+        r, g, b = ThemeManager.parse_hex_color(adjusted_hex)
         
         # Create colors based on theme
         if is_dark:

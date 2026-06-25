@@ -164,6 +164,25 @@ class CardContainer(QFrame):
         """
         self._content_layout.setContentsMargins(left, top, right, bottom)
 
+    def set_elevated(self, elevated: bool) -> None:
+        """Set or update the elevated status of the card at runtime.
+        
+        Args:
+            elevated: True for elevated prominence, False for standard card style.
+        """
+        if elevated:
+            self.setObjectName("cardElevated")
+            if self.property("card"):
+                self.setProperty("card", False)
+        else:
+            self.setObjectName("card")
+            self.setProperty("card", True)
+            
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
+
 
 class CardSection(QFrame):
     """A lightweight section divider within a card.
@@ -273,6 +292,25 @@ class HorizontalCard(QFrame):
             size: Spacing in pixels
         """
         self._layout.addSpacing(size)
+
+    def set_elevated(self, elevated: bool) -> None:
+        """Set or update the elevated status of the horizontal card at runtime.
+        
+        Args:
+            elevated: True for elevated prominence, False for standard card style.
+        """
+        if elevated:
+            self.setObjectName("cardElevated")
+            if self.property("card"):
+                self.setProperty("card", False)
+        else:
+            self.setObjectName("card")
+            self.setProperty("card", True)
+            
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
 
 
 class InfoCard(CardContainer):

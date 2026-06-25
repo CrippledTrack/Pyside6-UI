@@ -46,10 +46,16 @@ class PulsingDot(QFrame):
     
     def _update_style(self) -> None:
         """Update the dot's visual style based on current opacity."""
-        # Use theme-aware styling
+        try:
+            from ...qt_bindings import QApplication, QPalette
+            highlight = QApplication.palette().color(QPalette.ColorRole.Highlight)
+            r, g, b = highlight.red(), highlight.green(), highlight.blue()
+        except Exception:
+            r, g, b = 100, 150, 200
+            
         self.setStyleSheet(f"""
             QFrame {{
-                background-color: rgba(100, 150, 200, {self._opacity});
+                background-color: rgba({r}, {g}, {b}, {self._opacity});
                 border-radius: 5px;
                 border: none;
             }}
@@ -228,12 +234,22 @@ class LoadingOverlay(QFrame):
         """
         super().__init__(parent)
         
+        # Detect theme brightness dynamically
+        try:
+            from ...qt_bindings import QApplication, QPalette
+            window_color = QApplication.palette().color(QPalette.ColorRole.Window)
+            is_dark = window_color.lightnessF() < 0.5
+        except Exception:
+            is_dark = True
+            
+        bg_color = "rgba(0, 0, 0, 0.5)" if is_dark else "rgba(240, 240, 240, 0.6)"
+        
         # Semi-transparent background
-        self.setStyleSheet("""
-            LoadingOverlay {
-                background-color: rgba(0, 0, 0, 0.5);
+        self.setStyleSheet(f"""
+            LoadingOverlay {{
+                background-color: {bg_color};
                 border-radius: 8px;
-            }
+            }}
         """)
         
         layout = QVBoxLayout(self)
@@ -263,6 +279,7 @@ class LoadingOverlay(QFrame):
         
         # Message
         message_label = QLabel(message)
+        message_label.setStyleSheet("color: palette(text); background-color: transparent;")
         message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         message_font = QFont()
         message_font.setPointSize(10)

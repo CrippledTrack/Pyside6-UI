@@ -473,5 +473,93 @@ class ThemeManager:
         
         app.setPalette(palette)
 
+    @staticmethod
+    def parse_hex_color(hex_color: str) -> tuple[int, int, int]:
+        """Parse hex color string to RGB tuple.
+        
+        Args:
+            hex_color: Color in hex format (e.g., '#0078d4' or '0078d4')
+            
+        Returns:
+            RGB tuple of integers (r, g, b)
+        """
+        if not hex_color:
+            return (0, 120, 212)
+        hex_color = hex_color.lstrip('#')
+        if len(hex_color) == 3:
+            hex_color = ''.join(c + c for c in hex_color)
+        if len(hex_color) == 6:
+            try:
+                return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+            except ValueError:
+                pass
+        return (0, 120, 212)  # Default blue fallback
+
+    @staticmethod
+    def adjust_color(hex_color: str, factor: float) -> str:
+        """Adjust a hex color brightness.
+        
+        Args:
+            hex_color: Color in hex format (e.g., '#0078d4')
+            factor: Brightness adjustment. > 1 lightens, < 1 darkens
+            
+        Returns:
+            Adjusted color in hex format
+        """
+        hex_color_clean = hex_color.lstrip('#')
+        if len(hex_color_clean) == 3:
+            hex_color_clean = ''.join(c + c for c in hex_color_clean)
+        if len(hex_color_clean) == 6:
+            try:
+                r, g, b = tuple(int(hex_color_clean[i:i+2], 16) for i in (0, 2, 4))
+                if factor > 1:
+                    r = min(255, int(r + (255 - r) * (factor - 1)))
+                    g = min(255, int(g + (255 - g) * (factor - 1)))
+                    b = min(255, int(b + (255 - b) * (factor - 1)))
+                else:
+                    r = int(r * factor)
+                    g = int(g * factor)
+                    b = int(b * factor)
+                return f"#{r:02x}{g:02x}{b:02x}"
+            except ValueError:
+                pass
+        return hex_color
+
+    @staticmethod
+    def adjust_notification_color(hex_color: str, notification_type: Any) -> str:
+        """Parse hex color and adjust hue based on notification type.
+        
+        Args:
+            hex_color: Base highlight color in hex format
+            notification_type: The notification type to adjust for (string or NotificationType enum)
+            
+        Returns:
+            Adjusted color in hex format
+        """
+        # Resolve enum to its string value if needed
+        type_str = notification_type
+        if hasattr(notification_type, 'value'):
+            type_str = notification_type.value
+        if isinstance(type_str, str):
+            type_str = type_str.lower()
+        else:
+            type_str = str(type_str).lower()
+            
+        r, g, b = ThemeManager.parse_hex_color(hex_color)
+        
+        # Adjust hue based on type
+        if type_str == "success":
+            r, g, b = max(0, r - 30), min(255, g + 40), max(0, b - 30)
+        elif type_str == "warning":
+            r, g, b = min(255, r + 80), min(255, g + 30), max(0, b - 80)
+        elif type_str == "error":
+            r, g, b = min(255, r + 100), max(0, g - 60), max(0, b - 60)
+        elif type_str == "loading":
+            r, g, b = min(255, r + 20), max(0, g - 40), min(255, b + 40)
+        # info/other keeps original highlight color
+        
+        return f"#{r:02x}{g:02x}{b:02x}"
+
 
 __all__ = ['ThemeManager']
+

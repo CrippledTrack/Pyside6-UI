@@ -13,8 +13,7 @@ from ...qt_bindings import Qt, QLabel, QProgressBar, QVBoxLayout, QWidget
 
 
 class ProgressIndicator(QWidget):
-    """
-    Progress indicator widget with progress bar and optional message.
+    """Progress indicator widget with progress bar and optional message.
     
     This widget can be used in plugin widgets to show progress
     for long-running operations. Supports both determinate and
@@ -22,8 +21,7 @@ class ProgressIndicator(QWidget):
     """
     
     def __init__(self, parent: Optional[QWidget] = None) -> None:
-        """
-        Initialize the progress indicator.
+        """Initialize the progress indicator.
         
         Args:
             parent: Parent widget
@@ -50,6 +48,40 @@ class ProgressIndicator(QWidget):
         self.progress_bar.setMaximum(100)
         self.progress_bar.setValue(0)
         layout.addWidget(self.progress_bar)
+        
+        # Apply theme-aware styling
+        self._apply_styling()
+
+    def _apply_styling(self) -> None:
+        """Apply theme-aware styling to the progress bar."""
+        try:
+            from ...qt_bindings import QApplication, QPalette
+            highlight = QApplication.palette().color(QPalette.ColorRole.Highlight).name()
+            text_color = QApplication.palette().color(QPalette.ColorRole.Text).name()
+        except Exception:
+            highlight = "#3182ce"
+            text_color = "#ffffff"
+            
+        self.setStyleSheet(f"""
+            ProgressIndicator {{
+                background-color: transparent;
+            }}
+            QLabel {{
+                color: palette(text);
+                background-color: transparent;
+            }}
+            QProgressBar {{
+                border: 1px solid palette(mid);
+                border-radius: 4px;
+                background-color: palette(base);
+                text-align: center;
+                color: {text_color};
+            }}
+            QProgressBar::chunk {{
+                background-color: {highlight};
+                border-radius: 3px;
+            }}
+        """)
     
     def set_progress(self, value: int, maximum: int = 100) -> None:
         """

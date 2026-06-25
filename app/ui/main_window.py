@@ -39,6 +39,7 @@ from ..qt_bindings import (
     QMenu,
     QMenuBar,
     QMessageBox,
+    QDialog,
     QStatusBar,
     QTabWidget,
     QVBoxLayout,
@@ -104,7 +105,7 @@ class MainWindow(QMainWindow):
         self._theme_dialog: Optional["ThemeDialog"] = None
         self._plugin_dialog: Optional["PluginManagementDialog"] = None
         self._log_viewer_dialog: Optional["LogViewerDialog"] = None
-        self._about_dialog: Optional[QMessageBox] = None
+        self._about_dialog: Optional[QDialog] = None
         
         # Get services from container
         self.admin_service = container.get(AdminService)
@@ -499,7 +500,7 @@ class MainWindow(QMainWindow):
     def show_about_dialog(self) -> None:
         """Show the About dialog without blocking the main window."""
         from ..constants import GUI_API_VERSION as GUI_VERSION, VERSION_NAME as DEFAULT_VERSION_NAME
-        from ..utils.about_info import create_about_dialog
+        from .dialogs import create_about_dialog
         
         if self._about_dialog and self._about_dialog.isVisible():
             self._about_dialog.raise_()
@@ -766,66 +767,6 @@ class MainWindow(QMainWindow):
         """Clear the status bar message."""
         if self.status_bar_manager:
             self.status_bar_manager.clear_status()
-    
-    def toggle_new_ui(self) -> None:
-        """Toggle the new UI overhaul flag.
-        
-        This allows users to switch between the new UI overhaul and the old UI.
-        Some changes may require an application restart to take full effect.
-        """
-        if not self.settings_service or not self.menu_controller:
-            return
-        
-        # Get the new state from the action (Qt already toggled it)
-        toggle_action = self.menu_controller.toggle_new_ui_action
-        if not toggle_action:
-            return
-        
-        new_state = toggle_action.isChecked()
-        
-        # Save the new state
-        self.settings_service.save_new_ui_enabled(new_state)
-        
-        # Update menu action text
-        self.menu_controller._update_new_ui_action_text()
-        
-        # Update menu bar styling immediately
-        menu_bar = self.menuBar()
-        if menu_bar:
-            if new_state:
-                menu_bar.setStyleSheet("""
-                    QMenuBar {
-                        padding: 2px 0px;
-                    }
-                    QMenuBar::item {
-                        padding: 4px 8px;
-                    }
-                """)
-            else:
-                # Old UI: no custom styling
-                menu_bar.setStyleSheet("")
-        
-        # Reapply current theme with new UI flag setting
-        # This will automatically switch between legacy and new theme managers
-        if self.theme_manager:
-            current_theme = self.theme_manager.get_current_theme()
-            if current_theme:
-                # Force reapply with new flag - this will switch theme managers if needed
-                self.theme_manager.apply_theme(current_theme, new_ui_enabled=new_state)
-            else:
-                # If no theme is set, apply auto theme with new flag
-                self.theme_manager.apply_auto_theme()
-        
-        # Note: Table header resizing changes will apply on next tab load
-        # Margins stay the same (20, 20, 20, 20) in both versions
-        
-        # Show notification
-        state_text = "enabled" if new_state else "disabled"
-        self.toast_manager.show_info(
-            f"New UI {state_text}. Some changes may require restart to take full effect."
-        )
-        
-        logger.info(f"New UI toggled: {new_state}")
 
 
 __all__ = ['MainWindow']

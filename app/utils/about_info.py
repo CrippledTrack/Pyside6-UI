@@ -110,35 +110,6 @@ def _git_commit_line() -> str:
     return ""
 
 
-def create_about_dialog(
-    parent,
-    *,
-    app_name: str,
-    gui_api_version: str,
-    platform_name: str,
-    app_version: Optional[str] = None,
-):
-    """Create a configured non-modal About QMessageBox (not shown).
-
-    Kept here to keep `main_window.py` focused on UI wiring.
-    """
-    from ..qt_bindings import QtCore, QtWidgets
-
-    msg = QtWidgets.QMessageBox(parent)
-    msg.setWindowTitle(f"About {app_name}")
-    msg.setText(build_about_info(
-        app_name=app_name,
-        app_version=app_version,
-        gui_api_version=gui_api_version,
-        platform_name=platform_name,
-    ))
-    msg.setTextFormat(QtCore.Qt.TextFormat.RichText)
-    msg.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Close)
-    msg.setWindowModality(QtCore.Qt.WindowModality.NonModal)
-    msg.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
-    return msg
-
-
 def build_about_info(
     *,
     app_name: str,
@@ -146,11 +117,9 @@ def build_about_info(
     platform_name: str,
     app_version: Optional[str] = None,
 ) -> str:
-    """Build rich-text (Qt) for the About dialog."""
-    # Import here to avoid UI modules importing Qt binding shims too early.
+    """Build rich-text (Qt) for the About dialog. (Kept for compatibility)"""
     try:
         from ..qt_bindings import get_binding_name
-
         binding_name = get_binding_name()
     except Exception:
         binding_name = "pyside6"
@@ -172,7 +141,6 @@ def build_about_info(
     python_line = _python_version_line()
     git_line = _git_commit_line()
 
-    # Use a human-friendly platform label (e.g., map 'darwin' -> 'macOS').
     from .display_utils import _format_platform_name
     pretty_platform = _format_platform_name(platform_name)
 
@@ -189,5 +157,5 @@ def build_about_info(
     )
 
 
-__all__ = ["build_about_info", "create_about_dialog"]
+__all__ = ["build_about_info"]
 
