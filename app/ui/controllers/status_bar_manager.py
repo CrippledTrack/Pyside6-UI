@@ -22,11 +22,11 @@ from ...qt_bindings import (
     QLabel,
 )
 
+from ....themes.theme_manager import ThemeManager
+from ...services.notification_service import NotificationService
+
 if TYPE_CHECKING:
-    from ...services.notification_service import NotificationService
-    from ....themes.theme_manager import ThemeManager
     from ..widgets.notification_center import NotificationCenterWidget
-    from ...services.container import ServiceContainer
 
 logger = logging.getLogger(__name__)
 
@@ -37,25 +37,22 @@ class StatusBarManager(QObject):
     def __init__(
         self,
         status_bar: QStatusBar,
-        container: "ServiceContainer",
+        notification_service: NotificationService,
+        theme_manager: ThemeManager,
         parent: Optional[QObject] = None
     ) -> None:
         """Initialize the status bar manager.
         
         Args:
             status_bar: The status bar widget to manage
-            container: Service container for dependency injection
+            notification_service: The notification service
+            theme_manager: The theme manager
             parent: Optional parent object
         """
         super().__init__(parent)
         self.status_bar = status_bar
-        self.container = container
-        
-        from ...services.notification_service import NotificationService
-        from ....themes.theme_manager import ThemeManager
-        
-        self.notification_service = container.get(NotificationService)
-        self.theme_manager = container.get(ThemeManager)
+        self.notification_service = notification_service
+        self.theme_manager = theme_manager
         self._status_timer: Optional[QTimer] = None
         self._notification_widget: Optional["NotificationCenterWidget"] = None
         

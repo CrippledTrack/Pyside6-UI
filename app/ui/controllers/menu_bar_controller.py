@@ -14,8 +14,9 @@ from ...qt_bindings import QObject, Signal, QAction, QMenuBar, QMenu, QWidget
 
 from ...constants import CURRENT_PLATFORM
 
-if TYPE_CHECKING:
-    from ...services.container import ServiceContainer
+from ...services.admin_service import AdminService
+from ...services.daemon_service import DaemonService
+from ...services.settings_service import SettingsService
 
 logger = logging.getLogger(__name__)
 
@@ -29,29 +30,26 @@ class MenuBarController(QObject):
     def __init__(
         self,
         menu_bar: QMenuBar,
-        container: "ServiceContainer",
+        admin_service: AdminService,
+        daemon_service: Optional[DaemonService],
+        settings_service: SettingsService,
         parent_widget: Optional[QWidget] = None
     ) -> None:
         """Initialize the menu bar controller.
         
         Args:
             menu_bar: The menu bar widget to manage
-            container: Service container for dependency injection
+            admin_service: The admin service
+            daemon_service: The daemon service
+            settings_service: The settings service
             parent_widget: Optional parent widget for menu items
         """
         super().__init__(parent_widget)
         self.menu_bar = menu_bar
-        self.container = container
+        self.admin_service = admin_service
+        self.daemon_service = daemon_service
+        self.settings_service = settings_service
         self.parent_widget = parent_widget
-        
-        # Retrieve services from container
-        from ...services.admin_service import AdminService
-        from ...services.daemon_service import DaemonService
-        from ...services.settings_service import SettingsService
-        
-        self.admin_service = container.get(AdminService)
-        self.daemon_service = container.get(DaemonService) if CURRENT_PLATFORM == "linux" else None
-        self.settings_service = container.get(SettingsService)
         
         # Menu actions (stored for state management)
         self.manage_plugins_action: Optional[QAction] = None

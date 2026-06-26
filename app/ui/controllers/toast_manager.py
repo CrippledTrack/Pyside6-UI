@@ -9,12 +9,12 @@ import logging
 from typing import Optional, TYPE_CHECKING
 from ...qt_bindings import QObject, QEvent
 
+from ....themes.theme_manager import ThemeManager
+from ...services.notification_service import NotificationService, NotificationType
+from ..widgets.toast_notification import ToastNotification
+
 if TYPE_CHECKING:
     from ...qt_bindings import QWidget
-    from ....themes.theme_manager import ThemeManager
-    from ..widgets.toast_notification import ToastNotification
-    from ...services.notification_service import NotificationService
-    from ...services.container import ServiceContainer
 
 logger = logging.getLogger(__name__)
 
@@ -24,19 +24,15 @@ class ToastManager(QObject):
     
     def __init__(
         self,
-        container: "ServiceContainer",
-        parent_widget: Optional["QWidget"] = None
+        theme_manager: ThemeManager,
+        notification_service: NotificationService,
+        parent_widget: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent_widget)
         self.parent_widget = parent_widget
-        self.container = container
-        
-        from ....themes.theme_manager import ThemeManager
-        from ...services.notification_service import NotificationService
-        
-        self.theme_manager = container.get(ThemeManager)
-        self.notification_service = container.get(NotificationService)
-        self.active_toasts: list["ToastNotification"] = []
+        self.theme_manager = theme_manager
+        self.notification_service = notification_service
+        self.active_toasts: list[ToastNotification] = []
         
         if self.parent_widget:
             self.parent_widget.installEventFilter(self)
@@ -49,8 +45,6 @@ class ToastManager(QObject):
     
     def show_toast(self, message: str, notification_type: str = "info", duration: int = 3000) -> None:
         """Show a toast notification."""
-        from ..widgets.toast_notification import ToastNotification
-        from ...services.notification_service import NotificationType
         
         # Add to notification history if service is available
         if self.notification_service:

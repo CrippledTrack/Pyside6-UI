@@ -77,7 +77,7 @@ class LogViewerDialog(QDialog):
         logging.CRITICAL: "#9b2c2c",  # Deep red/purple
     }
     
-    def __init__(self, container: Any, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Log Viewer")
         self.setMinimumSize(900, 600)
@@ -88,7 +88,6 @@ class LogViewerDialog(QDialog):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         
         # State
-        self.container = container
         self._auto_scroll = True
         self._min_level = logging.DEBUG
         self._paused = False

@@ -111,6 +111,7 @@ class MainWindow(QMainWindow):
         self.admin_service = container.get(AdminService)
         self.daemon_service = container.get(DaemonService)
         self.plugin_registry = container.get(PluginRegistryFacade)
+        self.plugin_service = container.get(PluginService)
         
         # Register daemon refresh callback on Linux
         if CURRENT_PLATFORM == "linux":
@@ -177,11 +178,14 @@ class MainWindow(QMainWindow):
     
     def _setup_controllers(self) -> None:
         """Setup controllers for tab and plugin management."""
-        # Create tab controller - now accepts container directly
+        # Create tab controller - now accepts dependencies directly
         self.tab_controller = TabController(
-            self.tab_widget,
-            self.container,
-            self
+            tab_widget=self.tab_widget,
+            admin_service=self.admin_service,
+            daemon_service=self.daemon_service,
+            registry=self.plugin_registry,
+            plugin_service=self.plugin_service,
+            parent=self,
         )
         # Connect tab controller signals
         self.tab_controller.title_update_requested.connect(self._update_window_title)
@@ -211,12 +215,14 @@ class MainWindow(QMainWindow):
         self.setStatusBar(status_bar)
         status_bar.setMaximumHeight(20)
         
-        # Create status bar manager - now passes container directly
+        # Create status bar manager - now passes dependencies directly
         from .controllers.status_bar_manager import StatusBarManager
+        from ..services.notification_service import NotificationService
         self.status_bar_manager = StatusBarManager(
-            status_bar, 
-            self.container, 
-            self
+            status_bar=status_bar, 
+            notification_service=self.container.get(NotificationService),
+            theme_manager=self.theme_manager,
+            parent=self,
         )
     
     def _setup_menu_bar(self) -> None:
@@ -236,12 +242,14 @@ class MainWindow(QMainWindow):
         
         self.setMenuBar(menu_bar)
         
-        # Create menu bar controller - now accepts container directly
+        # Create menu bar controller - now accepts dependencies directly
         from .controllers.menu_bar_controller import MenuBarController
         self.menu_controller = MenuBarController(
-            menu_bar,
-            self.container,
-            self
+            menu_bar=menu_bar,
+            admin_service=self.admin_service,
+            daemon_service=self.daemon_service,
+            settings_service=self.settings_service,
+            parent_widget=self,
         )
         
         # Setup menu bar (UI toggle removed - now in theme dialog)
@@ -442,7 +450,11 @@ class MainWindow(QMainWindow):
             return
 
         from .dialogs.theme_dialog import ThemeDialog
-        dialog = ThemeDialog(self.container, self)
+        dialog = ThemeDialog(
+            theme_manager=self.theme_manager,
+            settings_service=self.settings_service,
+            parent=self,
+        )
         dialog.setWindowModality(Qt.WindowModality.NonModal)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.theme_selected.connect(self.on_theme_selected)
@@ -482,7 +494,7 @@ class MainWindow(QMainWindow):
             return
 
         from .dialogs.log_viewer_dialog import LogViewerDialog
-        dialog = LogViewerDialog(self.container, self)
+        dialog = LogViewerDialog(parent=self)
         dialog.setWindowModality(Qt.WindowModality.NonModal)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.destroyed.connect(lambda: setattr(self, "_log_viewer_dialog", None))
@@ -673,7 +685,12 @@ class MainWindow(QMainWindow):
     def setup_toast_manager(self) -> None:
         """Setup the toast notification manager."""
         from .controllers.toast_manager import ToastManager
-        self.toast_manager = ToastManager(self.container, self)
+        from ..services.notification_service import NotificationService
+        self.toast_manager = ToastManager(
+            theme_manager=self.theme_manager,
+            notification_service=self.container.get(NotificationService),
+            parent_widget=self,
+        )
     
     def setup_shortcuts(self) -> None:
         """Setup keyboard shortcuts."""

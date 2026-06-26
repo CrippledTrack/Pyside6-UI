@@ -11,7 +11,7 @@ import inspect
 import logging
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Any, Optional, List, Dict, Tuple, Type, TYPE_CHECKING
+from typing import Any, Optional, List, Dict, Tuple, Type, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..app.services.container import ServiceContainer
@@ -753,7 +753,20 @@ class PluginRegistry:
 
                 def _run(cb=callback, data=event_data, name=plugin_name, ev=event_name):
                     try:
-                        cb(data)
+                        # CRITICAL: We check if there is an active Qt application loop running.
+                        # Since this event runs inside a background worker thread, if a subscriber
+                        # is a GUI component and tries to modify UI elements directly from this thread,
+                        # Qt will crash or raise errors because UI operations are not thread-safe.
+                        # If a Qt event loop is active, we MUST marshal the execution back onto the Qt Main Thread.
+                        from ..app.qt_bindings import QtCore
+                        app = QtCore.QCoreApplication.instance()
+                        if app is not None:
+                            # Route execution through our Qt main-thread event dispatcher.
+                            QtEventDispatcher.get_instance().dispatch(cb, data)
+                        else:
+                            # No GUI application is active (e.g. running in CLI mode or unit tests),
+                            # so it is safe to invoke the callback directly on this worker thread.
+                            cb(data)
                     except Exception as e:
                         logger.error(f"Error delivering async event '{ev}' to '{name}': {e}")
 
@@ -762,6 +775,61 @@ class PluginRegistry:
                 logger.error(f"Error scheduling event '{event_name}' to '{plugin_name}': {e}")
 
         return futures
+
+
+class QtEventDispatcher:
+    """Helper to route arbitrary background thread callbacks onto the Qt Main Thread.
+
+    WHY THIS IS NEEDED:
+    Qt's UI system is not thread-safe. If any background thread tries to read/write UI widgets, 
+    it causes segmentation faults or undefined behavior. To prevent this, this class uses Qt's 
+    internal signal/slot event delivery system. When a signal is emitted across thread boundaries, 
+    Qt automatically routes it via a QueuedConnection, executing the connected slot (our callback) 
+    safely on the thread that created the QObject (which is the Main Thread where this dispatcher 
+    is initialized).
+    """
+    _instance = None
+
+    def __init__(self) -> None:
+        from ..app.qt_bindings import QtCore
+        
+        # We define a helper QObject subclass locally to declare a Qt Signal.
+        # This QObject is created on the main thread (during get_instance() lazy initialization).
+        class _DispatcherQObject(QtCore.QObject):
+            # The signal carries (callable_function, arguments_tuple, keyword_arguments_dict)
+            dispatch_signal = QtCore.Signal(object, tuple, dict)
+
+            def __init__(self) -> None:
+                super().__init__()
+                # The connection is made on the main thread.
+                self.dispatch_signal.connect(self._execute)
+
+            def _execute(self, func: Callable, args: tuple, kwargs: dict) -> None:
+                # This method executes in the event loop of the Main Thread.
+                try:
+                    func(*args, **kwargs)
+                except Exception as e:
+                    logging.getLogger(__name__).error(f"Error executing dispatched callback on Main Thread: {e}", exc_info=True)
+
+        self._qobject = _DispatcherQObject()
+
+    @classmethod
+    def get_instance(cls) -> "QtEventDispatcher":
+        """Get the singleton event dispatcher instance.
+
+        MUST be called for the first time from the Main GUI Thread (e.g., during app startup)
+        to guarantee that the underlying QObject is assigned to the Main Thread event loop.
+        """
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def dispatch(self, func: Callable, *args: Any, **kwargs: Any) -> None:
+        """Post a callback to be executed on the Qt Main Thread.
+
+        Can be safely called from any background thread.
+        """
+        self._qobject.dispatch_signal.emit(func, args, kwargs)
 
 
 __all__ = ['PluginRegistry']

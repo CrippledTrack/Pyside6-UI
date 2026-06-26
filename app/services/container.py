@@ -10,6 +10,15 @@ from __future__ import annotations
 import logging
 from typing import Dict, Type, TypeVar, Optional, Any, Callable
 
+from .settings_service import SettingsService
+from .daemon_service import DaemonService
+from .admin_service import AdminService
+from .plugin_service import PluginService
+from .plugin_registry_facade import PluginRegistryFacade
+from .notification_service import NotificationService
+from .dev_mode_service import DevModeService
+from ...plugin_system.registry import PluginRegistry
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar('T')
@@ -82,14 +91,7 @@ class ServiceContainer:
         
         logger.info("Initializing services...")
         
-        # Import services here to avoid circular dependencies
-        from .settings_service import SettingsService
-        from .daemon_service import DaemonService
-        from .admin_service import AdminService
-        from .plugin_service import PluginService
-        from .plugin_registry_facade import PluginRegistryFacade
-        from .notification_service import NotificationService
-        from .dev_mode_service import DevModeService
+        # Services are imported at the top level
         
         # 0. Dev mode service (no dependencies, needed before settings)
         if DevModeService not in self._services:
@@ -124,7 +126,6 @@ class ServiceContainer:
             self.register_singleton(AdminService, admin_service)
         
         # 4. Plugin registry (no dependencies initially, container set below)
-        from ...plugin_system.registry import PluginRegistry
         if PluginRegistry not in self._services:
             registry = PluginRegistry()
             self.register_singleton(PluginRegistry, registry)

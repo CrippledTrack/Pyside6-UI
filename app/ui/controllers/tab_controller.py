@@ -18,6 +18,9 @@ if TYPE_CHECKING:
     from ...services.container import ServiceContainer
 
 from ...services.plugin_registry_facade import PluginRegistryFacade
+from ...services.admin_service import AdminService
+from ...services.daemon_service import DaemonService
+from ...services.plugin_service import PluginService
 
 from ..widgets.admin_required_placeholder import AdminRequiredPlaceholder
 from ..widgets.error_placeholder import ErrorPlaceholder
@@ -40,28 +43,28 @@ class TabController(QObject):
     def __init__(
         self,
         tab_widget: QTabWidget,
-        container: "ServiceContainer",
+        admin_service: AdminService,
+        daemon_service: Optional[DaemonService],
+        registry: PluginRegistryFacade,
+        plugin_service: PluginService,
         parent: Optional[QObject] = None
     ) -> None:
         """Initialize the tab controller.
         
         Args:
             tab_widget: The tab widget to manage
-            container: Service container for dependency injection
+            admin_service: The admin service
+            daemon_service: The daemon service
+            registry: The plugin registry facade
+            plugin_service: The plugin service
             parent: Optional parent object
         """
         super().__init__(parent)
         self.tab_widget = tab_widget
-        self.container = container
-        
-        # Retrieve services from container
-        from ...services.admin_service import AdminService
-        from ...services.daemon_service import DaemonService
-        
-        self.admin_service = container.get(AdminService)
-        # DaemonService is only relevant on Linux
-        self.daemon_service = container.get(DaemonService) if CURRENT_PLATFORM == "linux" else None
-        self.registry = container.get(PluginRegistryFacade)
+        self.admin_service = admin_service
+        self.daemon_service = daemon_service
+        self.registry = registry
+        self.plugin_service = plugin_service
         
         self.loaded_tabs: Dict[str, Dict[str, Any]] = {}
         self.is_loading_tab = False
@@ -567,10 +570,7 @@ class TabController(QObject):
         Args:
             tab_name: Name of the tab plugin to query
         """
-        from ...services.plugin_service import PluginService
-        
-        plugin_service = self.container.get(PluginService)
-        plugin_class = plugin_service.get_plugin(tab_name)
+        plugin_class = self.plugin_service.get_plugin(tab_name)
         
         if plugin_class:
             plugin_info = plugin_class.get_plugin_info()

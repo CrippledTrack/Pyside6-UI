@@ -11,6 +11,9 @@ import json
 import logging
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
+from ....themes.theme_manager import ThemeManager
+from ...services.settings_service import SettingsService
+
 from ...qt_bindings import (
     Qt,
     Signal,
@@ -165,15 +168,14 @@ class ThemeDialog(QDialog):
     
     def __init__(
         self, 
-        container: Any,
+        theme_manager: ThemeManager,
+        settings_service: SettingsService,
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
-        from ....themes.theme_manager import ThemeManager
-        from ...services.settings_service import SettingsService
         
-        self.theme_manager = container.get(ThemeManager)
-        self.settings_service = container.get(SettingsService)
+        self.theme_manager = theme_manager
+        self.settings_service = settings_service
         self.current_theme = self.theme_manager.get_current_theme()
         self.favorite_themes = set()  # Set of favorite theme names
         if self.settings_service and hasattr(self.settings_service, 'get_favorite_themes'):

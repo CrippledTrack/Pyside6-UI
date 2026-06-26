@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from ..app.qt_bindings import QWidget
     from ..app.services.container import ServiceContainer
     from ..app.services.settings_service import SettingsService
+    from .registry import PluginRegistry
 
 from .interfaces import (
     PluginProtocol,
@@ -328,15 +329,12 @@ class CoreTabPlugin(BaseTabPlugin):
 
 
 # Re-exports
-from .registry import PluginRegistry
 from .types import MenuItemDefinition, ToolbarAction, PluginEvent
 
 __all__ = [
     # Base classes
     'BaseTabPlugin',
     'CoreTabPlugin',
-    # Registry
-    'PluginRegistry',
     # Interfaces
     'PluginProtocol',
     'TabExtension',
