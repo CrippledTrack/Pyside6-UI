@@ -12,20 +12,16 @@ from typing import Any, Dict, Optional, Callable, TYPE_CHECKING, List
 
 from ...qt_bindings import Signal, QObject, QTabWidget, QWidget, QMenu, QAction, QKeySequence, QMessageBox, QPoint
 
-from ...constants import CURRENT_PLATFORM
-
 if TYPE_CHECKING:
     from ...services.container import ServiceContainer
 
 from ...services.plugin_registry_facade import PluginRegistryFacade
-from ...services.admin_service import AdminService
-from ...services.daemon_service import DaemonService
+from ...services.interfaces import IAdminService, IDaemonService
 from ...services.plugin_service import PluginService
 
 from ..widgets.admin_required_placeholder import AdminRequiredPlaceholder
 from ..widgets.error_placeholder import ErrorPlaceholder
 from ..widgets.loading_placeholder import LoadingPlaceholder
-from ...utils.admin import needs_admin_for_plugin
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +39,8 @@ class TabController(QObject):
     def __init__(
         self,
         tab_widget: QTabWidget,
-        admin_service: AdminService,
-        daemon_service: Optional[DaemonService],
+        admin_service: IAdminService,
+        daemon_service: Optional[IDaemonService],
         registry: PluginRegistryFacade,
         plugin_service: PluginService,
         parent: Optional[QObject] = None
@@ -194,33 +190,27 @@ class TabController(QObject):
                 self._previous_tab_index = index
                 return
             
-            # On Linux, check if tab is showing AdminRequiredPlaceholder and daemon is now available
-            if CURRENT_PLATFORM == "linux" and tab_info.get("instance"):
+            # Check if tab is showing AdminRequiredPlaceholder and admin privileges or daemon are now available
+            if tab_info.get("instance"):
                 if isinstance(tab_info["instance"], AdminRequiredPlaceholder):
                     plugin_class = tab_info["plugin_class"]
                     requires_admin = getattr(plugin_class, 'requires_admin', False)
                     
-                    # Check if daemon is now available or running as root
-                    if (self.daemon_service and self.daemon_service.is_available()) or self.admin_service.is_admin():
-                        if not needs_admin_for_plugin(False, requires_admin, self.admin_service.is_admin()):
-                            # Daemon or root privilege is available, reload the tab
-                            logger.info(f"Daemon available, reloading tab '{tab_name}'")
-                            self._reload_tab(tab_name)
-                            self._previous_tab_index = index
-                            self.is_loading_tab = False
-                            self.title_update_requested.emit()
-                            return
+                    if not self.admin_service.needs_admin_for_plugin(requires_admin):
+                        # Privileges or daemon are available, reload the tab
+                        logger.info(f"Admin requirements met, reloading tab '{tab_name}'")
+                        self._reload_tab(tab_name)
+                        self._previous_tab_index = index
+                        self.is_loading_tab = False
+                        self.title_update_requested.emit()
+                        return
             
             # Lazy load tab content if not already loaded
             if not tab_info["instance"]:
                 plugin_class = tab_info["plugin_class"]
                 requires_admin = bool(getattr(plugin_class, "requires_admin", False))
                 
-                if needs_admin_for_plugin(
-                    CURRENT_PLATFORM == "windows",
-                    requires_admin,
-                    self.admin_service.is_admin()
-                ):
+                if self.admin_service.needs_admin_for_plugin(requires_admin):
                     # Show admin required placeholder
                     admin_widget = self._create_admin_placeholder(tab_name)
                     tab_info["instance"] = admin_widget
@@ -301,16 +291,12 @@ class TabController(QObject):
         
         try:
             # Check if admin is still needed
-            if needs_admin_for_plugin(
-                CURRENT_PLATFORM == "windows",
-                requires_admin,
-                self.admin_service.is_admin()
-            ):
+            if self.admin_service.needs_admin_for_plugin(requires_admin):
                 # Still needs admin, keep placeholder
                 logger.debug(f"Tab '{tab_name}' still needs admin, keeping placeholder")
                 return
             
-            logger.info(f"Creating widget for tab '{tab_name}' (daemon available)")
+            logger.info(f"Creating widget for tab '{tab_name}' (daemon/privilege available)")
             # Create the actual widget using instance
             plugin_instance = self.registry.get_plugin_instance(tab_name)
             widget = plugin_instance.create_widget(self.tab_widget)

@@ -15,7 +15,7 @@ from ...qt_bindings import QObject, Signal, Qt, QAction, QToolBar, QIcon
 from ...qt_bindings import is_valid as _qt_is_valid
 
 from ...services.plugin_service import PluginService
-from ...services.settings_service import SettingsService
+from ...services.interfaces import ISettingsService
 from ...services.plugin_registry_facade import PluginRegistryFacade
 
 if TYPE_CHECKING:
@@ -58,7 +58,7 @@ class PluginController(QObject):
         
         # Retrieve services from container
         
-        self.settings_service = container.get(SettingsService)
+        self.settings_service = container.get(ISettingsService)
         self.plugin_service = container.get(PluginService)
         self.registry = container.get(PluginRegistryFacade)
     

@@ -24,6 +24,8 @@ from .interfaces import (
     ServiceExtension,
     EventSubscriberExtension,
     SettingsExtension,
+    IServiceContainer,
+    ISettingsService,
 )
 
 logger = logging.getLogger(__name__)
@@ -86,7 +88,7 @@ class BaseTabPlugin:
     min_gui_version: Optional[str] = None
     required_gui_version: Optional[str] = None
     
-    def __init__(self, container: "ServiceContainer") -> None:
+    def __init__(self, container: "IServiceContainer" | "ServiceContainer") -> None:
         """Initialize the plugin with service container.
         
         Args:
@@ -96,12 +98,15 @@ class BaseTabPlugin:
         self._widget: Optional["QWidget"] = None
         
         # Convenience accessors for common services
-        # Import here to avoid circular imports
-        from ..app.services.settings_service import SettingsService
+        # We try to get the settings service using interface first to avoid circular imports
         try:
-            self.settings: Optional["SettingsService"] = container.get(SettingsService)
-        except (ValueError, KeyError):
-            self.settings = None
+            self.settings = container.get(ISettingsService)
+        except (ValueError, KeyError, TypeError):
+            try:
+                from ..app.services.settings_service import SettingsService
+                self.settings = container.get(SettingsService)
+            except (ValueError, KeyError, ImportError):
+                self.settings = None
     
     @abstractmethod
     def create_widget(self, parent: Optional["QWidget"] = None) -> "QWidget":

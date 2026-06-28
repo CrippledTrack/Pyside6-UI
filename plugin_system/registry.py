@@ -15,6 +15,7 @@ from typing import Any, Optional, List, Dict, Tuple, Type, Callable, TYPE_CHECKI
 
 if TYPE_CHECKING:
     from ..app.services.container import ServiceContainer
+    from .interfaces import IServiceContainer, ISettingsService
 
 # Import interfaces for type checking
 from .interfaces import (
@@ -26,6 +27,8 @@ from .interfaces import (
     ServiceExtension,
     EventSubscriberExtension,
     SettingsExtension,
+    IServiceContainer,
+    ISettingsService,
 )
 from .version_utils import check_version_compatibility, get_gui_version
 
@@ -143,12 +146,12 @@ class PluginRegistry:
     - EventSubscriberExtension: Plugins that subscribe to events
     """
 
-    def __init__(self, container: Optional["ServiceContainer"] = None) -> None:
+    def __init__(self, container: Optional[IServiceContainer | ServiceContainer] = None) -> None:
         """Initialize the registry.
         
         Args:
             container: Optional ServiceContainer for instantiating plugins.
-                      Can be set later via set_container().
+                       Can be set later via set_container().
         """
         self._container = container
         
@@ -181,7 +184,7 @@ class PluginRegistry:
         # Rejected plugins tracking
         self._rejected_plugins: Dict[str, Tuple[Type[Any], str]] = {}
     
-    def set_container(self, container: "ServiceContainer") -> None:
+    def set_container(self, container: IServiceContainer | ServiceContainer) -> None:
         """Set the service container for plugin instantiation.
         
         Args:
@@ -693,8 +696,11 @@ class PluginRegistry:
             # Check if Events extension is enabled for this plugin
             try:
                 if self._container:
-                    from ..app.services.settings_service import SettingsService
-                    settings_svc = self._container.get(SettingsService)
+                    try:
+                        settings_svc = self._container.get(ISettingsService)
+                    except (ValueError, KeyError, TypeError):
+                        from ..app.services.settings_service import SettingsService
+                        settings_svc = self._container.get(SettingsService)
                     if settings_svc and not settings_svc.is_extension_enabled(plugin_name, "Events"):
                         continue
             except Exception:
@@ -732,8 +738,11 @@ class PluginRegistry:
             # Check if Events extension is enabled for this plugin
             try:
                 if self._container:
-                    from ..app.services.settings_service import SettingsService
-                    settings_svc = self._container.get(SettingsService)
+                    try:
+                        settings_svc = self._container.get(ISettingsService)
+                    except (ValueError, KeyError, TypeError):
+                        from ..app.services.settings_service import SettingsService
+                        settings_svc = self._container.get(SettingsService)
                     if settings_svc and not settings_svc.is_extension_enabled(plugin_name, "Events"):
                         continue
             except Exception:

@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from typing import (
     Any, Callable, Dict, List, Optional, 
-    Protocol, runtime_checkable, TYPE_CHECKING
+    Protocol, runtime_checkable, TYPE_CHECKING,
+    Type, TypeVar
 )
 
 if TYPE_CHECKING:
@@ -188,6 +189,26 @@ class SettingsExtension(Protocol):
         ...
 
 
+T = TypeVar('T')
+
+
+@runtime_checkable
+class IServiceContainer(Protocol):
+    """Protocol for the service container to decouple plugin system from app services."""
+    
+    def get(self, service_type: Type[T]) -> T:
+        """Retrieve a service instance by its class or interface type."""
+        ...
+
+
+@runtime_checkable
+class ISettingsService(Protocol):
+    """Protocol for settings service to decouple plugin system from app settings."""
+    
+    def is_extension_enabled(self, plugin_name: str, extension_type: str) -> bool:
+        """Check if a specific extension type is enabled for a plugin."""
+        ...
+
 
 __all__ = [
     # Protocol interfaces
@@ -199,4 +220,6 @@ __all__ = [
     'ServiceExtension',
     'EventSubscriberExtension',
     'SettingsExtension',
+    'IServiceContainer',
+    'ISettingsService',
 ]

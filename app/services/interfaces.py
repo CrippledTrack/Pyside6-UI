@@ -33,8 +33,12 @@ class IAdminService(Protocol):
         """Prompt user for admin operation and check if admin is available."""
         ...
     
-    def restart_as_admin(self) -> None:
+    def restart_as_admin(self) -> tuple[bool, Optional[str]]:
         """Restart the application with administrator/root privileges."""
+        ...
+
+    def needs_admin_for_plugin(self, requires_admin: bool) -> bool:
+        """Determine whether admin privileges are required for a plugin."""
         ...
 
 
@@ -150,9 +154,38 @@ class ISettingsService(Protocol):
         ...
 
 
+class INotificationService(Protocol):
+    """Protocol for notification service."""
+    
+    notification_added: Any
+    unread_count_changed: Any
+    
+    def add_notification(self, message: str, type: Any, details: Optional[str] = None) -> None:
+        """Add a new notification."""
+        ...
+        
+    def get_notifications(self) -> List[Any]:
+        """Get all notifications (newest first)."""
+        ...
+        
+    def get_unread_count(self) -> int:
+        """Get count of unread notifications."""
+        ...
+        
+    def mark_all_as_read(self) -> None:
+        """Mark all notifications as read."""
+        ...
+        
+    def clear_all(self) -> None:
+        """Clear all notifications."""
+        ...
+
+
 __all__ = [
     'IAdminService',
     'IDaemonService',
     'ISettingsService',
+    'INotificationService',
 ]
+
 

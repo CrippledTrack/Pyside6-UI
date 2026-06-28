@@ -16,7 +16,7 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 # penalty of importing these heavy UI controllers during module load.
 if TYPE_CHECKING:
     from ..services.container import ServiceContainer
-    from ..services.settings_service import SettingsService
+    from ..services.interfaces import ISettingsService, IAdminService, IDaemonService, INotificationService
     from ...themes.theme_manager import ThemeManager
     from .dialogs.plugin_dialog import PluginManagementDialog
     from .dialogs.theme_dialog import ThemeDialog
@@ -46,9 +46,8 @@ from ..qt_bindings import (
     QWidget,
 )
 
+from ..services.interfaces import IAdminService, IDaemonService, ISettingsService
 from ..services.plugin_service import PluginService
-from ..services.admin_service import AdminService
-from ..services.daemon_service import DaemonService
 from ..services.tab_loader_service import TabLoaderThread
 from ..services.plugin_registry_facade import PluginRegistryFacade
 from .controllers.tab_controller import TabController
@@ -74,7 +73,7 @@ class MainWindow(QMainWindow):
     def __init__(
         self,
         theme_manager: Optional["ThemeManager"] = None,
-        settings_service: Optional["SettingsService"] = None,
+        settings_service: Optional["ISettingsService"] = None,
         container: "ServiceContainer" = None  # type: ignore[assignment]
     ) -> None:
         """Initialize the main window.
@@ -108,8 +107,8 @@ class MainWindow(QMainWindow):
         self._about_dialog: Optional[QDialog] = None
         
         # Get services from container
-        self.admin_service = container.get(AdminService)
-        self.daemon_service = container.get(DaemonService)
+        self.admin_service = container.get(IAdminService)
+        self.daemon_service = container.get(IDaemonService)
         self.plugin_registry = container.get(PluginRegistryFacade)
         self.plugin_service = container.get(PluginService)
         
@@ -217,10 +216,10 @@ class MainWindow(QMainWindow):
         
         # Create status bar manager - now passes dependencies directly
         from .controllers.status_bar_manager import StatusBarManager
-        from ..services.notification_service import NotificationService
+        from ..services.interfaces import INotificationService
         self.status_bar_manager = StatusBarManager(
             status_bar=status_bar, 
-            notification_service=self.container.get(NotificationService),
+            notification_service=self.container.get(INotificationService),
             theme_manager=self.theme_manager,
             parent=self,
         )
@@ -681,14 +680,13 @@ class MainWindow(QMainWindow):
         
         # Re-run tab loader
         self._start_tab_loader()
-    
     def setup_toast_manager(self) -> None:
         """Setup the toast notification manager."""
         from .controllers.toast_manager import ToastManager
-        from ..services.notification_service import NotificationService
+        from ..services.interfaces import INotificationService
         self.toast_manager = ToastManager(
             theme_manager=self.theme_manager,
-            notification_service=self.container.get(NotificationService),
+            notification_service=self.container.get(INotificationService),
             parent_widget=self,
         )
     

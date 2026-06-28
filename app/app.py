@@ -91,8 +91,8 @@ def run(argv: List[str]) -> int:
     logger.info("Service container initialized")
     
     # Get settings service from container
-    from .services.settings_service import SettingsService
-    settings_service = container.get(SettingsService)
+    from .services.interfaces import ISettingsService
+    settings_service = container.get(ISettingsService)
     logger.info("Settings service loaded")
     
     # Save current GUI version to settings for future reference

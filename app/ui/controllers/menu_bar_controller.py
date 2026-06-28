@@ -14,9 +14,7 @@ from ...qt_bindings import QObject, Signal, QAction, QMenuBar, QMenu, QWidget
 
 from ...constants import CURRENT_PLATFORM
 
-from ...services.admin_service import AdminService
-from ...services.daemon_service import DaemonService
-from ...services.settings_service import SettingsService
+from ...services.interfaces import IAdminService, IDaemonService, ISettingsService
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +28,9 @@ class MenuBarController(QObject):
     def __init__(
         self,
         menu_bar: QMenuBar,
-        admin_service: AdminService,
-        daemon_service: Optional[DaemonService],
-        settings_service: SettingsService,
+        admin_service: IAdminService,
+        daemon_service: Optional[IDaemonService],
+        settings_service: ISettingsService,
         parent_widget: Optional[QWidget] = None
     ) -> None:
         """Initialize the menu bar controller.

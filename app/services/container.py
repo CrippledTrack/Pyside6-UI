@@ -18,6 +18,8 @@ from .plugin_registry_facade import PluginRegistryFacade
 from .notification_service import NotificationService
 from .dev_mode_service import DevModeService
 from ...plugin_system.registry import PluginRegistry
+from ...plugin_system.interfaces import IServiceContainer, ISettingsService
+from .interfaces import IAdminService, IDaemonService, INotificationService, ISettingsService as IAppSettingsService
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +93,9 @@ class ServiceContainer:
         
         logger.info("Initializing services...")
         
+        # Register container itself under the IServiceContainer interface
+        self.register_singleton(IServiceContainer, self)
+        
         # Services are imported at the top level
         
         # 0. Dev mode service (no dependencies, needed before settings)
@@ -107,7 +112,10 @@ class ServiceContainer:
         # 1. Settings service (no dependencies)
         if SettingsService not in self._services:
             settings_service = SettingsService()
+            # DEPRECATED: Concrete registration for backward compatibility, will be removed in v6.0.0
             self.register_singleton(SettingsService, settings_service)
+            self.register_singleton(ISettingsService, settings_service)
+            self.register_singleton(IAppSettingsService, settings_service)
             try:
                 dev_svc = self.get(DevModeService)
                 dev_svc.configure_settings_service(settings_service)
@@ -117,13 +125,17 @@ class ServiceContainer:
         # 2. Daemon service (no dependencies)
         if DaemonService not in self._services:
             daemon_service = DaemonService()
+            # DEPRECATED: Concrete registration for backward compatibility, will be removed in v6.0.0
             self.register_singleton(DaemonService, daemon_service)
+            self.register_singleton(IDaemonService, daemon_service)
         
         # 3. Admin service (depends on daemon service)
         if AdminService not in self._services:
             daemon_service = self.get(DaemonService)
             admin_service = AdminService(daemon_service)
+            # DEPRECATED: Concrete registration for backward compatibility, will be removed in v6.0.0
             self.register_singleton(AdminService, admin_service)
+            self.register_singleton(IAdminService, admin_service)
         
         # 4. Plugin registry (no dependencies initially, container set below)
         if PluginRegistry not in self._services:
@@ -149,7 +161,9 @@ class ServiceContainer:
         # 5. Notification service (no dependencies)
         if NotificationService not in self._services:
             notification_service = NotificationService()
+            # DEPRECATED: Concrete registration for backward compatibility, will be removed in v6.0.0
             self.register_singleton(NotificationService, notification_service)
+            self.register_singleton(INotificationService, notification_service)
         
         self._initialized = True
         logger.info("Services initialized successfully")
