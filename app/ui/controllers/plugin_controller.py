@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional, Callable, TYPE_CHECKING
 
-from ...qt_bindings import QObject, Signal, Qt, QAction, QToolBar, QIcon
+from ...qt_bindings import QObject, Signal
 
 from ...qt_bindings import is_valid as _qt_is_valid
 
@@ -20,6 +20,7 @@ from ...services.plugin_registry_facade import PluginRegistryFacade
 
 if TYPE_CHECKING:
     from ...services.container import ServiceContainer
+    from ...services.interfaces import IMainWindowDelegate
 
 logger = logging.getLogger(__name__)
 
@@ -46,14 +47,13 @@ class PluginController(QObject):
         self.container = container
         
         # For dynamic extension integration
-        self._main_window = None
-        self._plugin_toolbar = None
+        self._main_window: Optional[IMainWindowDelegate] = None
         
         # Track extension components per plugin for removal on disable
-        self._plugin_menu_actions: Dict[str, list] = {}  # plugin_name -> [(QAction, QMenu), ...]
-        self._plugin_toolbar_actions: Dict[str, list] = {}  # plugin_name -> [QAction, ...]
-        self._plugin_status_widgets: Dict[str, list] = {}  # plugin_name -> [QWidget, ...]
-        self._plugin_created_menus: Dict[str, list] = {}  # plugin_name -> [QMenu, ...] menus created by plugin
+        self._plugin_menu_actions: Dict[str, list] = {}  # plugin_name -> [(action, target_menu), ...]
+        self._plugin_toolbar_actions: Dict[str, list] = {}  # plugin_name -> [action, ...]
+        self._plugin_status_widgets: Dict[str, list] = {}  # plugin_name -> [widget, ...]
+        self._plugin_created_menus: Dict[str, list] = {}  # plugin_name -> [menu, ...] menus created by plugin
         self._service_extensions_started: bool = False  # Track if service extensions have been started
         
         # Retrieve services from container
@@ -199,80 +199,41 @@ class PluginController(QObject):
             if plugin_name in self._plugin_menu_actions:
                 for action, target_menu in self._plugin_menu_actions[plugin_name]:
                     try:
-                        if target_menu and _qt_is_valid(target_menu):
-                            target_menu.removeAction(action)
-                            if _qt_is_valid(action):
-                                action.deleteLater()
-                            # If the menu is now empty, remove it from the menu bar (if it's a top-level menu on the menu bar)
-                            if len(target_menu.actions()) == 0 and self._main_window:
-                                menu_bar = self._main_window.menuBar()
-                                for act in menu_bar.actions():
-                                    try:
-                                        if act.menu() == target_menu:
-                                            menu_bar.removeAction(act)
-                                            logger.debug(f"Removed now-empty menu '{target_menu.title()}'")
-                                            break
-                                    except Exception:
-                                        continue
+                        if self._main_window:
+                            self._main_window.remove_menu_action(action, target_menu)
                     except Exception as e:
                         logger.debug(f"Error removing menu action: {e}")
+                
+                # Check if we should remove the menus created by this plugin
+                if self._main_window and plugin_name in self._plugin_created_menus:
+                    for menu in self._plugin_created_menus[plugin_name]:
+                        try:
+                            self._main_window.remove_menu_if_empty(menu)
+                        except Exception as e:
+                            logger.debug(f"Error removing empty menu: {e}")
+                            
                 del self._plugin_menu_actions[plugin_name]
+                if plugin_name in self._plugin_created_menus:
+                    del self._plugin_created_menus[plugin_name]
                 logger.info(f"Removed menu extensions for '{plugin_name}'")
-            
-            # Remove menus that were created by this plugin
-            if plugin_name in self._plugin_created_menus:
-                menu_bar = self._main_window.menuBar()
-                for menu in self._plugin_created_menus[plugin_name]:
-                    try:
-                        if not _qt_is_valid(menu):
-                            continue
-                        # Find and remove the menu's action from the menu bar
-                        # Only remove it if it is now empty (no other plugin has actions in it)
-                        if len(menu.actions()) == 0:
-                            for action in menu_bar.actions():
-                                try:
-                                    action_menu = action.menu()
-                                except Exception:
-                                    continue
-                                if action_menu == menu:
-                                    menu_bar.removeAction(action)
-                                    if _qt_is_valid(action):
-                                        action.deleteLater()
-                                    if _qt_is_valid(menu):
-                                        menu.deleteLater()
-                                    logger.debug(f"Removed created menu '{menu.title()}' for '{plugin_name}'")
-                                    break
-                        else:
-                            logger.debug(f"Keeping created menu '{menu.title()}' as it still has actions from other plugins")
-                    except Exception as e:
-                        logger.debug(f"Error removing created menu: {e}")
-                del self._plugin_created_menus[plugin_name]
             
             # Remove toolbar actions
             if plugin_name in self._plugin_toolbar_actions:
                 for action in self._plugin_toolbar_actions[plugin_name]:
                     try:
-                        if self._plugin_toolbar:
-                            self._plugin_toolbar.removeAction(action)
-                            if _qt_is_valid(action):
-                                action.deleteLater()
+                        if self._main_window:
+                            self._main_window.remove_toolbar_action(action)
                     except Exception as e:
                         logger.debug(f"Error removing toolbar action: {e}")
                 del self._plugin_toolbar_actions[plugin_name]
                 logger.info(f"Removed toolbar actions for '{plugin_name}'")
-                
-                # Hide toolbar if empty
-                if self._plugin_toolbar and not self._plugin_toolbar.actions():
-                    self._plugin_toolbar.hide()
             
             # Remove status widgets
             if plugin_name in self._plugin_status_widgets:
                 for widget in self._plugin_status_widgets[plugin_name]:
                     try:
-                        self._main_window.statusBar().removeWidget(widget)
-                        widget.hide()
-                        if _qt_is_valid(widget):
-                            widget.deleteLater()
+                        if self._main_window:
+                            self._main_window.remove_status_widget(widget)
                     except Exception as e:
                         logger.debug(f"Error removing status widget: {e}")
                 del self._plugin_status_widgets[plugin_name]
@@ -339,16 +300,16 @@ class PluginController(QObject):
         
         # Handle Dynamic Tab Extension Toggle
         # We need to manually handle this because tabs are normally managed by MainWindow via plugin_toggled
-        if hasattr(plugin_class, 'create_widget') and self._main_window and hasattr(self._main_window, 'tab_controller'):
+        if hasattr(plugin_class, 'create_widget') and self._main_window:
             should_have_tab = self._is_extension_enabled(plugin_name, "Tab")
             # Check if tab is currently loaded
-            tab_exists = plugin_name in self._main_window.tab_controller.loaded_tabs
+            tab_exists = self._main_window.has_plugin_tab(plugin_name)
             
             if should_have_tab and not tab_exists:
-                self._main_window.tab_controller.add_tab(plugin_name, plugin_class)
+                self._main_window.add_plugin_tab(plugin_name, plugin_class)
                 logger.info(f"Dynamically added tab for '{plugin_name}'")
             elif not should_have_tab and tab_exists:
-                self._main_window.tab_controller.remove_tab(plugin_name)
+                self._main_window.remove_plugin_tab(plugin_name)
                 logger.info(f"Dynamically removed tab for '{plugin_name}'")
         
         logger.info(f"Refreshed extensions for '{plugin_name}'")
@@ -501,35 +462,16 @@ class PluginController(QObject):
             for plugin_name in list(self._plugin_menu_actions.keys()):
                 for action, target_menu in self._plugin_menu_actions[plugin_name]:
                     try:
-                        if target_menu and _qt_is_valid(target_menu):
-                            target_menu.removeAction(action)
-                            if _qt_is_valid(action):
-                                action.deleteLater()
+                        self._main_window.remove_menu_action(action, target_menu)
                     except Exception as e:
                         logger.debug(f"Error removing menu action: {e}")
                 del self._plugin_menu_actions[plugin_name]
             
             # Remove all menus created by plugins
-            menu_bar = self._main_window.menuBar()
             for plugin_name in list(self._plugin_created_menus.keys()):
                 for menu in self._plugin_created_menus[plugin_name]:
                     try:
-                        if not _qt_is_valid(menu):
-                            continue
-                        # Find and remove the menu's action from the menu bar
-                        for action in menu_bar.actions():
-                            try:
-                                action_menu = action.menu()
-                            except Exception:
-                                continue
-                            if action_menu == menu:
-                                menu_bar.removeAction(action)
-                                if _qt_is_valid(action):
-                                    action.deleteLater()
-                                if _qt_is_valid(menu):
-                                    menu.deleteLater()
-                                logger.debug(f"Removed created menu '{menu.title()}' for '{plugin_name}'")
-                                break
+                        self._main_window.remove_menu_if_empty(menu)
                     except Exception as e:
                         logger.debug(f"Error removing created menu: {e}")
                 del self._plugin_created_menus[plugin_name]
@@ -538,26 +480,16 @@ class PluginController(QObject):
             for plugin_name in list(self._plugin_toolbar_actions.keys()):
                 for action in self._plugin_toolbar_actions[plugin_name]:
                     try:
-                        if self._plugin_toolbar:
-                            self._plugin_toolbar.removeAction(action)
-                            if _qt_is_valid(action):
-                                action.deleteLater()
+                        self._main_window.remove_toolbar_action(action)
                     except Exception as e:
                         logger.debug(f"Error removing toolbar action: {e}")
                 del self._plugin_toolbar_actions[plugin_name]
-            
-            # Hide toolbar if empty
-            if self._plugin_toolbar and not self._plugin_toolbar.actions():
-                self._plugin_toolbar.hide()
             
             # Remove all status widgets
             for plugin_name in list(self._plugin_status_widgets.keys()):
                 for widget in self._plugin_status_widgets[plugin_name]:
                     try:
-                        self._main_window.statusBar().removeWidget(widget)
-                        widget.hide()
-                        if _qt_is_valid(widget):
-                            widget.deleteLater()
+                        self._main_window.remove_status_widget(widget)
                     except Exception as e:
                         logger.debug(f"Error removing status widget: {e}")
                 del self._plugin_status_widgets[plugin_name]
@@ -566,7 +498,7 @@ class PluginController(QObject):
         except Exception as e:
             logger.error(f"Error cleaning up extensions: {e}")
     
-    def integrate_extensions(self, main_window: Any) -> None:
+    def integrate_extensions(self, main_window: IMainWindowDelegate) -> None:
         """Integrate all plugin extensions into the main window.
         
         Args:
@@ -616,18 +548,18 @@ class PluginController(QObject):
             self.start_service_extensions()
             
             logger.info(f"Integrated extensions: {len(menu_plugins)} menu, {len(status_plugins)} status, "
-                       f"{len(toolbar_plugins)} toolbar")
+                        f"{len(toolbar_plugins)} toolbar")
         except Exception as e:
             logger.error(f"Error integrating plugin extensions: {e}")
     
     def _integrate_menu_extension(self, name: str, plugin_class: type) -> None:
         """Add menu items from a MenuExtension plugin."""
-
+        if not self._main_window:
+            return
         
         # Get plugin instance
         instance = self.registry.get_plugin_instance(name)
         menu_items = instance.get_menu_items()
-        menu_bar = self._main_window.menuBar()
         
         # Track actions for this plugin as (action, target_menu) tuples
         if name not in self._plugin_menu_actions:
@@ -636,87 +568,52 @@ class PluginController(QObject):
             self._plugin_created_menus[name] = []
         
         for item in menu_items:
-            # Find or create the target menu
-            target_menu = None
-            for action in menu_bar.actions():
-                try:
-                    menu = action.menu()
-                except Exception:
-                    continue
-                if not _qt_is_valid(menu):
-                    continue
-                if action.text().replace("&", "") == item.menu:
-                    target_menu = menu
-                    break
+            # Delegate creation of menu item
+            res = self._main_window.add_menu_action(
+                menu_title=item.menu,
+                label=item.label,
+                callback=item.callback,
+                shortcut=item.shortcut,
+                icon=item.icon,
+                enabled=item.enabled,
+                separator_before=item.separator_before,
+                separator_after=item.separator_after
+            )
+            action, target_menu, was_created, sep_before, sep_after = res
             
-            if target_menu is None:
-                # Create new menu - track that we created it
-                target_menu = menu_bar.addMenu(item.menu)
+            if was_created:
                 self._plugin_created_menus[name].append(target_menu)
-            
-            # Add separator before if requested
-            if item.separator_before:
-                sep_action = target_menu.addSeparator()
-                self._plugin_menu_actions[name].append((sep_action, target_menu))
-            
-            # Create action
-            action = QAction(item.label, self._main_window)
-            action.triggered.connect(item.callback)
-            if item.shortcut:
-                action.setShortcut(item.shortcut)
-            if item.icon:
-                action.setIcon(QIcon(item.icon))
-            action.setEnabled(item.enabled)
-            target_menu.addAction(action)
-            
-            # Track the action AND menu for removal on disable
+                
+            if sep_before:
+                self._plugin_menu_actions[name].append((sep_before, target_menu))
+                
             self._plugin_menu_actions[name].append((action, target_menu))
             
-            # Add separator after if requested
-            if item.separator_after:
-                sep_action = target_menu.addSeparator()
-                self._plugin_menu_actions[name].append((sep_action, target_menu))
+            if sep_after:
+                self._plugin_menu_actions[name].append((sep_after, target_menu))
             
             logger.debug(f"Added menu item '{item.label}' to '{item.menu}' from plugin '{name}'")
     
     def _integrate_status_extension(self, name: str, plugin_class: type) -> None:
         """Add status bar widget from a StatusExtension plugin."""
+        if not self._main_window:
+            return
+            
         # Get plugin instance
         instance = self.registry.get_plugin_instance(name)
-        widget = instance.create_status_widget(self._main_window.statusBar())
+        widget = self._main_window.add_status_widget_for_plugin(name, instance)
         if widget:
-            self._main_window.statusBar().addPermanentWidget(widget)
             # Track widget for removal on disable
             if name not in self._plugin_status_widgets:
                 self._plugin_status_widgets[name] = []
             self._plugin_status_widgets[name].append(widget)
             logger.debug(f"Added status bar widget from plugin '{name}'")
     
-    def _get_or_create_plugin_toolbar(self):
-        """Get or create the plugin toolbar."""
-
-        
-        # Return cached toolbar if exists
-        if self._plugin_toolbar is not None:
-            return self._plugin_toolbar
-        
-        # Create new toolbar
-        toolbar = QToolBar("Plugin Toolbar", self._main_window)
-        toolbar.setObjectName("PluginToolbar")
-        toolbar.setMovable(True)
-        toolbar.setFloatable(True)
-        
-        # Add to main window
-        self._main_window.addToolBar(Qt.ToolBarArea.TopToolBarArea, toolbar)
-        
-        self._plugin_toolbar = toolbar
-        logger.debug("Created plugin toolbar")
-        return toolbar
-    
     def _integrate_toolbar_extension(self, name: str, plugin_class: type) -> None:
         """Add toolbar actions from a ToolbarExtension plugin to the plugin toolbar."""
-
-        
+        if not self._main_window:
+            return
+            
         # Get plugin instance
         instance = self.registry.get_plugin_instance(name)
         actions = instance.get_toolbar_actions()
@@ -725,33 +622,21 @@ class PluginController(QObject):
         if name not in self._plugin_toolbar_actions:
             self._plugin_toolbar_actions[name] = []
         
-        # Get or create plugin toolbar
-        toolbar = self._get_or_create_plugin_toolbar()
-        
         for action_def in actions:
-            action = QAction(action_def.label, self._main_window)
-            action.triggered.connect(action_def.callback)
-            if action_def.icon:
-                action.setIcon(QIcon(action_def.icon))
-            if action_def.tooltip:
-                action.setToolTip(action_def.tooltip)
-            if action_def.checkable:
-                action.setCheckable(True)
-                action.setChecked(action_def.checked)
-            toolbar.addAction(action)
-            
-            # Track the action for removal on disable
-            self._plugin_toolbar_actions[name].append(action)
-            
-            logger.debug(f"Added toolbar action '{action_def.label}' from plugin '{name}'")
-        
-        # Ensure toolbar is visible when actions are added
-        if toolbar.actions():
-            toolbar.show()
+            action = self._main_window.add_toolbar_action(
+                label=action_def.label,
+                callback=action_def.callback,
+                icon=action_def.icon,
+                tooltip=action_def.tooltip,
+                checkable=action_def.checkable,
+                checked=action_def.checked
+            )
+            if action:
+                self._plugin_toolbar_actions[name].append(action)
+                logger.debug(f"Added toolbar action '{action_def.label}' from plugin '{name}'")
     
     def start_service_extensions(self) -> None:
         """Start all ServiceExtension plugins."""
-
         
         try:
             service_plugins = self.registry.get_service_extensions(enabled_only=True)
@@ -773,7 +658,6 @@ class PluginController(QObject):
     
     def shutdown_service_extensions(self) -> None:
         """Shutdown all ServiceExtension plugins."""
-
         
         try:
             service_plugins = self.registry.get_service_extensions(enabled_only=True)

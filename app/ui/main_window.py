@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import platform
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, Dict, Optional, TYPE_CHECKING, Callable
 
 # PERF: We use TYPE_CHECKING to hide these imports from the runtime. This provides full
 # IDE autocompletion and static analysis support without paying the 100ms+ startup
@@ -44,6 +44,8 @@ from ..qt_bindings import (
     QTabWidget,
     QVBoxLayout,
     QWidget,
+    QToolBar,
+    QIcon,
 )
 
 from ..services.interfaces import IAdminService, IDaemonService, ISettingsService
@@ -105,6 +107,7 @@ class MainWindow(QMainWindow):
         self._plugin_dialog: Optional["PluginManagementDialog"] = None
         self._log_viewer_dialog: Optional["LogViewerDialog"] = None
         self._about_dialog: Optional[QDialog] = None
+        self._plugin_toolbar: Optional[QToolBar] = None
         
         # Get services from container
         self.admin_service = container.get(IAdminService)
@@ -775,6 +778,164 @@ class MainWindow(QMainWindow):
         """Clear the status bar message."""
         if self.status_bar_manager:
             self.status_bar_manager.clear_status()
+            
+    # =========================================================================
+    # IMainWindowDelegate Implementation
+    # =========================================================================
+
+    def add_menu_action(
+        self,
+        menu_title: str,
+        label: str,
+        callback: Callable[[], None],
+        shortcut: Optional[str] = None,
+        icon: Optional[str] = None,
+        enabled: bool = True,
+        separator_before: bool = False,
+        separator_after: bool = False
+    ) -> tuple[QAction, QMenu, bool, Optional[QAction], Optional[QAction]]:
+        """Add a menu action to a top-level menu."""
+        from ..qt_bindings import is_valid as _qt_is_valid
+        
+        menu_bar = self.menuBar()
+        target_menu = None
+        was_created = False
+        
+        for action in menu_bar.actions():
+            try:
+                menu = action.menu()
+            except Exception:
+                continue
+            if not _qt_is_valid(menu):
+                continue
+            if action.text().replace("&", "") == menu_title:
+                target_menu = menu
+                break
+                
+        if target_menu is None:
+            target_menu = menu_bar.addMenu(menu_title)
+            was_created = True
+            
+        sep_before_action = None
+        if separator_before:
+            sep_before_action = target_menu.addSeparator()
+            
+        action = QAction(label, self)
+        action.triggered.connect(callback)
+        if shortcut:
+            action.setShortcut(shortcut)
+        if icon:
+            action.setIcon(QIcon(icon))
+        action.setEnabled(enabled)
+        target_menu.addAction(action)
+        
+        sep_after_action = None
+        if separator_after:
+            sep_after_action = target_menu.addSeparator()
+            
+        return action, target_menu, was_created, sep_before_action, sep_after_action
+
+    def remove_menu_action(self, action: QAction, target_menu: QMenu) -> None:
+        """Remove a menu action from a target menu."""
+        from ..qt_bindings import is_valid as _qt_is_valid
+        if target_menu and _qt_is_valid(target_menu) and _qt_is_valid(action):
+            target_menu.removeAction(action)
+            action.deleteLater()
+
+    def remove_menu_if_empty(self, menu: QMenu) -> None:
+        """Remove a top-level menu if it contains no actions."""
+        from ..qt_bindings import is_valid as _qt_is_valid
+        if not _qt_is_valid(menu):
+            return
+        if len(menu.actions()) == 0:
+            menu_bar = self.menuBar()
+            for action in menu_bar.actions():
+                try:
+                    action_menu = action.menu()
+                except Exception:
+                    continue
+                if action_menu == menu:
+                    menu_bar.removeAction(action)
+                    if _qt_is_valid(action):
+                        action.deleteLater()
+                    if _qt_is_valid(menu):
+                        menu.deleteLater()
+                    break
+
+    def add_status_widget_for_plugin(self, plugin_name: str, plugin_instance: Any) -> QWidget:
+        """Create and add a status widget for a plugin."""
+        widget = plugin_instance.create_status_widget(self.statusBar())
+        if widget:
+            self.statusBar().addPermanentWidget(widget)
+        return widget
+
+    def remove_status_widget(self, widget: QWidget) -> None:
+        """Remove a status widget from the status bar."""
+        from ..qt_bindings import is_valid as _qt_is_valid
+        if widget and _qt_is_valid(widget):
+            self.statusBar().removeWidget(widget)
+            widget.hide()
+            widget.deleteLater()
+
+    def add_toolbar_action(
+        self,
+        label: str,
+        callback: Callable[[], None],
+        icon: Optional[str] = None,
+        tooltip: Optional[str] = None,
+        checkable: bool = False,
+        checked: bool = False
+    ) -> QAction:
+        """Add a toolbar action to the plugin toolbar."""
+        toolbar = self._get_or_create_plugin_toolbar()
+        action = QAction(label, self)
+        action.triggered.connect(callback)
+        if icon:
+            action.setIcon(QIcon(icon))
+        if tooltip:
+            action.setToolTip(tooltip)
+        if checkable:
+            action.setCheckable(True)
+            action.setChecked(checked)
+        toolbar.addAction(action)
+        if toolbar.actions():
+            toolbar.show()
+        return action
+
+    def remove_toolbar_action(self, action: QAction) -> None:
+        """Remove a toolbar action from the plugin toolbar."""
+        from ..qt_bindings import is_valid as _qt_is_valid
+        if self._plugin_toolbar and _qt_is_valid(action):
+            self._plugin_toolbar.removeAction(action)
+            action.deleteLater()
+            if not self._plugin_toolbar.actions():
+                self._plugin_toolbar.hide()
+
+    def has_plugin_tab(self, plugin_name: str) -> bool:
+        """Check if a plugin tab is currently loaded."""
+        return plugin_name in self.tab_controller.loaded_tabs
+
+    def add_plugin_tab(self, plugin_name: str, plugin_class: type) -> None:
+        """Add a tab for a plugin."""
+        self.tab_controller.add_tab(plugin_name, plugin_class)
+
+    def remove_plugin_tab(self, plugin_name: str) -> None:
+        """Remove a tab for a plugin."""
+        self.tab_controller.remove_tab(plugin_name)
+
+    def _get_or_create_plugin_toolbar(self) -> QToolBar:
+        """Get or create the plugin toolbar."""
+        if self._plugin_toolbar is not None:
+            return self._plugin_toolbar
+            
+        toolbar = QToolBar("Plugin Toolbar", self)
+        toolbar.setObjectName("PluginToolbar")
+        toolbar.setMovable(True)
+        toolbar.setFloatable(True)
+        
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, toolbar)
+        self._plugin_toolbar = toolbar
+        return toolbar
 
 
 __all__ = ['MainWindow']

@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Protocol, Optional, Dict, Any, List, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..qt_bindings import QWidget
+    from ..qt_bindings import QWidget, QAction, QMenu, QIcon
     from .settings_service import WindowGeometry
 
 
@@ -181,11 +181,74 @@ class INotificationService(Protocol):
         ...
 
 
+class IMainWindowDelegate(Protocol):
+    """Protocol for main window UI delegate, decoupling controllers from window internals."""
+
+    def add_menu_action(
+        self,
+        menu_title: str,
+        label: str,
+        callback: Callable[[], None],
+        shortcut: Optional[str] = None,
+        icon: Optional[str] = None,
+        enabled: bool = True,
+        separator_before: bool = False,
+        separator_after: bool = False
+    ) -> tuple[QAction, QMenu, bool, Optional[QAction], Optional[QAction]]:
+        """Add a menu action to a top-level menu."""
+        ...
+
+    def remove_menu_action(self, action: QAction, target_menu: QMenu) -> None:
+        """Remove a menu action from a target menu."""
+        ...
+
+    def remove_menu_if_empty(self, menu: QMenu) -> None:
+        """Remove a top-level menu if it contains no actions."""
+        ...
+
+    def add_status_widget_for_plugin(self, plugin_name: str, plugin_instance: Any) -> QWidget:
+        """Create and add a status widget for a plugin."""
+        ...
+
+    def remove_status_widget(self, widget: QWidget) -> None:
+        """Remove a status widget from the status bar."""
+        ...
+
+    def add_toolbar_action(
+        self,
+        label: str,
+        callback: Callable[[], None],
+        icon: Optional[str] = None,
+        tooltip: Optional[str] = None,
+        checkable: bool = False,
+        checked: bool = False
+    ) -> QAction:
+        """Add a toolbar action to the plugin toolbar."""
+        ...
+
+    def remove_toolbar_action(self, action: QAction) -> None:
+        """Remove a toolbar action from the plugin toolbar."""
+        ...
+
+    def has_plugin_tab(self, plugin_name: str) -> bool:
+        """Check if a plugin tab is currently loaded."""
+        ...
+
+    def add_plugin_tab(self, plugin_name: str, plugin_class: type) -> None:
+        """Add a tab for a plugin."""
+        ...
+
+    def remove_plugin_tab(self, plugin_name: str) -> None:
+        """Remove a tab for a plugin."""
+        ...
+
+
 __all__ = [
     'IAdminService',
     'IDaemonService',
     'ISettingsService',
     'INotificationService',
+    'IMainWindowDelegate',
 ]
 
 
