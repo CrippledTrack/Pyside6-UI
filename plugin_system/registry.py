@@ -128,7 +128,19 @@ def _check_implements_interface(plugin_class: Type[Any], interface: Type) -> boo
     except TypeError:
         pass
     return False
-
+def _get_platform_prefix(supported_platforms: List[str]) -> str:
+    """Determine the platform prefix for display/registration name mapping."""
+    if supported_platforms:
+        sp = supported_platforms[0].lower()
+        if "win" in sp:
+            return "[Win]"
+        elif "linux" in sp:
+            return "[Linux]"
+        elif "darwin" in sp or "mac" in sp:
+            return "[macOS]"
+        else:
+            return f"[{supported_platforms[0].capitalize()}]"
+    return "[XPlatform]"
 
 
 class PluginRegistry:
@@ -257,19 +269,7 @@ class PluginRegistry:
 
             if show_all and not is_compatible:
                 # Determine platform prefix
-                platform_prefix = ""
-                if supported_platforms:
-                    sp = supported_platforms[0].lower()
-                    if "win" in sp:
-                        platform_prefix = "[Win]"
-                    elif "linux" in sp:
-                        platform_prefix = "[Linux]"
-                    elif "darwin" in sp or "mac" in sp:
-                        platform_prefix = "[macOS]"
-                    else:
-                        platform_prefix = f"[{supported_platforms[0].capitalize()}]"
-                else:
-                    platform_prefix = "[XPlatform]"
+                platform_prefix = _get_platform_prefix(supported_platforms)
 
                 plugin_class = _create_prefixed_plugin(plugin_class, platform_prefix)
                 plugin_name = plugin_class.plugin_name
@@ -304,19 +304,7 @@ class PluginRegistry:
 
         if show_all and not is_compatible:
             supported_platforms = getattr(plugin_class, 'supported_platforms', [])
-            platform_prefix = ""
-            if supported_platforms:
-                sp = supported_platforms[0].lower()
-                if "win" in sp:
-                    platform_prefix = "[Win]"
-                elif "linux" in sp:
-                    platform_prefix = "[Linux]"
-                elif "darwin" in sp or "mac" in sp:
-                    platform_prefix = "[macOS]"
-                else:
-                    platform_prefix = f"[{supported_platforms[0].capitalize()}]"
-            else:
-                platform_prefix = "[XPlatform]"
+            platform_prefix = _get_platform_prefix(supported_platforms)
             
             return f"{platform_prefix} {name}"
         
@@ -675,6 +663,30 @@ class PluginRegistry:
     # Event Bus
     # =========================================================================
     
+    def _get_plugin_event_subscriptions(self, plugin_name: str, plugin_class: type) -> Optional[Dict[str, Any]]:
+        """Get event subscriptions for a plugin if the Events extension is enabled."""
+        try:
+            if self._container:
+                try:
+                    settings_svc = self._container.get(ISettingsService)
+                except (ValueError, KeyError, TypeError):
+                    from ..app.services.settings_service import SettingsService
+                    settings_svc = self._container.get(SettingsService)
+                if settings_svc and not settings_svc.is_extension_enabled(plugin_name, "Events"):
+                    return None
+        except Exception:
+            pass
+
+        try:
+            try:
+                instance = self.get_plugin_instance(plugin_name)
+                return instance.get_event_subscriptions()
+            except (ValueError, AttributeError):
+                # Fallback to classmethod (legacy)
+                return plugin_class.get_event_subscriptions()
+        except Exception:
+            return None
+
     def publish_event(self, event_name: str, event_data: Dict[str, Any] = None) -> None:
         """Publish an event to all subscribed plugins.
         
@@ -693,33 +705,13 @@ class PluginRegistry:
         subscribers = self.get_event_subscriber_extensions(enabled_only=True)
         
         for plugin_name, plugin_class in subscribers.items():
-            # Check if Events extension is enabled for this plugin
-            try:
-                if self._container:
-                    try:
-                        settings_svc = self._container.get(ISettingsService)
-                    except (ValueError, KeyError, TypeError):
-                        from ..app.services.settings_service import SettingsService
-                        settings_svc = self._container.get(SettingsService)
-                    if settings_svc and not settings_svc.is_extension_enabled(plugin_name, "Events"):
-                        continue
-            except Exception:
-                pass
-
-            try:
-                # Try to get instance first
+            subscriptions = self._get_plugin_event_subscriptions(plugin_name, plugin_class)
+            if subscriptions and event_name in subscriptions:
                 try:
-                    instance = self.get_plugin_instance(plugin_name)
-                    subscriptions = instance.get_event_subscriptions()
-                except (ValueError, AttributeError):
-                    # Fallback to classmethod (legacy)
-                    subscriptions = plugin_class.get_event_subscriptions()
-                
-                if event_name in subscriptions:
                     callback = subscriptions[event_name]
                     callback(event_data)
-            except Exception as e:
-                logger.error(f"Error delivering event '{event_name}' to '{plugin_name}': {e}")
+                except Exception as e:
+                    logger.error(f"Error delivering event '{event_name}' to '{plugin_name}': {e}")
 
     def publish_event_async(self, event_name: str, event_data: Dict[str, Any] = None) -> List["Future[None]"]:
         """Publish an event asynchronously to subscribed plugins (opt-in).
@@ -735,31 +727,13 @@ class PluginRegistry:
         futures: List[Future] = []
 
         for plugin_name, plugin_class in subscribers.items():
-            # Check if Events extension is enabled for this plugin
-            try:
-                if self._container:
-                    try:
-                        settings_svc = self._container.get(ISettingsService)
-                    except (ValueError, KeyError, TypeError):
-                        from ..app.services.settings_service import SettingsService
-                        settings_svc = self._container.get(SettingsService)
-                    if settings_svc and not settings_svc.is_extension_enabled(plugin_name, "Events"):
-                        continue
-            except Exception:
-                pass
+            subscriptions = self._get_plugin_event_subscriptions(plugin_name, plugin_class)
+            if not subscriptions or event_name not in subscriptions:
+                continue
 
             try:
-                try:
-                    instance = self.get_plugin_instance(plugin_name)
-                    subscriptions = instance.get_event_subscriptions()
-                except (ValueError, AttributeError):
-                    subscriptions = plugin_class.get_event_subscriptions()
-
-                if event_name not in subscriptions:
-                    continue
-
                 callback = subscriptions[event_name]
-
+    
                 def _run(cb=callback, data=event_data, name=plugin_name, ev=event_name):
                     try:
                         # CRITICAL: We check if there is an active Qt application loop running.
@@ -778,7 +752,7 @@ class PluginRegistry:
                             cb(data)
                     except Exception as e:
                         logger.error(f"Error delivering async event '{ev}' to '{name}': {e}")
-
+    
                 futures.append(executor.submit(_run))
             except Exception as e:
                 logger.error(f"Error scheduling event '{event_name}' to '{plugin_name}': {e}")

@@ -10,6 +10,7 @@ import time
 import threading
 from pathlib import Path
 from typing import Optional
+from ..daemon.protocol import get_socket_path, get_effective_uid_gid
 
 logger = logging.getLogger(__name__)
 
@@ -287,6 +288,45 @@ def get_sudo_status():
     }
 
 
+def _wait_for_auth(process: subprocess.Popen, name: str) -> None:
+    """Wait for pkexec or sudo authentication to succeed or fail.
+    
+    If the process exits quickly, assume failure. If it keeps running,
+    assume success and exit the current process.
+    """
+    max_wait = 120  # 2 minutes max wait for authentication
+    check_interval = 0.5
+    waited = 0
+    
+    while waited < max_wait:
+        time.sleep(check_interval)
+        waited += check_interval
+        
+        poll_result = process.poll()
+        if poll_result is None:
+            # Process is still running - either waiting for auth or app has started
+            # If we've waited at least 2 seconds, assume auth succeeded and app is starting
+            if waited >= 2.0:
+                # Give it a bit more time to actually start the app, then exit
+                time.sleep(1.0)
+                sys.exit(0)
+        else:
+            # Process exited
+            # If it exited very quickly (< 1 second), it's likely an immediate failure
+            if waited < 1.0:
+                returncode = poll_result
+                raise RuntimeError(f"{name} authentication failed or was cancelled (return code: {returncode})")
+            # If it ran for a while then exited, might have started but crashed
+            # Or user cancelled after some time - treat as failure
+            returncode = poll_result
+            raise RuntimeError(f"{name} process exited (return code: {returncode})")
+            
+    # Timeout - process still running but we've waited too long
+    # This shouldn't happen, but if it does, assume it's working and exit
+    logger.warning(f"{name} authentication wait timed out, assuming success and exiting")
+    sys.exit(0)
+
+
 def run_as_admin() -> bool:
     """Attempt to re-launch the current application with root privileges.
     
@@ -320,42 +360,7 @@ def run_as_admin() -> bool:
                 ['pkexec'] + cmd_args,
                 start_new_session=True
             )
-            # Wait for authentication - give user time to enter password
-            # Check periodically if process is still running (waiting for auth or started)
-            # If process exits quickly (< 2 seconds), it likely failed
-            # If process is still running after 2 seconds, assume auth is in progress or succeeded
-            max_wait = 120  # 2 minutes max wait for authentication
-            check_interval = 0.5
-            waited = 0
-            
-            while waited < max_wait:
-                time.sleep(check_interval)
-                waited += check_interval
-                
-                poll_result = process.poll()
-                if poll_result is None:
-                    # Process is still running - either waiting for auth or app has started
-                    # If we've waited at least 2 seconds, assume auth succeeded and app is starting
-                    if waited >= 2.0:
-                        # Give it a bit more time to actually start the app, then exit
-                        time.sleep(1.0)
-                        sys.exit(0)
-                else:
-                    # Process exited
-                    # If it exited very quickly (< 1 second), it's likely an immediate failure
-                    if waited < 1.0:
-                        returncode = poll_result
-                        # pkexec returns 126 for authentication failure, 127 for command not found
-                        raise RuntimeError(f"pkexec authentication failed or was cancelled (return code: {returncode})")
-                    # If it ran for a while then exited, might have started but crashed
-                    # Or user cancelled after some time - treat as failure
-                    returncode = poll_result
-                    raise RuntimeError(f"pkexec process exited (return code: {returncode})")
-            
-            # Timeout - process still running but we've waited too long
-            # This shouldn't happen, but if it does, assume it's working and exit
-            logger.warning("pkexec authentication wait timed out, assuming success and exiting")
-            sys.exit(0)
+            _wait_for_auth(process, 'pkexec')
             
         except FileNotFoundError:
             # pkexec not found, fall through to sudo
@@ -375,39 +380,7 @@ def run_as_admin() -> bool:
                 ['sudo'] + cmd_args,
                 start_new_session=True
             )
-            # Wait for authentication - give user time to enter password
-            # Same logic as pkexec
-            max_wait = 120  # 2 minutes max wait for authentication
-            check_interval = 0.5
-            waited = 0
-            
-            while waited < max_wait:
-                time.sleep(check_interval)
-                waited += check_interval
-                
-                poll_result = process.poll()
-                if poll_result is None:
-                    # Process is still running - either waiting for auth or app has started
-                    # If we've waited at least 2 seconds, assume auth succeeded and app is starting
-                    if waited >= 2.0:
-                        # Give it a bit more time to actually start the app, then exit
-                        time.sleep(1.0)
-                        sys.exit(0)
-                else:
-                    # Process exited
-                    # If it exited very quickly (< 1 second), it's likely an immediate failure
-                    if waited < 1.0:
-                        returncode = poll_result
-                        raise RuntimeError(f"sudo authentication failed or was cancelled (return code: {returncode})")
-                    # If it ran for a while then exited, might have started but crashed
-                    # Or user cancelled after some time - treat as failure
-                    returncode = poll_result
-                    raise RuntimeError(f"sudo process exited (return code: {returncode})")
-            
-            # Timeout - process still running but we've waited too long
-            # This shouldn't happen, but if it does, assume it's working and exit
-            logger.warning("sudo authentication wait timed out, assuming success and exiting")
-            sys.exit(0)
+            _wait_for_auth(process, 'sudo')
             
         except FileNotFoundError:
             pass
@@ -434,19 +407,7 @@ def is_daemon_running(socket_path: Optional[str] = None) -> bool:
         return _daemon_process is not None and _daemon_process.poll() is None
 
     if socket_path is None:
-        from ..daemon.protocol import get_socket_path
-        # Get UID from environment to determine correct socket path
-        # When running normally (not via sudo/pkexec), get current user's UID directly
-        uid_str = os.environ.get('SUDO_UID') or os.environ.get('PKEXEC_UID')
-        if not uid_str:
-            # Not running via sudo/pkexec, get current user's UID directly
-            try:
-                uid = os.getuid()
-            except (AttributeError, OSError):
-                uid = None
-        else:
-            uid = int(uid_str) if uid_str else None
-        socket_path = get_socket_path(uid)
+        socket_path = get_socket_path()
     if not os.path.exists(socket_path):
         return False
     
@@ -473,20 +434,8 @@ def start_daemon(socket_path: Optional[str] = None) -> Optional[object]:
     use_pipe_daemon = getattr(get_platforms_constants(), 'USE_PIPE_DAEMON', False)
     
     if socket_path is None and not use_pipe_daemon:
-        from ..daemon.protocol import get_socket_path
-        # Get UID from environment to determine correct socket path
-        # When running normally (not via sudo/pkexec), get current user's UID directly
-        uid_str = os.environ.get('SUDO_UID') or os.environ.get('PKEXEC_UID')
-        if not uid_str:
-            # Not running via sudo/pkexec, get current user's UID directly
-            try:
-                uid = os.getuid()
-            except (AttributeError, OSError):
-                uid = None
-        else:
-            uid = int(uid_str) if uid_str else None
-        socket_path = get_socket_path(uid)
-        logger.info(f"Determined socket path: {socket_path} (UID: {uid})")
+        socket_path = get_socket_path()
+        logger.info(f"Determined socket path: {socket_path}")
     
     # Check if already running
     if is_daemon_running(socket_path):
@@ -568,21 +517,11 @@ def start_daemon(socket_path: Optional[str] = None) -> Optional[object]:
     
     # Get UID/GID before starting daemon (needed for socket path and permissions)
     # When running normally (not via sudo/pkexec), we need to get current user's UID
-    uid_str = os.environ.get('SUDO_UID') or os.environ.get('PKEXEC_UID')
-    if not uid_str:
-        # Not running via sudo/pkexec, get current user's UID directly
-        try:
-            original_uid = os.getuid()
-            original_gid = os.getgid()
-            logger.info(f"Running as normal user, UID: {original_uid}, GID: {original_gid}")
-        except (AttributeError, OSError):
-            original_uid = None
-            original_gid = None
-    else:
-        original_uid = int(uid_str) if uid_str else None
-        gid_str = os.environ.get('SUDO_GID') or os.environ.get('PKEXEC_GID')
-        original_gid = int(gid_str) if gid_str else None
+    original_uid, original_gid = get_effective_uid_gid()
+    if os.environ.get('SUDO_UID') or os.environ.get('PKEXEC_UID'):
         logger.info(f"Running via elevation, original UID: {original_uid}, GID: {original_gid}")
+    else:
+        logger.info(f"Running as normal user, UID: {original_uid}, GID: {original_gid}")
     
     # Pass UID/GID as command-line arguments (pkexec doesn't preserve env vars)
     if original_uid is not None:
@@ -777,16 +716,7 @@ def stop_daemon(socket_path: Optional[str] = None):
         return
         
     if socket_path is None:
-        from ..daemon.protocol import get_socket_path
-        uid_str = os.environ.get('SUDO_UID') or os.environ.get('PKEXEC_UID')
-        if not uid_str:
-            try:
-                uid = os.getuid()
-            except (AttributeError, OSError):
-                uid = None
-        else:
-            uid = int(uid_str) if uid_str else None
-        socket_path = get_socket_path(uid)
+        socket_path = get_socket_path()
         
     if not is_daemon_running(socket_path):
         logger.info("Daemon not running")

@@ -11,7 +11,7 @@ import json
 import logging
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
-from ....themes.theme_manager import ThemeManager
+from ....themes.theme_manager import ThemeManager, create_palette_from_data
 from ...services.settings_service import SettingsService
 
 from ...qt_bindings import (
@@ -47,7 +47,7 @@ from ...qt_bindings import (
     QWidget,
 )
 
-from ....themes.theme_manager import ThemeManager
+
 
 logger = logging.getLogger(__name__)
 
@@ -126,38 +126,7 @@ class ThemePreviewWidget(QFrame):
     
     def _apply_palette(self, palette_data: Dict[str, Any]) -> None:
         """Apply color palette to the preview widget"""
-        palette = QPalette()
-        
-        color_roles = {
-            'window': QPalette.ColorRole.Window,
-            'window_text': QPalette.ColorRole.WindowText,
-            'base': QPalette.ColorRole.Base,
-            'alternate_base': QPalette.ColorRole.AlternateBase,
-            'tool_tip_base': QPalette.ColorRole.ToolTipBase,
-            'tool_tip_text': QPalette.ColorRole.ToolTipText,
-            'text': QPalette.ColorRole.Text,
-            'button': QPalette.ColorRole.Button,
-            'button_text': QPalette.ColorRole.ButtonText,
-            'bright_text': QPalette.ColorRole.BrightText,
-            'link': QPalette.ColorRole.Link,
-            'highlight': QPalette.ColorRole.Highlight,
-            'highlighted_text': QPalette.ColorRole.HighlightedText
-        }
-        
-        for role_name, color_value in palette_data.items():
-            if role_name in color_roles:
-                if isinstance(color_value, str):
-                    color = QColor(color_value)
-                elif isinstance(color_value, list) and len(color_value) >= 3:
-                    if len(color_value) == 3:
-                        color = QColor(color_value[0], color_value[1], color_value[2])
-                    else:
-                        color = QColor(color_value[0], color_value[1], color_value[2], color_value[3])
-                else:
-                    continue
-                
-                palette.setColor(color_roles[role_name], color)
-        
+        palette = create_palette_from_data(palette_data)
         self.setPalette(palette)
 
 class ThemeDialog(QDialog):

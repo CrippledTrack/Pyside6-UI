@@ -20,6 +20,30 @@ from ...qt_bindings import (
 )
 
 
+def _init_widget_elevation(widget: QFrame, elevated: bool) -> None:
+    """Helper function to set initial object name and property based on elevation."""
+    if elevated:
+        widget.setObjectName("cardElevated")
+    else:
+        widget.setObjectName("card")
+        widget.setProperty("card", True)
+
+
+def _update_widget_elevation(widget: QFrame, elevated: bool) -> None:
+    """Helper function to set or update the elevated status of a card at runtime."""
+    if elevated:
+        widget.setObjectName("cardElevated")
+        if widget.property("card"):
+            widget.setProperty("card", False)
+    else:
+        widget.setObjectName("card")
+        widget.setProperty("card", True)
+        
+    widget.style().unpolish(widget)
+    widget.style().polish(widget)
+    widget.update()
+
+
 class CardContainer(QFrame):
     """A card-style container widget with optional title and consistent styling.
     
@@ -54,11 +78,7 @@ class CardContainer(QFrame):
         super().__init__(parent)
         
         # Set object name for theme styling
-        if elevated:
-            self.setObjectName("cardElevated")
-        else:
-            self.setObjectName("card")
-            self.setProperty("card", True)
+        _init_widget_elevation(self, elevated)
         
         # Main layout
         self._main_layout = QVBoxLayout(self)
@@ -170,17 +190,7 @@ class CardContainer(QFrame):
         Args:
             elevated: True for elevated prominence, False for standard card style.
         """
-        if elevated:
-            self.setObjectName("cardElevated")
-            if self.property("card"):
-                self.setProperty("card", False)
-        else:
-            self.setObjectName("card")
-            self.setProperty("card", True)
-            
-        self.style().unpolish(self)
-        self.style().polish(self)
-        self.update()
+        _update_widget_elevation(self, elevated)
 
 
 
@@ -258,11 +268,7 @@ class HorizontalCard(QFrame):
         """
         super().__init__(parent)
         
-        if elevated:
-            self.setObjectName("cardElevated")
-        else:
-            self.setObjectName("card")
-            self.setProperty("card", True)
+        _init_widget_elevation(self, elevated)
         
         self._layout = QHBoxLayout(self)
         self._layout.setContentsMargins(16, 12, 16, 12)
@@ -299,17 +305,7 @@ class HorizontalCard(QFrame):
         Args:
             elevated: True for elevated prominence, False for standard card style.
         """
-        if elevated:
-            self.setObjectName("cardElevated")
-            if self.property("card"):
-                self.setProperty("card", False)
-        else:
-            self.setObjectName("card")
-            self.setProperty("card", True)
-            
-        self.style().unpolish(self)
-        self.style().polish(self)
-        self.update()
+        _update_widget_elevation(self, elevated)
 
 
 

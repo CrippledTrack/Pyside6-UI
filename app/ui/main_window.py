@@ -634,19 +634,8 @@ class MainWindow(QMainWindow):
             enabled: True if cross-platform tabs should be shown
         """
         # Human-readable names for known platforms, used in toast messages.
-        platform_labels = {
-            "windows": "Windows",
-            "linux": "Linux",
-            "darwin": "macOS",
-        }
-        all_platform_keys = ["windows", "linux", "darwin"]
-        current_key = CURRENT_PLATFORM
-        other_platforms = [
-            platform_labels[p]
-            for p in all_platform_keys
-            if p != current_key and p in platform_labels
-        ]
-        other_text = ", ".join(other_platforms) if other_platforms else "other platforms"
+        from ..utils.display_utils import get_other_platforms_text
+        other_text = get_other_platforms_text()
         
         # Reload plugins with the new cross-platform setting applied.
         self._reload_all_plugins()

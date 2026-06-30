@@ -79,6 +79,46 @@ def _is_version_lte(version_str: str, major: int, minor: int) -> bool:
     return v_minor <= minor
 
 
+def create_palette_from_data(palette_data: Dict[str, Any]) -> QPalette:
+    """Create and return a QPalette object from palette data dictionary."""
+    palette = QPalette()
+    
+    # Map color roles to their string representations
+    color_roles = {
+        'window': QPalette.ColorRole.Window,
+        'window_text': QPalette.ColorRole.WindowText,
+        'base': QPalette.ColorRole.Base,
+        'alternate_base': QPalette.ColorRole.AlternateBase,
+        'tool_tip_base': QPalette.ColorRole.ToolTipBase,
+        'tool_tip_text': QPalette.ColorRole.ToolTipText,
+        'text': QPalette.ColorRole.Text,
+        'button': QPalette.ColorRole.Button,
+        'button_text': QPalette.ColorRole.ButtonText,
+        'bright_text': QPalette.ColorRole.BrightText,
+        'link': QPalette.ColorRole.Link,
+        'highlight': QPalette.ColorRole.Highlight,
+        'highlighted_text': QPalette.ColorRole.HighlightedText
+    }
+    
+    for role_name, color_value in palette_data.items():
+        if role_name in color_roles:
+            if isinstance(color_value, str):
+                # Handle hex color strings
+                color = QColor(color_value)
+            elif isinstance(color_value, list) and len(color_value) >= 3:
+                # Handle RGB/RGBA lists
+                if len(color_value) == 3:
+                    color = QColor(color_value[0], color_value[1], color_value[2])
+                else:
+                    color = QColor(color_value[0], color_value[1], color_value[2], color_value[3])
+            else:
+                continue
+            
+            palette.setColor(color_roles[role_name], color)
+            
+    return palette
+
+
 class ThemeManager:
     """Manages application themes including loading, saving, and applying themes"""
     
@@ -436,41 +476,7 @@ class ThemeManager:
             app.setPalette(palette)
             return
         
-        palette = QPalette()
-        
-        # Map color roles to their string representations
-        color_roles = {
-            'window': QPalette.ColorRole.Window,
-            'window_text': QPalette.ColorRole.WindowText,
-            'base': QPalette.ColorRole.Base,
-            'alternate_base': QPalette.ColorRole.AlternateBase,
-            'tool_tip_base': QPalette.ColorRole.ToolTipBase,
-            'tool_tip_text': QPalette.ColorRole.ToolTipText,
-            'text': QPalette.ColorRole.Text,
-            'button': QPalette.ColorRole.Button,
-            'button_text': QPalette.ColorRole.ButtonText,
-            'bright_text': QPalette.ColorRole.BrightText,
-            'link': QPalette.ColorRole.Link,
-            'highlight': QPalette.ColorRole.Highlight,
-            'highlighted_text': QPalette.ColorRole.HighlightedText
-        }
-        
-        for role_name, color_value in palette_data.items():
-            if role_name in color_roles:
-                if isinstance(color_value, str):
-                    # Handle hex color strings
-                    color = QColor(color_value)
-                elif isinstance(color_value, list) and len(color_value) >= 3:
-                    # Handle RGB/RGBA lists
-                    if len(color_value) == 3:
-                        color = QColor(color_value[0], color_value[1], color_value[2])
-                    else:
-                        color = QColor(color_value[0], color_value[1], color_value[2], color_value[3])
-                else:
-                    continue
-                
-                palette.setColor(color_roles[role_name], color)
-        
+        palette = create_palette_from_data(palette_data)
         app.setPalette(palette)
 
     @staticmethod

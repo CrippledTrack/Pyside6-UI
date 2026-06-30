@@ -265,19 +265,8 @@ class MenuBarController(QObject):
         self.show_all_platforms_action.setChecked(is_show_all_platforms())
         
         # Build a human-readable list of other platforms for the tooltip
-        platform_labels = {
-            "windows": "Windows",
-            "linux": "Linux",
-            "darwin": "macOS",
-        }
-        all_platform_keys = ["windows", "linux", "darwin"]
-        current_key = CURRENT_PLATFORM
-        other_platforms = [
-            platform_labels[p]
-            for p in all_platform_keys
-            if p != current_key and p in platform_labels
-        ]
-        other_text = ", ".join(other_platforms) if other_platforms else "other platforms"
+        from ...utils.display_utils import get_other_platforms_text
+        other_text = get_other_platforms_text()
         
         self.show_all_platforms_action.setToolTip(
             f"Show tabs from {other_text} for testing purposes. "

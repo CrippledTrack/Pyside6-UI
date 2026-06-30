@@ -66,5 +66,27 @@ def build_version_details(version_info: Dict[str, str], platform_name: str) -> D
     }
 
 
-__all__ = ['build_title', 'build_version_details']
+def get_other_platforms_text() -> str:
+    """
+    Return a human-readable list of other platforms (excluding the current one) for display/tooltips.
+    
+    Returns:
+        Comma-separated string of other platform names (e.g. "Windows, macOS")
+    """
+    from ..constants import CURRENT_PLATFORM
+    platform_labels = {
+        "windows": "Windows",
+        "linux": "Linux",
+        "darwin": "macOS",
+    }
+    all_platform_keys = ["windows", "linux", "darwin"]
+    other_platforms = [
+        platform_labels[p]
+        for p in all_platform_keys
+        if p != CURRENT_PLATFORM and p in platform_labels
+    ]
+    return ", ".join(other_platforms) if other_platforms else "other platforms"
+
+
+__all__ = ['build_title', 'build_version_details', 'get_other_platforms_text']
 

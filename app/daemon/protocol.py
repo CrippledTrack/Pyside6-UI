@@ -74,6 +74,43 @@ def create_stream_chunk(request_id: str, chunk: str) -> Dict[str, Any]:
     }
 
 
+def get_effective_uid_gid() -> tuple[Optional[int], Optional[int]]:
+    """
+    Get the original user's UID and GID, falling back to os.getuid()/os.getgid().
+    
+    This handles environments where the app has been elevated via sudo or pkexec.
+    """
+    uid_str = os.environ.get('SUDO_UID') or os.environ.get('PKEXEC_UID')
+    gid_str = os.environ.get('SUDO_GID') or os.environ.get('PKEXEC_GID')
+    
+    uid = None
+    gid = None
+    
+    if uid_str:
+        try:
+            uid = int(uid_str)
+        except ValueError:
+            pass
+    if gid_str:
+        try:
+            gid = int(gid_str)
+        except ValueError:
+            pass
+            
+    if uid is None:
+        try:
+            uid = os.getuid()
+        except (AttributeError, OSError):
+            pass
+    if gid is None:
+        try:
+            gid = os.getgid()
+        except (AttributeError, OSError):
+            pass
+            
+    return uid, gid
+
+
 def get_socket_path(uid: Optional[int] = None) -> str:
     """
     Get a secure socket path in a user-specific directory.
@@ -91,12 +128,7 @@ def get_socket_path(uid: Optional[int] = None) -> str:
     """
     # Try to get original user's UID
     if uid is None:
-        uid_str = os.environ.get('SUDO_UID') or os.environ.get('PKEXEC_UID')
-        if uid_str:
-            try:
-                uid = int(uid_str)
-            except ValueError:
-                uid = None
+        uid, _ = get_effective_uid_gid()
     
     if uid is not None:
         try:
@@ -159,4 +191,5 @@ __all__ = [
     'OPERATION_SHUTDOWN',
     'SOCKET_PATH',
     'get_socket_path',
+    'get_effective_uid_gid',
 ]
