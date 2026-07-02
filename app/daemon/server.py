@@ -14,10 +14,13 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any, List, Optional
 from .protocol import (
     OPERATION_RUN_COMMAND,
+    OPERATION_RUN_COMMAND_STREAM,
+    OPERATION_CANCEL,
     OPERATION_SHUTDOWN,
     get_socket_path,
     deserialize_message,
     create_response,
+    create_stream_chunk,
     serialize_message
 )
 
@@ -29,21 +32,6 @@ logging.basicConfig(level=logging.INFO, format=log_format)
 
 MAX_WORKERS = 8
 SHUTDOWN_REQUESTED = threading.Event()
-
-
-def monitor_parent_process(parent_pid: int):
-    """Monitor parent process and shutdown if it exits."""
-    logger.info(f"Starting parent process monitor thread for PID {parent_pid}")
-    import time
-    while not SHUTDOWN_REQUESTED.is_set():
-        try:
-            # os.kill(pid, 0) checks if process exists on Unix
-            os.kill(parent_pid, 0)
-        except OSError:
-            logger.warning(f"Parent process {parent_pid} has exited. Shutting down daemon...")
-            SHUTDOWN_REQUESTED.set()
-            break
-        time.sleep(2.0)
 
 
 class PrivilegedDaemon:
@@ -63,6 +51,15 @@ class PrivilegedDaemon:
         self.server_socket: Optional[socket.socket] = None
         self.executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix='daemon-worker')
         self._lock = threading.Lock()
+        
+        # Active subprocess jobs (for cancellation support)
+        self._active_jobs: Dict[str, subprocess.Popen] = {}
+        self._jobs_lock = threading.Lock()
+        
+        # Connection tracking for automatic shutdown
+        self._active_connections = 0
+        self._connections_lock = threading.Lock()
+        self._has_had_connections = False
     
     def _get_original_uid(self) -> Optional[int]:
         """Get the original user's UID from environment variables."""
@@ -140,7 +137,18 @@ class PrivilegedDaemon:
         
         try:
             if operation == OPERATION_RUN_COMMAND:
-                result = self._execute_command(params)
+                result = self._execute_command(request_id, params)
+                return create_response(request_id, True, result)
+            
+            elif operation == OPERATION_RUN_COMMAND_STREAM:
+                # Streaming is handled inline — intermediate chunks are
+                # written directly to the pipe by _execute_command_stream.
+                # Only the final response is returned here.
+                result = self._execute_command_stream(request_id, params)
+                return create_response(request_id, True, result)
+            
+            elif operation == OPERATION_CANCEL:
+                result = self._handle_cancel(params)
                 return create_response(request_id, True, result)
             
             elif operation == 'ping':
@@ -148,6 +156,11 @@ class PrivilegedDaemon:
 
             elif operation == OPERATION_SHUTDOWN:
                 logger.info("Shutdown requested")
+                with self._connections_lock:
+                    active = self._active_connections
+                if active > 1:
+                    logger.info(f"Ignored shutdown request: {active} active connections exist")
+                    return create_response(request_id, True, {'message': f'Kept alive, {active} connections active'})
                 SHUTDOWN_REQUESTED.set()
                 return create_response(request_id, True, {'message': 'Shutting down'})
             
@@ -161,7 +174,7 @@ class PrivilegedDaemon:
             logger.error(f"Error handling request {request_id}: {e}", exc_info=True)
             return create_response(request_id, False, error=str(e))
     
-    def _execute_command(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    def _execute_command(self, request_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a command as root."""
         command = params.get('command')
         if not command:
@@ -179,28 +192,40 @@ class PrivilegedDaemon:
             if cmd_timeout is not None:
                 cmd_timeout = int(cmd_timeout)
             
-            result = subprocess.run(
+            proc = subprocess.Popen(
                 command,
-                capture_output=True,
-                text=True,
-                timeout=cmd_timeout  # None means no timeout
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
             )
             
+            # Register for cancellation support
+            with self._jobs_lock:
+                self._active_jobs[request_id] = proc
+            
+            try:
+                stdout, stderr = proc.communicate(timeout=cmd_timeout)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                stdout, stderr = proc.communicate()
+                logger.error(f"Command timed out: {' '.join(command)}")
+                return {
+                    'returncode': -1,
+                    'stdout': stdout or '',
+                    'stderr': f'Command timed out after {cmd_timeout}s',
+                    'success': False
+                }
+            finally:
+                with self._jobs_lock:
+                    self._active_jobs.pop(request_id, None)
+            
             return {
-                'returncode': result.returncode,
-                'stdout': result.stdout,
-                'stderr': result.stderr,
-                'success': result.returncode == 0
+                'returncode': proc.returncode,
+                'stdout': stdout,
+                'stderr': stderr,
+                'success': proc.returncode == 0
             }
             
-        except subprocess.TimeoutExpired as e:
-            logger.error(f"Command timed out: {' '.join(command)}")
-            return {
-                'returncode': -1,
-                'stdout': '',
-                'stderr': f'Command timed out: {e}',
-                'success': False
-            }
         except Exception as e:
             logger.error(f"Command execution failed: {e}")
             return {
@@ -209,6 +234,112 @@ class PrivilegedDaemon:
                 'stderr': str(e),
                 'success': False
             }
+    
+    def _execute_command_stream(self, request_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a command as root, streaming stdout line-by-line over the pipe.
+        
+        Each line of output is sent as an intermediate streaming chunk response
+        via the pipe. The final response contains the aggregated output and
+        return code.
+        
+        This method writes directly to the pipe under _stdout_lock and should
+        only be used in pipe mode.
+        
+        Raises:
+            ValueError: If called in legacy socket mode (no pipe available).
+        """
+        # Streaming requires pipe mode — _pipe_stdout and _stdout_lock
+        # are only initialized in start_pipe_mode().
+        if not hasattr(self, '_pipe_stdout'):
+            raise ValueError(
+                "run_command_stream is only supported in pipe mode. "
+                "Use run_command instead."
+            )
+        
+        command = params.get('command')
+        if not command:
+            raise ValueError("Command parameter is required")
+        
+        if not isinstance(command, list):
+            raise ValueError("Command must be a list")
+        
+        logger.info(f"Executing streaming command: {' '.join(command)}")
+        
+        try:
+            # Merge stdout and stderr so all output is streamed in order
+            proc = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True
+            )
+            
+            # Register for cancellation support
+            with self._jobs_lock:
+                self._active_jobs[request_id] = proc
+            
+            aggregated_output = []
+            try:
+                for line in proc.stdout:
+                    aggregated_output.append(line)
+                    # Send intermediate chunk
+                    chunk_msg = create_stream_chunk(request_id, line)
+                    chunk_data = serialize_message(chunk_msg)
+                    with self._stdout_lock:
+                        self._pipe_stdout.write(chunk_data)
+                        self._pipe_stdout.flush()
+                
+                proc.wait()
+            finally:
+                with self._jobs_lock:
+                    self._active_jobs.pop(request_id, None)
+            
+            return {
+                'returncode': proc.returncode,
+                'stdout': ''.join(aggregated_output),
+                'stderr': '',
+                'success': proc.returncode == 0
+            }
+            
+        except Exception as e:
+            logger.error(f"Streaming command execution failed: {e}")
+            return {
+                'returncode': -1,
+                'stdout': '',
+                'stderr': str(e),
+                'success': False
+            }
+    
+    def _handle_cancel(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Cancel a running job by terminating its subprocess.
+        
+        Uses SIGTERM first, waits 2 seconds for graceful exit, then SIGKILL.
+        """
+        target_id = params.get('target_id')
+        if not target_id:
+            raise ValueError("target_id parameter is required")
+        
+        with self._jobs_lock:
+            proc = self._active_jobs.get(target_id)
+        
+        if proc is None:
+            logger.debug(f"Cancel requested for {target_id} but no active job found")
+            return {'cancelled': False, 'target_id': target_id, 'reason': 'not found'}
+        
+        logger.info(f"Cancelling job {target_id} (PID {proc.pid})")
+        try:
+            proc.terminate()
+            try:
+                proc.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                logger.warning(f"Job {target_id} did not exit after SIGTERM, sending SIGKILL")
+                proc.kill()
+                proc.wait(timeout=5.0)
+            
+            return {'cancelled': True, 'target_id': target_id}
+        except Exception as e:
+            logger.error(f"Failed to cancel job {target_id}: {e}")
+            return {'cancelled': False, 'target_id': target_id, 'reason': str(e)}
     
     def _handle_client(self, client_socket: socket.socket, addr):
         """Handle a client connection."""
@@ -219,6 +350,10 @@ class PrivilegedDaemon:
             logger.error(f"Unauthorized connection attempt from {addr}, closing connection")
             client_socket.close()
             return
+        
+        with self._connections_lock:
+            self._active_connections += 1
+            self._has_had_connections = True
         
         try:
             while not SHUTDOWN_REQUESTED.is_set():
@@ -249,6 +384,13 @@ class PrivilegedDaemon:
         finally:
             client_socket.close()
             logger.debug(f"Client disconnected: {addr}")
+            with self._connections_lock:
+                self._active_connections -= 1
+                active = self._active_connections
+            
+            if self._has_had_connections and active == 0:
+                logger.info("No active connections remaining. Initiating automatic daemon shutdown...")
+                SHUTDOWN_REQUESTED.set()
     
     def start(self):
         """Start the daemon server in legacy socket mode (To be removed after 5.x)."""
@@ -296,16 +438,6 @@ class PrivilegedDaemon:
             except OSError as e:
                 logger.error(f"Failed to create/chown/chmod socket directory {socket_dir}: {e}")
                 raise
-        
-        # Start parent PID monitor if configured
-        if hasattr(self, 'parent_pid') and self.parent_pid is not None:
-            monitor_thread = threading.Thread(
-                target=monitor_parent_process,
-                args=(self.parent_pid,),
-                name="parent-monitor",
-                daemon=True
-            )
-            monitor_thread.start()
 
         # Create socket with safe umask
         orig_umask = os.umask(0o177)
@@ -390,8 +522,44 @@ class PrivilegedDaemon:
     # =========================================================================
     # Pipe Mode Worker Execution
     # =========================================================================
+    def _handle_async_pipe_request(self, request: Dict[str, Any]):
+        """Handle a pipe request asynchronously and write the response thread-safely."""
+        try:
+            response = self._handle_request(request)
+            response_data = serialize_message(response)
+            with self._stdout_lock:
+                self._pipe_stdout.write(response_data)
+                self._pipe_stdout.flush()
+        except Exception as e:
+            logger.error(f"Error in async pipe handler: {e}", exc_info=True)
+            # Attempt to send an error response
+            try:
+                request_id = request.get('id', 'unknown')
+                error_response = create_response(request_id, False, error=str(e))
+                error_data = serialize_message(error_response)
+                with self._stdout_lock:
+                    self._pipe_stdout.write(error_data)
+                    self._pipe_stdout.flush()
+            except Exception:
+                logger.error("Failed to send error response", exc_info=True)
+
     def start_pipe_mode(self):
         """Start the daemon in standard I/O pipe mode."""
+        # ── stdout pollution guard ───────────────────────────────────────────
+        # Save the raw binary stdout for exclusive IPC use, then redirect
+        # Python-level stdout to stderr so any rogue print() from imported
+        # libraries cannot corrupt the JSON pipe.
+        self._pipe_stdout = sys.stdout.buffer
+        sys.stdout = sys.stderr
+        
+        # Ensure all logging explicitly targets stderr
+        logging.basicConfig(
+            stream=sys.stderr, level=logging.INFO,
+            format='[Daemon] %(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            force=True
+        )
+        # ─────────────────────────────────────────────────────────────────────
+        
         print("[Daemon] Starting privileged daemon in pipe mode...", file=sys.stderr, flush=True)
         print(f"[Daemon] Current EUID: {os.geteuid()}, UID: {os.getuid()}", file=sys.stderr, flush=True)
         
@@ -404,16 +572,9 @@ class PrivilegedDaemon:
             
         # Setup signal handlers
         self._setup_signal_handlers()
-        
-        # Start parent PID monitor if configured
-        if hasattr(self, 'parent_pid') and self.parent_pid is not None:
-            monitor_thread = threading.Thread(
-                target=monitor_parent_process,
-                args=(self.parent_pid,),
-                name="parent-monitor",
-                daemon=True
-            )
-            monitor_thread.start()
+
+        # Stdout lock for thread-safe response writing
+        self._stdout_lock = threading.Lock()
             
         logger.info("Pipe daemon started and ready")
         print("[Daemon] Pipe daemon started and ready", file=sys.stderr, flush=True)
@@ -435,17 +596,10 @@ class PrivilegedDaemon:
                 # Parse request
                 request = deserialize_message(line)
                 
-                # WARNING: Although self.executor is a thread pool, we must block on future.result()
-                # in the main thread select loop. This enforces synchronous request-response sequencing.
-                # Since stdout is a single shared pipe channel, asynchronous/concurrent writes would
-                # interleave lines or cause out-of-order responses, breaking the client's sequential expectations.
-                future = self.executor.submit(self._handle_request, request)
-                response = future.result()
-                
-                # Serialize and write response
-                response_data = serialize_message(response)
-                sys.stdout.buffer.write(response_data)
-                sys.stdout.buffer.flush()
+                # Hand off to thread pool — do NOT block on result.
+                # Responses are written back by _handle_async_pipe_request
+                # under _stdout_lock, so they never interleave.
+                self.executor.submit(self._handle_async_pipe_request, request)
                 
             except Exception as e:
                 logger.error(f"Error in pipe mode loop: {e}", exc_info=True)
@@ -489,16 +643,6 @@ def run_daemon(argv: Optional[List[str]] = None) -> int:
             except (ValueError, IndexError) as e:
                 logger.warning(f"Failed to parse GID from command line: {e}")
                 
-    parent_pid = None
-    if '--parent-pid' in argv:
-        idx = argv.index('--parent-pid')
-        if idx + 1 < len(argv):
-            try:
-                parent_pid = int(argv[idx + 1])
-                logger.info(f"Parsed parent PID: {parent_pid}")
-            except (ValueError, IndexError) as e:
-                logger.warning(f"Failed to parse parent PID: {e}")
-    
     # Set environment variables from command-line if not already set
     # (helps with socket path determination)
     if uid is not None and 'PKEXEC_UID' not in os.environ and 'SUDO_UID' not in os.environ:
@@ -523,8 +667,6 @@ def run_daemon(argv: Optional[List[str]] = None) -> int:
             from .protocol import get_socket_path
             daemon.socket_path = get_socket_path(uid)
             print(f"[Daemon] Set socket_path to {daemon.socket_path}", file=sys.stderr, flush=True)
-        
-        daemon.parent_pid = parent_pid
         
         if '--pipe' in argv:
             print("[Daemon] Calling daemon.start_pipe_mode()...", file=sys.stderr, flush=True)

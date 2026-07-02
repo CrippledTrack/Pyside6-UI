@@ -205,6 +205,30 @@ class PluginRegistry:
             if not plugin_name or plugin_name == "Unnamed Plugin":
                 plugin_name = plugin_class.__name__
 
+            # Check if in single plugin mode and filter
+            from ..app.utils.imports import get_platforms_constants
+            constants = get_platforms_constants()
+            if getattr(constants, "SINGLE_PLUGIN_MODE", False):
+                single_name = getattr(constants, "SINGLE_PLUGIN_NAME", "")
+                if single_name:
+                    single_name_lower = single_name.lower().strip()
+                    class_name = plugin_class.__name__.lower()
+                    curr_name = getattr(plugin_class, 'plugin_name', '').lower()
+                    curr_title = getattr(plugin_class, 'tab_title', '').lower()
+                    
+                    if (single_name_lower != class_name and 
+                        single_name_lower != curr_name and 
+                        single_name_lower != curr_title and 
+                        single_name_lower not in class_name and 
+                        single_name_lower not in curr_name and 
+                        single_name_lower not in curr_title):
+                        logger.debug(f"Skipping plugin '{plugin_name}' in single plugin mode (target: '{single_name}')")
+                        return
+                else:
+                    if len(self._plugins) >= 1:
+                        logger.debug(f"Skipping plugin '{plugin_name}' in single plugin mode (already registered a plugin)")
+                        return
+
             # Validate plugin
             if hasattr(plugin_class, 'validate_plugin'):
                 errors = plugin_class.validate_plugin()
@@ -496,6 +520,13 @@ class PluginRegistry:
     def clear(self) -> None:
         """Clear all registered plugins and cached instances."""
         with self._lock:
+            # Clean up all cached instances before clearing
+            for name, instance in list(self._plugin_instances.items()):
+                if hasattr(instance, '_cleanup_plugin_resources'):
+                    try:
+                        instance._cleanup_plugin_resources()
+                    except Exception as e:
+                        logger.error(f"Error cleaning up resources during clear of '{name}': {e}")
             self._plugins.clear()
             self._core_plugins.clear()
             self._external_plugins.clear()
@@ -572,6 +603,18 @@ class PluginRegistry:
     def disable_plugin(self, name: str) -> None:
         """Disable a plugin by name."""
         self._disabled_plugins.add(name)
+
+    def unload_plugin_instance(self, name: str) -> None:
+        """Remove a plugin instance from the cache and trigger its framework cleanup."""
+        with self._lock:
+            instance = self._plugin_instances.pop(name, None)
+            if instance is not None:
+                if hasattr(instance, '_cleanup_plugin_resources'):
+                    try:
+                        instance._cleanup_plugin_resources()
+                    except Exception as e:
+                        logger.error(f"Error cleaning up resources during unload of '{name}': {e}")
+                logger.debug(f"Unloaded plugin instance: {name}")
 
     def enable_plugin(self, name: str) -> None:
         """Enable a plugin by name."""
@@ -721,4 +764,4 @@ class PluginRegistry:
         return futures
 
 
-__all__ = ['PluginRegistry']
+__all__ = ['PluginRegistry']

@@ -48,13 +48,8 @@ def run(argv: List[str]) -> int:
         set_dev_mode(True)
         set_dev_logging_override(True)
 
-    # PERF: Service imports are loaded lazily below. This reduces the time-to-first-paint
-    # by ensuring module-level imports in app.py don't drag in the entire dependency tree.
     from .services.app_lifecycle_service import AppLifecycleService
     app_lifecycle = AppLifecycleService()
-    if not app_lifecycle.acquire_single_instance_lock():
-        print("Another instance is already running.", file=sys.stderr)
-        return 1
     
     # Apply console visibility setting based on SHOW_CONSOLE constant
     from .utils.console import apply_console_setting
@@ -124,8 +119,7 @@ def run(argv: List[str]) -> int:
     # Cleanup: Stop daemon on exit (if it was started)
     daemon_lifecycle.shutdown(daemon_client)
     
-    # Cleanup: Release lock file
-    app_lifecycle.release_single_instance_lock()
+
     
     logger.info(f"Application closed with code {exit_code}")
     return exit_code

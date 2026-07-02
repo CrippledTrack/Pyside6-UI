@@ -52,6 +52,7 @@ _previous_showwarning = None
 
 class CustomFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
+        orig_exc_info = record.exc_info
         if not hasattr(record, "threadName"):
             record.threadName = "MainThread"
         elif record.threadName and record.threadName.startswith("Dummy-"):
@@ -95,15 +96,19 @@ class CustomFormatter(logging.Formatter):
             # Clear exc_info to prevent parent formatter from also processing it
             record.exc_info = None
         else:
-            record.exc_text = ""
-        return super().format(record)
+            if not getattr(record, 'exc_text', None):
+                record.exc_text = ""
+        try:
+            return super().format(record)
+        finally:
+            record.exc_info = orig_exc_info
 
 
 def _prune_old_logs(log_dir: Path, keep: int) -> None:
     """Remove oldest log files beyond the retention limit."""
     try:
         log_files = sorted(
-            (path for path in log_dir.glob("app_*.log") if path.is_file()),
+            (path for path in log_dir.glob("app_*.log*") if path.is_file()),
             key=lambda p: p.stat().st_mtime,
             reverse=True,
         )

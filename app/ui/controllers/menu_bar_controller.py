@@ -107,9 +107,12 @@ class MenuBarController(QObject):
         settings_menu = QMenu("Settings", self.parent_widget)
         self.menu_bar.addMenu(settings_menu)
         
-        self.manage_plugins_action = QAction("Manage Plugins...", self.parent_widget)
-        settings_menu.addAction(self.manage_plugins_action)
-        self.manage_plugins_action.triggered.connect(on_manage_plugins)
+        from ...utils.imports import get_platforms_constants
+        constants = get_platforms_constants()
+        if not getattr(constants, "SINGLE_PLUGIN_MODE", False):
+            self.manage_plugins_action = QAction("Manage Plugins...", self.parent_widget)
+            settings_menu.addAction(self.manage_plugins_action)
+            self.manage_plugins_action.triggered.connect(on_manage_plugins)
         
         self.select_theme_action = QAction("Select Theme...", self.parent_widget)
         settings_menu.addAction(self.select_theme_action)
@@ -218,6 +221,7 @@ class MenuBarController(QObject):
                 self.start_pipe_daemon_action = QAction("Start Pipe Daemon (Beta)", self.parent_widget)
                 self.start_pipe_daemon_action.setToolTip("Start the experimental pipe-based daemon")
                 self.start_pipe_daemon_action.setEnabled(not is_running)
+                self.start_pipe_daemon_action.setVisible(not is_running)
                 if on_start_pipe_daemon:
                     self.start_pipe_daemon_action.triggered.connect(on_start_pipe_daemon)
                 admin_menu.addAction(self.start_pipe_daemon_action)
@@ -248,6 +252,12 @@ class MenuBarController(QObject):
         
         if not is_dev_mode():
             return
+            
+        from ...utils.imports import get_platforms_constants
+        constants = get_platforms_constants()
+        if getattr(constants, "SINGLE_PLUGIN_MODE", False):
+            logger.debug("Single plugin mode active, skipping dev menu")
+            return
         
         dev_menu = QMenu("Dev", self.parent_widget)
         self.menu_bar.addMenu(dev_menu)
@@ -277,6 +287,7 @@ class MenuBarController(QObject):
             f"Show tabs from {other_text} for testing purposes. "
             "Requires application restart to take effect."
         )
+        
         self.show_all_platforms_action.triggered.connect(self._on_show_all_platforms_toggled)
         dev_menu.addAction(self.show_all_platforms_action)
         
@@ -391,6 +402,7 @@ class MenuBarController(QObject):
                 )
                 if self.start_pipe_daemon_action:
                     self.start_pipe_daemon_action.setEnabled(False)
+                    self.start_pipe_daemon_action.setVisible(False)
                     self.start_pipe_daemon_action.setToolTip(
                         "The privileged daemon is currently running"
                     )
@@ -403,6 +415,7 @@ class MenuBarController(QObject):
                 )
                 if self.start_pipe_daemon_action:
                     self.start_pipe_daemon_action.setEnabled(True)
+                    self.start_pipe_daemon_action.setVisible(True)
                     self.start_pipe_daemon_action.setToolTip(
                         "Start the experimental pipe-based daemon"
                     )

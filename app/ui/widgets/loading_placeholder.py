@@ -76,8 +76,9 @@ class LoadingDots(QWidget):
             self._dots.append(dot)
             layout.addWidget(dot)
             
-            # Create animation for this dot
-            anim = QPropertyAnimation(dot, b"opacity")
+            # Create animation for this dot, making the dot the parent so the animation
+            # is cleanly destroyed before the target widget is torn down.
+            anim = QPropertyAnimation(dot, b"opacity", dot)
             anim.setDuration(600)
             anim.setStartValue(0.3)
             anim.setKeyValueAt(0.5, 1.0)
@@ -98,7 +99,10 @@ class LoadingDots(QWidget):
     def stop(self) -> None:
         """Stop all animations."""
         for anim in self._animations:
-            anim.stop()
+            try:
+                anim.stop()
+            except RuntimeError:
+                pass
 
 
 class LoadingPlaceholder(QWidget):

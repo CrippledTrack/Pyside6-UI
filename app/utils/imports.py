@@ -83,6 +83,31 @@ def get_platforms_constants() -> Any:
     except ImportError:
         pass
         
+    # Check for launch variables override
+    # 1. Environment variables
+    env_mode = os.environ.get("GUI_SINGLE_PLUGIN_MODE")
+    env_name = os.environ.get("GUI_SINGLE_PLUGIN") or os.environ.get("GUI_SINGLE_PLUGIN_NAME")
+    
+    if env_name:
+        if env_name.lower() in ("1", "true", "yes", "on"):
+            merged["SINGLE_PLUGIN_MODE"] = True
+        elif env_name.lower() in ("0", "false", "no", "off"):
+            merged["SINGLE_PLUGIN_MODE"] = False
+        else:
+            merged["SINGLE_PLUGIN_MODE"] = True
+            merged["SINGLE_PLUGIN_NAME"] = env_name
+            
+    if env_mode:
+        merged["SINGLE_PLUGIN_MODE"] = env_mode.lower() in ("1", "true", "yes", "on")
+
+    # 2. Command-line arguments (sys.argv)
+    for arg in sys.argv:
+        if arg.startswith("--single-plugin="):
+            merged["SINGLE_PLUGIN_MODE"] = True
+            merged["SINGLE_PLUGIN_NAME"] = arg.split("=", 1)[1].strip()
+        elif arg == "--single-plugin":
+            merged["SINGLE_PLUGIN_MODE"] = True
+
     # Ensure GUI internal constants are never overridden by external plugins
     merged['GUI_API_VERSION'] = gui_constants.GUI_API_VERSION
     merged['CURRENT_PLATFORM'] = gui_constants.CURRENT_PLATFORM

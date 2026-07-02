@@ -468,35 +468,6 @@ class PluginManagementDialog(QDialog):
         types_str = self._get_extension_types(plugin_class)
         self.details_types.setText(types_str if types_str else "Tab only")
         
-        # Check if plugin is enabled
-        plugin_is_enabled = self._registry.is_enabled(name)
-        
-        # Update extension type checkboxes
-        detected_types = types_str.split(", ") if types_str else []
-        for ext_type, cb in self.ext_checkboxes.items():
-            has_extension = ext_type in detected_types
-            # Only enable checkbox if plugin is enabled AND has this extension type
-            cb.setEnabled(has_extension and plugin_is_enabled)
-            
-            if has_extension and self.settings_service:
-                # Load saved state from settings
-                is_enabled = self.settings_service.is_extension_enabled(name, ext_type)
-                cb.blockSignals(True)  # Prevent triggering handler during load
-                # If plugin is disabled, visually uncheck extensions (even if enabled in settings)
-                if not plugin_is_enabled:
-                    cb.setChecked(False)
-                else:
-                    cb.setChecked(is_enabled)
-                cb.blockSignals(False)
-            else:
-                cb.blockSignals(True)
-                # If disabled or no settings, uncheck/default based on existence
-                if not plugin_is_enabled:
-                    cb.setChecked(False)
-                else:
-                    cb.setChecked(has_extension)
-                cb.blockSignals(False)
-
         # Configure button availability
         has_config = any([
             hasattr(plugin_class, 'get_settings_widget') and callable(getattr(plugin_class, 'get_settings_widget', None)),
@@ -556,7 +527,6 @@ class PluginManagementDialog(QDialog):
         self.details_module.setText("-")
         self.details_min_gui_version.setText("-")
         self.details_required_gui_version.setText("-")
-        self.details_description.setPlainText("")
         self.details_description.setPlainText("")
         self.configure_btn.setEnabled(False)
         
@@ -625,15 +595,44 @@ class PluginManagementDialog(QDialog):
 
     def enable_all(self) -> None:
         """Enable all plugins."""
-        for name, _ in self._all_plugins:
-            self.toggle_plugin(name, True)
+        tab_controller = None
+        if self.parent() and hasattr(self.parent(), "tab_controller"):
+            tab_controller = self.parent().tab_controller
+            tab_controller.set_batch_loading(True)
+            
+        try:
+            for name, _ in self._all_plugins:
+                self.toggle_plugin(name, True)
+        finally:
+            if tab_controller:
+                tab_controller.set_batch_loading(False)
+                # Load the currently active tab since batch loading is now off
+                if hasattr(self.parent(), "tab_widget"):
+                    current_index = self.parent().tab_widget.currentIndex()
+                    if current_index >= 0:
+                        tab_controller.on_tab_changed(current_index)
+                        
         self.apply_filters()
         self.on_selection_changed()
 
     def disable_all(self) -> None:
         """Disable all plugins."""
-        for name, _ in self._all_plugins:
-            self.toggle_plugin(name, False)
+        tab_controller = None
+        if self.parent() and hasattr(self.parent(), "tab_controller"):
+            tab_controller = self.parent().tab_controller
+            tab_controller.set_batch_loading(True)
+            
+        try:
+            for name, _ in self._all_plugins:
+                self.toggle_plugin(name, False)
+        finally:
+            if tab_controller:
+                tab_controller.set_batch_loading(False)
+                if hasattr(self.parent(), "tab_widget"):
+                    current_index = self.parent().tab_widget.currentIndex()
+                    if current_index >= 0:
+                        tab_controller.on_tab_changed(current_index)
+                        
         self.apply_filters()
         self.on_selection_changed()
 

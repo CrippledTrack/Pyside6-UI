@@ -43,6 +43,7 @@ from .builtin_themes import (
     get_cyberpunk_theme,
     get_minimal_theme,
     get_purple_dark_theme,
+    get_oled_theme,
 )
 
 if TYPE_CHECKING:
@@ -118,6 +119,7 @@ class ThemeManager:
             "red": get_red_theme(),
             "cyberpunk": get_cyberpunk_theme(),
             "minimal": get_minimal_theme(),
+            "oled": get_oled_theme(),
             "legacy": get_legacy_theme(),
         }
         self.builtin_theme_names = set(builtin_themes.keys())
@@ -173,8 +175,20 @@ class ThemeManager:
         
         theme_path = self.themes_dir / f"{theme_name}.json"
         try:
-            with open(theme_path, 'w', encoding='utf-8') as f:
-                json.dump(theme_data, f, indent=2, ensure_ascii=False)
+            import os
+            import tempfile
+            temp_fd, temp_path = tempfile.mkstemp(dir=str(self.themes_dir), prefix=f".theme_{theme_name}_")
+            try:
+                with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
+                    json.dump(theme_data, f, indent=2, ensure_ascii=False)
+                os.replace(temp_path, theme_path)
+            except Exception as e:
+                if os.path.exists(temp_path):
+                    try:
+                        os.unlink(temp_path)
+                    except Exception:
+                        pass
+                raise e
             self._themes[theme_name] = theme_data
             logger.info(f"Saved custom theme: {theme_name}")
             return True
@@ -352,10 +366,22 @@ class ThemeManager:
             theme_name = saved_theme
             logger.info(f"Applying saved theme preference: {theme_name}")
         else:
-            # Auto-detect based on system preference
-            is_dark = self.detect_system_dark_mode()
-            theme_name = "dark" if is_dark else "light"
-            logger.info(f"Applying auto-detected theme: {theme_name}")
+            # Check for DEFAULT_THEME constant override
+            try:
+                from ..app.utils.imports import get_platforms_constants
+                platform_constants = get_platforms_constants()
+                default_theme = getattr(platform_constants, 'DEFAULT_THEME', '')
+            except Exception:
+                default_theme = ''
+            
+            if default_theme and default_theme in self._themes:
+                theme_name = default_theme
+                logger.info(f"Applying constant default theme override: {theme_name}")
+            else:
+                # Auto-detect based on system preference
+                is_dark = self.detect_system_dark_mode()
+                theme_name = "dark" if is_dark else "light"
+                logger.info(f"Applying auto-detected theme: {theme_name}")
         
         # apply_theme will automatically check settings_service for new_ui_enabled
         self.apply_theme(theme_name)

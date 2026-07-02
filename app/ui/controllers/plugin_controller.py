@@ -148,6 +148,13 @@ class PluginController(QObject):
         self.plugin_toggled.emit(plugin_name, enabled)
         self.plugin_state_changed.emit()
         
+        # Clear plugin instance from cache if disabling to prevent resource leaks
+        if not enabled:
+            try:
+                self.registry.unload_plugin_instance(plugin_name)
+            except Exception as e:
+                logger.error(f"Error unloading plugin instance '{plugin_name}': {e}")
+        
         return True
     
     def _integrate_plugin_extensions_dynamic(self, plugin_name: str, plugin_class: type) -> None:
