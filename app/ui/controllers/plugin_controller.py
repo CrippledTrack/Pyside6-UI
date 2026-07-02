@@ -55,6 +55,14 @@ class PluginController(QObject):
         self._plugin_status_widgets: Dict[str, list] = {}  # plugin_name -> [widget, ...]
         self._plugin_created_menus: Dict[str, list] = {}  # plugin_name -> [menu, ...] menus created by plugin
         self._service_extensions_started: bool = False  # Track if service extensions have been started
+
+        # Map of extension names to integration functions
+        self._integration_handlers = {
+            "Menu": self._integrate_menu_extension,
+            "Status": self._integrate_status_extension,
+            "Toolbar": self._integrate_toolbar_extension,
+            "Service": self._integrate_service_extension,
+        }
         
         # Retrieve services from container
         
@@ -148,41 +156,18 @@ class PluginController(QObject):
             plugin_name: Name of the plugin
             plugin_class: The plugin class
         """
-        
         try:
-            # Integrate Menu Extension (has get_menu_items method)
-            if hasattr(plugin_class, 'get_menu_items'):
-                if self._is_extension_enabled(plugin_name, "Menu"):
-                    self._integrate_menu_extension(plugin_name, plugin_class)
-                    logger.info(f"Dynamically integrated menu extension for '{plugin_name}'")
-                else:
-                    logger.debug(f"Menu extension disabled for '{plugin_name}'")
-            
-            # Integrate Status Extension (has create_status_widget method)
-            if hasattr(plugin_class, 'create_status_widget'):
-                if self._is_extension_enabled(plugin_name, "Status"):
-                    self._integrate_status_extension(plugin_name, plugin_class)
-                    logger.info(f"Dynamically integrated status extension for '{plugin_name}'")
-                else:
-                    logger.debug(f"Status extension disabled for '{plugin_name}'")
-            
-            # Integrate Toolbar Extension (has get_toolbar_actions method)
-            if hasattr(plugin_class, 'get_toolbar_actions'):
-                if self._is_extension_enabled(plugin_name, "Toolbar"):
-                    self._integrate_toolbar_extension(plugin_name, plugin_class)
-                    logger.info(f"Dynamically integrated toolbar extension for '{plugin_name}'")
-                else:
-                    logger.debug(f"Toolbar extension disabled for '{plugin_name}'")
-            
-            # Start Service Extension (has on_application_start method)
-            if hasattr(plugin_class, 'on_application_start'):
-                if self._is_extension_enabled(plugin_name, "Service"):
-                    # Get instance
-                    instance = self.registry.get_plugin_instance(plugin_name)
-                    instance.on_application_start(self.container)
-                    logger.info(f"Dynamically started service extension for '{plugin_name}'")
-                else:
-                    logger.debug(f"Service extension disabled for '{plugin_name}'")
+            from ....plugin_system.extensions import EXTENSION_POINTS
+            for ep in EXTENSION_POINTS:
+                if ep.name in self._integration_handlers:
+                    if ep.check_implements(plugin_class):
+                        toggle_name = ep.parent_toggle if ep.parent_toggle else ep.name
+                        if self._is_extension_enabled(plugin_name, toggle_name):
+                            handler = self._integration_handlers[ep.name]
+                            handler(plugin_name, plugin_class)
+                            logger.info(f"Dynamically integrated {ep.name} extension for '{plugin_name}'")
+                        else:
+                            logger.debug(f"{ep.name} extension disabled for '{plugin_name}'")
         except Exception as e:
             logger.error(f"Error dynamically integrating extensions for '{plugin_name}': {e}")
     
@@ -504,51 +489,36 @@ class PluginController(QObject):
         Args:
             main_window: The MainWindow instance to integrate into
         """
-        
         self._main_window = main_window
         
         # Clean up any previously integrated extensions to prevent duplicates
         self.cleanup_all_extensions()
         
         try:
-            # Integrate Menu Extensions
-            menu_plugins = self.registry.get_menu_extensions(enabled_only=True)
-            for name, plugin_class in menu_plugins.items():
-                try:
-                    if self._is_extension_enabled(name, "Menu"):
-                        self._integrate_menu_extension(name, plugin_class)
-                    else:
-                        logger.debug(f"Menu extension disabled for '{name}'")
-                except Exception as e:
-                    logger.error(f"Failed to integrate menu extension '{name}': {e}")
+            # Map of extension names to registry extension query functions
+            registry_queries = {
+                "Menu": self.registry.get_menu_extensions,
+                "Status": self.registry.get_status_extensions,
+                "Toolbar": self.registry.get_toolbar_extensions,
+            }
             
-            # Integrate Status Extensions
-            status_plugins = self.registry.get_status_extensions(enabled_only=True)
-            for name, plugin_class in status_plugins.items():
-                try:
-                    if self._is_extension_enabled(name, "Status"):
-                        self._integrate_status_extension(name, plugin_class)
-                    else:
-                        logger.debug(f"Status extension disabled for '{name}'")
-                except Exception as e:
-                    logger.error(f"Failed to integrate status extension '{name}': {e}")
-            
-            # Integrate Toolbar Extensions
-            toolbar_plugins = self.registry.get_toolbar_extensions(enabled_only=True)
-            for name, plugin_class in toolbar_plugins.items():
-                try:
-                    if self._is_extension_enabled(name, "Toolbar"):
-                        self._integrate_toolbar_extension(name, plugin_class)
-                    else:
-                        logger.debug(f"Toolbar extension disabled for '{name}'")
-                except Exception as e:
-                    logger.error(f"Failed to integrate toolbar extension '{name}': {e}")
+            for ext_name, query_func in registry_queries.items():
+                plugins = query_func(enabled_only=True)
+                for name, plugin_class in plugins.items():
+                    try:
+                        if self._is_extension_enabled(name, ext_name):
+                            handler = self._integration_handlers.get(ext_name)
+                            if handler:
+                                handler(name, plugin_class)
+                        else:
+                            logger.debug(f"{ext_name} extension disabled for '{name}'")
+                    except Exception as e:
+                        logger.error(f"Failed to integrate {ext_name} extension '{name}': {e}")
             
             # Initialize Service Extensions
             self.start_service_extensions()
             
-            logger.info(f"Integrated extensions: {len(menu_plugins)} menu, {len(status_plugins)} status, "
-                        f"{len(toolbar_plugins)} toolbar")
+            logger.info("Integrated extensions")
         except Exception as e:
             logger.error(f"Error integrating plugin extensions: {e}")
     
@@ -635,18 +605,20 @@ class PluginController(QObject):
                 self._plugin_toolbar_actions[name].append(action)
                 logger.debug(f"Added toolbar action '{action_def.label}' from plugin '{name}'")
     
+    def _integrate_service_extension(self, name: str, plugin_class: type) -> None:
+        """Start a ServiceExtension plugin."""
+        instance = self.registry.get_plugin_instance(name)
+        logger.info(f"Starting service extension: {name}")
+        instance.on_application_start(self.container)
+
     def start_service_extensions(self) -> None:
         """Start all ServiceExtension plugins."""
-        
         try:
             service_plugins = self.registry.get_service_extensions(enabled_only=True)
             for name, plugin_class in service_plugins.items():
                 try:
                     if self._is_extension_enabled(name, "Service"):
-                        # Get plugin instance and start service
-                        instance = self.registry.get_plugin_instance(name)
-                        logger.info(f"Starting service extension: {name}")
-                        instance.on_application_start(self.container)
+                        self._integrate_service_extension(name, plugin_class)
                     else:
                         logger.debug(f"Service extension disabled for '{name}'")
                 except Exception as e:

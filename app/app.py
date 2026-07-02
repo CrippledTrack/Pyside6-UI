@@ -100,6 +100,10 @@ def run(argv: List[str]) -> int:
 
     app = QApplication(argv)
 
+    # Initialize the QtEventDispatcher on the main thread to ensure proper thread affinity
+    from ..plugin_system.registry import QtEventDispatcher
+    QtEventDispatcher.get_instance()
+
     app_lifecycle.configure_qt_application(app, VERSION_NAME, GUI_API_VERSION)
 
     from .services.theme_init_service import ThemeInitService

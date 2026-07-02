@@ -76,50 +76,13 @@ def _check_implements_interface(plugin_class: Type[Any], interface: Type) -> boo
     """Check if a plugin class implements an interface.
 
     Protocol types don't work with issubclass() reliably for classes, so we use
-    an explicit interface → requirements mapping and a minimal ABC fallback.
+    the centralized ExtensionPoint registry with a fallback.
     """
-    interface_name = getattr(interface, "__name__", str(interface))
+    from .extensions import get_extension_point_by_interface
 
-    def _has_callable(attr: str) -> bool:
-        try:
-            member = inspect.getattr_static(plugin_class, attr)
-        except Exception:
-            return False
-        return callable(getattr(plugin_class, attr, None)) and member is not None
-
-    def _has_attr(attr: str) -> bool:
-        return hasattr(plugin_class, attr)
-
-    requirements: Dict[str, Dict[str, List[str]]] = {
-        "TabExtension": {"callable": ["create_widget"], "attrs": []},
-        "MenuExtension": {"callable": ["get_menu_items"], "attrs": []},
-        "StatusExtension": {"callable": ["create_status_widget"], "attrs": []},
-        "ToolbarExtension": {"callable": ["get_toolbar_actions"], "attrs": []},
-        "ServiceExtension": {"callable": ["on_application_start"], "attrs": []},
-        "EventSubscriberExtension": {"callable": ["get_event_subscriptions"], "attrs": []},
-        "SettingsExtension": {"callable": ["get_settings_widget"], "attrs": []},
-        "PluginProtocol": {"callable": [], "attrs": ["plugin_name", "supported_platforms"]},
-    }
-
-    req = requirements.get(interface_name)
-    if req:
-        if interface_name == "SettingsExtension":
-            # Must be overridden (not just inherited default from BaseTabPlugin)
-            try:
-                from .base import BaseTabPlugin
-                method = inspect.getattr_static(plugin_class, "get_settings_widget")
-                base_method = getattr(BaseTabPlugin, "get_settings_widget", None)
-                if getattr(plugin_class, "get_settings_widget", None) is base_method:
-                    return False
-                return method is not None and callable(getattr(plugin_class, "get_settings_widget", None))
-            except Exception:
-                return False
-
-        if any(not _has_callable(name) for name in req["callable"]):
-            return False
-        if any(not _has_attr(name) for name in req["attrs"]):
-            return False
-        return True
+    ep = get_extension_point_by_interface(interface)
+    if ep:
+        return ep.check_implements(plugin_class)
 
     # Fallback: try ABC-style check (best-effort)
     try:
@@ -192,6 +155,16 @@ class PluginRegistry:
         self._toolbar_plugins: Dict[str, Type[Any]] = {}
         self._service_plugins: Dict[str, Type[Any]] = {}
         self._event_subscriber_plugins: Dict[str, Type[Any]] = {}
+        
+        # Categorized plugin map for generic iterations
+        self._extension_category_maps = {
+            "Tab": self._tab_plugins,
+            "Menu": self._menu_plugins,
+            "Status": self._status_plugins,
+            "Toolbar": self._toolbar_plugins,
+            "Service": self._service_plugins,
+            "Events": self._event_subscriber_plugins,
+        }
         
         # Rejected plugins tracking
         self._rejected_plugins: Dict[str, Tuple[Type[Any], str]] = {}
@@ -459,18 +432,10 @@ class PluginRegistry:
     
     def _categorize_plugin_by_interface(self, plugin_name: str, plugin_class: Type[Any]) -> None:
         """Categorize a plugin by which interfaces it implements."""
-        if _check_implements_interface(plugin_class, TabExtension):
-            self._tab_plugins[plugin_name] = plugin_class
-        if _check_implements_interface(plugin_class, MenuExtension):
-            self._menu_plugins[plugin_name] = plugin_class
-        if _check_implements_interface(plugin_class, StatusExtension):
-            self._status_plugins[plugin_name] = plugin_class
-        if _check_implements_interface(plugin_class, ToolbarExtension):
-            self._toolbar_plugins[plugin_name] = plugin_class
-        if _check_implements_interface(plugin_class, ServiceExtension):
-            self._service_plugins[plugin_name] = plugin_class
-        if _check_implements_interface(plugin_class, EventSubscriberExtension):
-            self._event_subscriber_plugins[plugin_name] = plugin_class
+        from .extensions import EXTENSION_POINTS
+        for ep in EXTENSION_POINTS:
+            if ep.name in self._extension_category_maps and ep.check_implements(plugin_class):
+                self._extension_category_maps[ep.name][plugin_name] = plugin_class
 
     def _apply_default_disabled_state(self, plugin_class: Type[Any], plugin_name: str) -> None:
         """Apply default disabled state if plugin has disabled_by_default flag."""
@@ -525,12 +490,8 @@ class PluginRegistry:
             self._plugin_instances.clear()
             self._version_incompatibilities.clear()
             self._seen_plugins.clear()
-            self._tab_plugins.clear()
-            self._menu_plugins.clear()
-            self._status_plugins.clear()
-            self._toolbar_plugins.clear()
-            self._service_plugins.clear()
-            self._event_subscriber_plugins.clear()
+            for category_map in self._extension_category_maps.values():
+                category_map.clear()
             self._rejected_plugins.clear()
             self._shutdown_event_executor()
 
@@ -736,20 +697,21 @@ class PluginRegistry:
     
                 def _run(cb=callback, data=event_data, name=plugin_name, ev=event_name):
                     try:
-                        # CRITICAL: We check if there is an active Qt application loop running.
-                        # Since this event runs inside a background worker thread, if a subscriber
-                        # is a GUI component and tries to modify UI elements directly from this thread,
-                        # Qt will crash or raise errors because UI operations are not thread-safe.
-                        # If a Qt event loop is active, we MUST marshal the execution back onto the Qt Main Thread.
-                        from ..app.qt_bindings import QtCore
-                        app = QtCore.QCoreApplication.instance()
-                        if app is not None:
-                            # Route execution through our Qt main-thread event dispatcher.
-                            QtEventDispatcher.get_instance().dispatch(cb, data)
-                        else:
-                            # No GUI application is active (e.g. running in CLI mode or unit tests),
-                            # so it is safe to invoke the callback directly on this worker thread.
-                            cb(data)
+                        # Check if the callback explicitly requests execution on the UI thread
+                        run_on_ui = getattr(cb, "_run_on_ui_thread", False) or getattr(getattr(cb, "__func__", None), "_run_on_ui_thread", False)
+                        
+                        if run_on_ui:
+                            # CRITICAL: We check if there is an active Qt application loop running.
+                            # If a Qt event loop is active, we MUST marshal the execution back onto the Qt Main Thread.
+                            from ..app.qt_bindings import QtCore
+                            app = QtCore.QCoreApplication.instance()
+                            if app is not None:
+                                # Route execution through our Qt main-thread event dispatcher.
+                                QtEventDispatcher.get_instance().dispatch(cb, data)
+                                return
+                                
+                        # Otherwise run directly in background thread (Option C / default fallback)
+                        cb(data)
                     except Exception as e:
                         logger.error(f"Error delivering async event '{ev}' to '{name}': {e}")
     

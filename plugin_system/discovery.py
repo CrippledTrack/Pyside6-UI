@@ -283,20 +283,8 @@ class PluginDiscovery:
                 return False
 
             # Must implement at least one extension surface.
-            # Keep this purely attribute-based so Protocol-based plugins can be discovered.
-            extension_markers = [
-                ('create_widget',),                 # TabExtension
-                ('get_menu_items',),                # MenuExtension
-                ('create_status_widget',),          # StatusExtension
-                ('get_toolbar_actions',),           # ToolbarExtension
-                ('on_application_start',),          # ServiceExtension
-                ('get_event_subscriptions',),       # EventSubscriberExtension
-                ('get_settings_widget',),           # SettingsExtension (registry further checks override)
-            ]
-            has_any_extension = any(
-                all(hasattr(cls, attr) and callable(getattr(cls, attr)) for attr in attrs)
-                for attrs in extension_markers
-            )
+            from .extensions import EXTENSION_POINTS
+            has_any_extension = any(ep.check_implements(cls) for ep in EXTENSION_POINTS if ep.name != "PluginProtocol")
             if not has_any_extension:
                 return False
             

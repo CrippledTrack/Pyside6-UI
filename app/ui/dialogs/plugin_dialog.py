@@ -156,7 +156,11 @@ class PluginManagementDialog(QDialog):
         ext_layout.setContentsMargins(8, 4, 8, 4)
 
         self.ext_checkboxes: Dict[str, QCheckBox] = {}
-        for ext_type in ["Tab", "Menu", "Toolbar", "Status", "Service"]:
+        from ....plugin_system.extensions import EXTENSION_POINTS
+        for ep in EXTENSION_POINTS:
+            if not ep.is_user_toggleable:
+                continue
+            ext_type = ep.name
             cb = QCheckBox(ext_type)
             cb.setChecked(True)  # Default enabled
             cb.setEnabled(False)  # Disabled until a plugin is selected
@@ -235,41 +239,13 @@ class PluginManagementDialog(QDialog):
 
     def _get_extension_types(self, plugin_class: type) -> str:
         """Get a string describing which extension interfaces the plugin implements."""
+        from ....plugin_system.extensions import EXTENSION_POINTS
         extensions = []
-        
-        # Check for Tab extension (has create_widget method)
-        if hasattr(plugin_class, 'create_widget'):
-            extensions.append("Tab")
-        
-        # Check for Menu extension (has get_menu_items method)
-        if hasattr(plugin_class, 'get_menu_items'):
-            extensions.append("Menu")
-        
-        # Check for Status extension (has create_status_widget method)
-        if hasattr(plugin_class, 'create_status_widget'):
-            extensions.append("Status")
-        
-        # Check for Toolbar extension (has get_toolbar_actions method)
-        if hasattr(plugin_class, 'get_toolbar_actions'):
-            extensions.append("Toolbar")
-        
-        # Check for Service extension (has on_application_start OR get_event_subscriptions)
-        # Events are grouped under Service for user simplicity
-        has_service = hasattr(plugin_class, 'on_application_start')
-        has_events = hasattr(plugin_class, 'get_event_subscriptions')
-        if has_service or has_events:
-            extensions.append("Service")
-        
-        # Check for Settings extension (has get_settings_widget method)
-        # Note: Be careful as BaseTabPlugin also has this - only count if not default
-        if hasattr(plugin_class, 'get_settings_widget'):
-            method = getattr(plugin_class, 'get_settings_widget')
-            # Check if it's overridden (not just inherited from base)
-            from ....plugin_system.base import BaseTabPlugin
-            base_method = getattr(BaseTabPlugin, 'get_settings_widget', None)
-            if method is not base_method:
-                extensions.append("Settings")
-        
+        for ep in EXTENSION_POINTS:
+            if ep.name in ("Events", "PluginProtocol"):
+                continue
+            if ep.check_implements(plugin_class):
+                extensions.append(ep.name)
         return ", ".join(extensions) if extensions else ""
 
     def load_plugins(self) -> None:
@@ -333,11 +309,16 @@ class PluginManagementDialog(QDialog):
             )
             return
 
-        self.plugin_service.clear()
-        # Use the comprehensive plugin discovery from the service
-        self.plugin_controller.plugin_service.discover_and_register_all_plugins()
-        QMessageBox.information(self, "Plugins Reloaded", "Plugins have been reloaded.")
-        self.load_plugins()
+        # Safely delegate reload to MainWindow if possible to ensure proper UI teardown
+        if self.parent() and hasattr(self.parent(), '_reload_all_plugins'):
+            self.parent()._reload_all_plugins()
+            self.accept()
+        else:
+            # Fallback
+            self.plugin_service.clear()
+            self.plugin_controller.plugin_service.discover_and_register_all_plugins()
+            QMessageBox.information(self, "Plugins Reloaded", "Plugins have been reloaded.")
+            self.load_plugins()
 
     def apply_filters(self) -> None:
         search_text = self.search_input.text().strip().lower()

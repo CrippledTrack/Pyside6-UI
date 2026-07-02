@@ -15,6 +15,13 @@ from .interfaces import (
     SettingsExtension,
 )
 from .types import MenuItemDefinition, ToolbarAction, PluginEvent
+from .extensions import (
+    ExtensionPoint,
+    EXTENSION_POINTS,
+    get_extension_point,
+    get_extension_point_by_interface,
+)
+from .decorators import ui_thread
 
 __all__ = [
     # Base classes
@@ -35,4 +42,11 @@ __all__ = [
     "MenuItemDefinition",
     "ToolbarAction",
     "PluginEvent",
+    # Extensions Registry
+    "ExtensionPoint",
+    "EXTENSION_POINTS",
+    "get_extension_point",
+    "get_extension_point_by_interface",
+    # Decorators
+    "ui_thread",
 ]
