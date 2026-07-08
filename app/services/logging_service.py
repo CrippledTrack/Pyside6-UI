@@ -11,15 +11,12 @@ from pathlib import Path
 from typing import Optional
 from logging.handlers import RotatingFileHandler
 
-from ..utils.imports import get_platforms_constants
 from ..utils.admin import is_dev_mode
 
-# Import platform constants using the utility function
-constants = get_platforms_constants()
-LOGGING_ENABLED = constants.LOGGING_ENABLED
-LOG_TO_FILE = constants.LOG_TO_FILE
+# PERF: LOGGING_ENABLED and LOG_TO_FILE are resolved lazily inside setup_logging()
+# instead of at module import time, to avoid pinning the constants module in memory.
 
-SAVE_LOGS_TO_FILE = LOG_TO_FILE
+SAVE_LOGS_TO_FILE = None  # Set in setup_logging()
 MAX_LOG_SIZE = 5 * 1024 * 1024  # 5MB
 MAX_LOG_FILES = 6
 LOG_FORMAT = "%(asctime)s - %(levelname)s - [%(threadName)s] - %(name)s - %(message)s%(exc_text)s"
@@ -229,10 +226,17 @@ def setup_logging() -> logging.Logger:
 
     Matches the behavior previously implemented in main.py.
     """
-    global _logging_configured, _previous_excepthook, _previous_showwarning
+    global _logging_configured, _previous_excepthook, _previous_showwarning, SAVE_LOGS_TO_FILE
     try:
         if _logging_configured:
             return logging.getLogger(__name__)
+
+        # Resolve platform constants lazily (first and only call)
+        from ..utils.imports import get_platforms_constants
+        _constants = get_platforms_constants()
+        LOGGING_ENABLED = _constants.LOGGING_ENABLED
+        SAVE_LOGS_TO_FILE = _constants.LOG_TO_FILE
+
         if not LOGGING_ENABLED:
             # Minimal no-op configuration to avoid noisy handlers
             logging.getLogger().handlers.clear()

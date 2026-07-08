@@ -11,6 +11,7 @@ import inspect
 import logging
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
+from types import MappingProxyType
 from typing import Any, Optional, List, Dict, Tuple, Type, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -453,17 +454,17 @@ class PluginRegistry:
     # Query methods
     # =========================================================================
 
-    def get_all_plugins(self) -> Dict[str, Type[Any]]:
-        """Get all registered plugin classes."""
-        return self._plugins.copy()
+    def get_all_plugins(self) -> MappingProxyType:
+        """Get a read-only view of all registered plugin classes."""
+        return MappingProxyType(self._plugins)
 
-    def get_core_plugins(self) -> Dict[str, Type[Any]]:
-        """Get core plugin classes only."""
-        return self._core_plugins.copy()
+    def get_core_plugins(self) -> MappingProxyType:
+        """Get a read-only view of core plugin classes."""
+        return MappingProxyType(self._core_plugins)
 
-    def get_external_plugins(self) -> Dict[str, Type[Any]]:
-        """Get external plugin classes only."""
-        return self._external_plugins.copy()
+    def get_external_plugins(self) -> MappingProxyType:
+        """Get a read-only view of external plugin classes."""
+        return MappingProxyType(self._external_plugins)
 
     def get_plugin(self, name: str) -> Optional[Type[Any]]:
         """Get a specific plugin class by name."""
@@ -521,9 +522,9 @@ class PluginRegistry:
         """Get the version incompatibility reason for a plugin, if any."""
         return self._version_incompatibilities.get(name)
     
-    def get_rejected_plugins(self) -> Dict[str, Tuple[Type[Any], str]]:
-        """Get plugins that were rejected during registration."""
-        return self._rejected_plugins.copy()
+    def get_rejected_plugins(self) -> MappingProxyType:
+        """Get a read-only view of plugins that were rejected during registration."""
+        return MappingProxyType(self._rejected_plugins)
 
     def register_plugin_force(self, name: str, plugin_class: Type[Any]) -> None:
         """Force-register a previously rejected plugin, bypassing version checks.
@@ -588,37 +589,37 @@ class PluginRegistry:
         """Get plugin classes that implement TabExtension."""
         if enabled_only:
             return {k: v for k, v in self._tab_plugins.items() if self.is_enabled(k)}
-        return self._tab_plugins.copy()
+        return MappingProxyType(self._tab_plugins)
     
     def get_menu_extensions(self, enabled_only: bool = True) -> Dict[str, Type[Any]]:
         """Get plugin classes that implement MenuExtension."""
         if enabled_only:
             return {k: v for k, v in self._menu_plugins.items() if self.is_enabled(k)}
-        return self._menu_plugins.copy()
+        return MappingProxyType(self._menu_plugins)
     
     def get_status_extensions(self, enabled_only: bool = True) -> Dict[str, Type[Any]]:
         """Get plugin classes that implement StatusExtension."""
         if enabled_only:
             return {k: v for k, v in self._status_plugins.items() if self.is_enabled(k)}
-        return self._status_plugins.copy()
+        return MappingProxyType(self._status_plugins)
     
     def get_toolbar_extensions(self, enabled_only: bool = True) -> Dict[str, Type[Any]]:
         """Get plugin classes that implement ToolbarExtension."""
         if enabled_only:
             return {k: v for k, v in self._toolbar_plugins.items() if self.is_enabled(k)}
-        return self._toolbar_plugins.copy()
+        return MappingProxyType(self._toolbar_plugins)
     
     def get_service_extensions(self, enabled_only: bool = True) -> Dict[str, Type[Any]]:
         """Get plugin classes that implement ServiceExtension."""
         if enabled_only:
             return {k: v for k, v in self._service_plugins.items() if self.is_enabled(k)}
-        return self._service_plugins.copy()
+        return MappingProxyType(self._service_plugins)
     
     def get_event_subscriber_extensions(self, enabled_only: bool = True) -> Dict[str, Type[Any]]:
         """Get plugin classes that implement EventSubscriberExtension."""
         if enabled_only:
             return {k: v for k, v in self._event_subscriber_plugins.items() if self.is_enabled(k)}
-        return self._event_subscriber_plugins.copy()
+        return MappingProxyType(self._event_subscriber_plugins)
     
     # =========================================================================
     # Event Bus

@@ -17,23 +17,17 @@ from typing import Optional, List, Dict, Any
 from ..utils.paths import get_base_path
 from ..utils.imports import get_platforms_constants
 
-# Try to get NEW_UI_ENABLED_BY_DEFAULT from platform constants first, fallback to GUI constants
+# PERF: Single call to get_platforms_constants() for both values (was 2 separate calls).
 try:
     platform_constants = get_platforms_constants()
     NEW_UI_ENABLED_BY_DEFAULT = getattr(platform_constants, 'NEW_UI_ENABLED_BY_DEFAULT', None)
+    HIDE_ADMIN_MENU_BY_DEFAULT = getattr(platform_constants, 'HIDE_ADMIN_MENU_BY_DEFAULT', None)
     if NEW_UI_ENABLED_BY_DEFAULT is None:
         from ..constants import NEW_UI_ENABLED_BY_DEFAULT
-except (ImportError, AttributeError):
-    from ..constants import NEW_UI_ENABLED_BY_DEFAULT
-
-# Try to get HIDE_ADMIN_MENU_BY_DEFAULT from platform constants first, fallback to GUI constants
-try:
-    platform_constants = get_platforms_constants()
-    HIDE_ADMIN_MENU_BY_DEFAULT = getattr(platform_constants, 'HIDE_ADMIN_MENU_BY_DEFAULT', None)
     if HIDE_ADMIN_MENU_BY_DEFAULT is None:
         from ..constants import HIDE_ADMIN_MENU_BY_DEFAULT
 except (ImportError, AttributeError):
-    from ..constants import HIDE_ADMIN_MENU_BY_DEFAULT
+    from ..constants import NEW_UI_ENABLED_BY_DEFAULT, HIDE_ADMIN_MENU_BY_DEFAULT
 
 logger = logging.getLogger(__name__)
 
@@ -493,9 +487,10 @@ class SettingsService:
         Returns:
             True if enabled (default), False if explicitly disabled
         """
-        states = self.get_plugin_extension_states(plugin_name)
-        # Default to enabled if not explicitly set
-        return states.get(extension_type, True)
+        # PERF: Inline lookup to avoid the defensive .copy() in get_plugin_extension_states().
+        # This method is called on every tab activation and during plugin loading.
+        ps = self._settings.plugin_settings.get(plugin_name, {})
+        return ps.get('extension_states', {}).get(extension_type, True)
     
     def set_extension_enabled(self, plugin_name: str, extension_type: str, enabled: bool) -> None:
         """

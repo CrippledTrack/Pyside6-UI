@@ -13,7 +13,8 @@ import json
 import logging
 import platform
 from pathlib import Path
-from typing import Dict, List, Optional, Any, TYPE_CHECKING
+from types import MappingProxyType
+from typing import Callable, Dict, List, Optional, Any, TYPE_CHECKING
 from ..app.qt_bindings import QApplication, QPalette, QColor, Qt
 
 # Try to get NEW_UI_ENABLED_BY_DEFAULT from platform constants first, fallback to GUI constants
@@ -30,21 +31,9 @@ except (ImportError, AttributeError):
         # Fallback if constants not available
         NEW_UI_ENABLED_BY_DEFAULT = True
 
-from .builtin_themes import (
-    get_default_theme,
-    get_legacy_theme,
-    get_dark_theme,
-    get_light_theme,
-    get_blue_theme,
-    get_green_theme,
-    get_purple_theme,
-    get_orange_theme,
-    get_red_theme,
-    get_cyberpunk_theme,
-    get_minimal_theme,
-    get_purple_dark_theme,
-    get_oled_theme,
-)
+# PERF: Builtin theme getter functions are imported lazily via their module path
+# to avoid generating all 13 stylesheet strings at import time.
+# See _BUILTIN_THEME_FACTORIES below.
 
 if TYPE_CHECKING:
     from ..app.services.settings_service import SettingsService
@@ -119,6 +108,25 @@ def create_palette_from_data(palette_data: Dict[str, Any]) -> QPalette:
     return palette
 
 
+# Mapping of builtin theme name -> factory function import path.
+# Each factory is only called the first time its theme is accessed.
+_BUILTIN_THEME_FACTORIES: Dict[str, str] = {
+    "default":     "get_default_theme",
+    "dark":        "get_dark_theme",
+    "light":       "get_light_theme",
+    "blue":        "get_blue_theme",
+    "green":       "get_green_theme",
+    "purple":      "get_purple_theme",
+    "purple_dark": "get_purple_dark_theme",
+    "orange":      "get_orange_theme",
+    "red":         "get_red_theme",
+    "cyberpunk":   "get_cyberpunk_theme",
+    "minimal":     "get_minimal_theme",
+    "oled":        "get_oled_theme",
+    "legacy":      "get_legacy_theme",
+}
+
+
 class ThemeManager:
     """Manages application themes including loading, saving, and applying themes"""
     
@@ -131,6 +139,12 @@ class ThemeManager:
         self._last_stylesheet = ""  # Track last applied stylesheet for refreshes
         # Capture initial system palette before any theme is applied
         self._initial_palette = QApplication.style().standardPalette()
+        
+        # PERF: Lazy theme factories — theme data is only generated when first accessed.
+        # Maps theme name -> callable that returns the theme data dict.
+        self._theme_factories: Dict[str, Callable[[], Dict[str, Any]]] = {}
+        # Cache of sorted theme name list, invalidated on add/remove.
+        self._sorted_names_cache: Optional[List[str]] = None
         
         # Check if we should use legacy theme manager
         self._use_legacy = False
@@ -146,24 +160,18 @@ class ThemeManager:
         self.load_custom_themes()
     
     def load_builtin_themes(self) -> None:
-        """Load built-in themes"""
-        builtin_themes = {
-            "default": get_default_theme(),
-            "dark": get_dark_theme(), 
-            "light": get_light_theme(),
-            "blue": get_blue_theme(),
-            "green": get_green_theme(),
-            "purple": get_purple_theme(),
-            "purple_dark": get_purple_dark_theme(),
-            "orange": get_orange_theme(),
-            "red": get_red_theme(),
-            "cyberpunk": get_cyberpunk_theme(),
-            "minimal": get_minimal_theme(),
-            "oled": get_oled_theme(),
-            "legacy": get_legacy_theme(),
-        }
-        self.builtin_theme_names = set(builtin_themes.keys())
-        self._themes.update(builtin_themes)
+        """Register built-in themes as lazy factories.
+        
+        Theme data is not generated until the theme is first accessed
+        (applied or previewed), saving ~200KB+ of stylesheet strings
+        for themes that are never used.
+        """
+        from . import builtin_themes as _bt_mod
+        for name, func_name in _BUILTIN_THEME_FACTORIES.items():
+            factory = getattr(_bt_mod, func_name)
+            self._theme_factories[name] = factory
+        self.builtin_theme_names = set(_BUILTIN_THEME_FACTORIES.keys())
+        self._sorted_names_cache = None  # Invalidate name cache
     
     def is_builtin_theme(self, theme_name: str) -> bool:
         """Check if a theme is a built-in theme.
@@ -191,22 +199,48 @@ class ThemeManager:
                     logger.info(f"Loaded custom theme: {theme_name}")
             except Exception as e:
                 logger.error(f"Failed to load theme {theme_file.name}: {e}")
+        self._sorted_names_cache = None  # Invalidate name cache
     
-    @property
-    def themes(self) -> Dict[str, Any]:
-        """Get themes dictionary (for compatibility with theme dialog)
+    def _resolve_theme(self, theme_name: str) -> Optional[Dict[str, Any]]:
+        """Resolve a theme by name, materializing from a lazy factory if needed.
         
+        Returns the theme data dict, or None if the theme does not exist.
+        """
+        if theme_name in self._themes:
+            return self._themes[theme_name]
+        if theme_name in self._theme_factories:
+            self._themes[theme_name] = self._theme_factories.pop(theme_name)()
+            return self._themes[theme_name]
+        return None
+
+    def _has_theme(self, theme_name: str) -> bool:
+        """Check if a theme is registered (materialized or pending lazy factory)."""
+        return theme_name in self._themes or theme_name in self._theme_factories
+
+    @property
+    def themes(self) -> MappingProxyType:
+        """Get a read-only view of all themes.
+        
+        PERF: Returns a MappingProxyType instead of a full copy.
+        Lazy-factory themes are materialized on access to ensure the
+        view is complete for callers that iterate all themes (e.g. theme dialog).
         """
         # Ensure themes are loaded
-        if not self._themes:
+        if not self._themes and not self._theme_factories:
             self.load_builtin_themes()
             self.load_custom_themes()
-        return dict(self._themes)
+        # Materialize any remaining lazy factories so the view is complete
+        if self._theme_factories:
+            for name in list(self._theme_factories):
+                self._themes[name] = self._theme_factories.pop(name)()
+        return MappingProxyType(self._themes)
     
     @themes.setter
     def themes(self, value: Dict[str, Any]) -> None:
         """Set themes dictionary"""
         self._themes = value
+        self._theme_factories.clear()
+        self._sorted_names_cache = None
     
     def save_custom_theme(self, theme_name: str, theme_data: Dict[str, Any]) -> bool:
         """Save a custom theme to file.
@@ -230,6 +264,7 @@ class ThemeManager:
                         pass
                 raise e
             self._themes[theme_name] = theme_data
+            self._sorted_names_cache = None  # Invalidate name cache
             logger.info(f"Saved custom theme: {theme_name}")
             return True
         except Exception as e:
@@ -241,13 +276,18 @@ class ThemeManager:
         
         Returns themes from the main manager since there's only one set of themes
         (modern themes that get adapted for legacy UI).
+        PERF: Result is cached and invalidated when themes are added/removed.
         """
         # Ensure themes are loaded
-        if not self._themes:
+        if not self._themes and not self._theme_factories:
             self.load_builtin_themes()
             self.load_custom_themes()
         
-        return sorted(self._themes.keys())
+        if self._sorted_names_cache is None:
+            # Include both materialized and pending lazy themes
+            all_names = set(self._themes.keys()) | set(self._theme_factories.keys())
+            self._sorted_names_cache = sorted(all_names)
+        return list(self._sorted_names_cache)
     
     def get_current_theme(self) -> str:
         """Get current theme name"""
@@ -260,11 +300,12 @@ class ThemeManager:
             theme_name: Theme to look up.  ``None`` (default) uses the current theme.
 
         Returns:
-            Theme data dictionary, or ``{}`` if the theme is not found.
+            Theme data dictionary (direct reference, not a copy), or ``{}``
+            if the theme is not found.
         """
         if theme_name is None:
             theme_name = self.get_current_theme()
-        return self._themes.get(theme_name, {})
+        return self._resolve_theme(theme_name) or {}
 
     def is_legacy_ui(self) -> bool:
         """Whether the UI is running in legacy (classic) mode."""
@@ -293,17 +334,17 @@ class ThemeManager:
             self._use_legacy = True
             
             # Ensure themes are loaded
-            if not self._themes:
+            if not self._themes and not self._theme_factories:
                 self.load_builtin_themes()
                 self.load_custom_themes()
             
             # Check if theme exists
-            if theme_name not in self._themes:
+            if not self._has_theme(theme_name):
                 logger.error(f"Theme '{theme_name}' not found")
                 return False
             
             try:
-                theme_data = self._themes[theme_name]
+                theme_data = self._resolve_theme(theme_name)
                 
                 # Default theme = system styling
                 if theme_name == "default" and not theme_data.get('stylesheet', '').strip():
@@ -335,7 +376,7 @@ class ThemeManager:
         # If we were using legacy, we need to switch back to new
         if self._use_legacy:
             # Make sure new themes are loaded
-            if not self._themes:
+            if not self._themes and not self._theme_factories:
                 self.load_builtin_themes()
                 self.load_custom_themes()
             logger.info("Switched to new theme manager")
@@ -343,17 +384,17 @@ class ThemeManager:
         self._use_legacy = False
         
         # Ensure themes are loaded
-        if not self._themes:
+        if not self._themes and not self._theme_factories:
             self.load_builtin_themes()
             self.load_custom_themes()
         
         # Check if theme exists
-        if theme_name not in self._themes:
+        if not self._has_theme(theme_name):
             logger.error(f"Theme '{theme_name}' not found")
             return False
         
         try:
-            theme_data = self._themes[theme_name]
+            theme_data = self._resolve_theme(theme_name)
             stylesheet = theme_data.get('stylesheet', '')
             
             self._apply_stylesheet(stylesheet)
@@ -397,12 +438,12 @@ class ThemeManager:
         Returns the applied theme name.
         """
         # Ensure themes are loaded
-        if not self._themes:
+        if not self._themes and not self._theme_factories:
             self.load_builtin_themes()
             self.load_custom_themes()
         
         # Use saved theme preference if available
-        if saved_theme and saved_theme in self._themes:
+        if saved_theme and self._has_theme(saved_theme):
             theme_name = saved_theme
             logger.info(f"Applying saved theme preference: {theme_name}")
         else:
@@ -414,7 +455,7 @@ class ThemeManager:
             except Exception:
                 default_theme = ''
             
-            if default_theme and default_theme in self._themes:
+            if default_theme and self._has_theme(default_theme):
                 theme_name = default_theme
                 logger.info(f"Applying constant default theme override: {theme_name}")
             else:

@@ -750,6 +750,24 @@ class MainWindow(QMainWindow):
         # Shutdown ServiceExtension plugins
         self.plugin_controller.shutdown_service_extensions()
         
+        # PERF: Explicitly close and release dialog references to free their widget trees
+        # immediately, rather than relying on async destroyed signal lambdas.
+        for dlg_attr in ('_theme_dialog', '_plugin_dialog', '_log_viewer_dialog', '_about_dialog'):
+            dlg = getattr(self, dlg_attr, None)
+            if dlg is not None:
+                try:
+                    dlg.close()
+                except Exception:
+                    pass
+                setattr(self, dlg_attr, None)
+        
+        # PERF: Shut down the plugin registry's ThreadPoolExecutor so worker threads
+        # are joined on app exit, not just during plugin reload.
+        try:
+            self.registry._registry._shutdown_event_executor()
+        except Exception:
+            pass
+        
         event.accept()
     
     

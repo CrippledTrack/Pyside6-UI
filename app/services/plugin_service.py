@@ -312,6 +312,15 @@ class PluginService:
             raise
 
         self._discovery_complete = True
+        
+        # PERF: Clear the discovery object's accumulated list — all plugins have
+        # been registered into the registry, so these (name, class, source) tuples
+        # are dead weight.
+        try:
+            discovery.discovered_plugins.clear()
+        except (NameError, AttributeError):
+            pass  # discovery may not have been created if an early exception occurred
+        
         return registered_core, summary
     
     def _load_core_plugins_from_source(self, source: str) -> List[Type[Any]]:
