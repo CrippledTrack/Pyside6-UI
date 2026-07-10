@@ -14,7 +14,7 @@ import os
 import sys
 from typing import Optional, List, Tuple, Any, Type, Dict
 
-from ...qt_bindings import (
+from ..bindings import (
     Signal,
     Qt,
     QPoint,
@@ -24,7 +24,7 @@ from ...qt_bindings import (
     QVBoxLayout, QWidget, QTabWidget, QFrame
 )
 
-from ....plugin_system.base import BaseTabPlugin
+from .....plugin_system.base import BaseTabPlugin
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +156,7 @@ class PluginManagementDialog(QDialog):
         ext_layout.setContentsMargins(8, 4, 8, 4)
 
         self.ext_checkboxes: Dict[str, QCheckBox] = {}
-        from ....plugin_system.extensions import EXTENSION_POINTS
+        from .....plugin_system.extensions import EXTENSION_POINTS
         for ep in EXTENSION_POINTS:
             if not ep.is_user_toggleable:
                 continue
@@ -239,7 +239,7 @@ class PluginManagementDialog(QDialog):
 
     def _get_extension_types(self, plugin_class: type) -> str:
         """Get a string describing which extension interfaces the plugin implements."""
-        from ....plugin_system.extensions import EXTENSION_POINTS
+        from .....plugin_system.extensions import EXTENSION_POINTS
         extensions = []
         for ep in EXTENSION_POINTS:
             if ep.name in ("Events", "PluginProtocol"):
@@ -684,10 +684,10 @@ class PluginManagementDialog(QDialog):
         elif chosen == configure_action:
             self.configure_selected()
         elif chosen == copy_name_action:
-            from ...qt_bindings import QApplication
+            from ..bindings import QApplication
             QApplication.clipboard().setText(name)
         elif chosen == copy_info_action:
-            from ...qt_bindings import QApplication
+            from ..bindings import QApplication
             lines = [
                 f"Name: {info['name']}",
                 f"Version: {info['version']}",

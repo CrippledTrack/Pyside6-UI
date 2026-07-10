@@ -7,14 +7,14 @@ from __future__ import annotations
 
 import logging
 from typing import Optional, TYPE_CHECKING
-from ...qt_bindings import QObject, QEvent
+from ..bindings import QObject, QEvent
 
-from ....themes.theme_manager import ThemeManager
-from ...services.notification_service import NotificationService, NotificationType
+from ..themes.theme_manager import ThemeManager
+from ....services.notification_service import NotificationService, NotificationType
 from ..widgets.toast_notification import ToastNotification
 
 if TYPE_CHECKING:
-    from ...qt_bindings import QWidget
+    from ..bindings import QWidget
 
 logger = logging.getLogger(__name__)
 

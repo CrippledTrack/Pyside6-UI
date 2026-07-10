@@ -15,18 +15,18 @@ import platform
 from pathlib import Path
 from types import MappingProxyType
 from typing import Callable, Dict, List, Optional, Any, TYPE_CHECKING
-from ..app.qt_bindings import QApplication, QPalette, QColor, Qt
+from ..bindings import QApplication, QPalette, QColor, Qt
 
 # Try to get NEW_UI_ENABLED_BY_DEFAULT from platform constants first, fallback to GUI constants
 try:
-    from ..app.utils.imports import get_platforms_constants
+    from ....utils.imports import get_platforms_constants
     platform_constants = get_platforms_constants()
     NEW_UI_ENABLED_BY_DEFAULT = getattr(platform_constants, 'NEW_UI_ENABLED_BY_DEFAULT', None)
     if NEW_UI_ENABLED_BY_DEFAULT is None:
-        from ..app.constants import NEW_UI_ENABLED_BY_DEFAULT
+        from ....constants import NEW_UI_ENABLED_BY_DEFAULT
 except (ImportError, AttributeError):
     try:
-        from ..app.constants import NEW_UI_ENABLED_BY_DEFAULT
+        from ....constants import NEW_UI_ENABLED_BY_DEFAULT
     except ImportError:
         # Fallback if constants not available
         NEW_UI_ENABLED_BY_DEFAULT = True
@@ -36,7 +36,7 @@ except (ImportError, AttributeError):
 # See _BUILTIN_THEME_FACTORIES below.
 
 if TYPE_CHECKING:
-    from ..app.services.settings_service import SettingsService
+    from ....services.settings_service import SettingsService
 
 logger = logging.getLogger(__name__)
 
@@ -449,7 +449,7 @@ class ThemeManager:
         else:
             # Check for DEFAULT_THEME constant override
             try:
-                from ..app.utils.imports import get_platforms_constants
+                from ....utils.imports import get_platforms_constants
                 platform_constants = get_platforms_constants()
                 default_theme = getattr(platform_constants, 'DEFAULT_THEME', '')
             except Exception:
@@ -489,7 +489,7 @@ class ThemeManager:
     def _refresh_menus_after_stylesheet_clear(self, app: QApplication) -> None:
         """Force menu bars to re-polish after clearing stylesheet."""
         try:
-            from ..app.qt_bindings import QMenuBar
+            from ..bindings import QMenuBar
         except Exception:
             return
         

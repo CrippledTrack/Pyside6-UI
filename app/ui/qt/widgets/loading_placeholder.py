@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from ...qt_bindings import (
+from ..bindings import (
     Property,
     QEasingCurve,
     QPropertyAnimation,
@@ -47,7 +47,7 @@ class PulsingDot(QFrame):
     def _update_style(self) -> None:
         """Update the dot's visual style based on current opacity."""
         try:
-            from ...qt_bindings import QApplication, QPalette
+            from ..bindings import QApplication, QPalette
             highlight = QApplication.palette().color(QPalette.ColorRole.Highlight)
             r, g, b = highlight.red(), highlight.green(), highlight.blue()
         except Exception:
@@ -236,7 +236,7 @@ class LoadingOverlay(QFrame):
         
         # Detect theme brightness dynamically
         try:
-            from ...qt_bindings import QApplication, QPalette
+            from ..bindings import QApplication, QPalette
             window_color = QApplication.palette().color(QPalette.ColorRole.Window)
             is_dark = window_color.lightnessF() < 0.5
         except Exception:

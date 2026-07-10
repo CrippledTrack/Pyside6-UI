@@ -119,7 +119,7 @@ def build_about_info(
 ) -> str:
     """Build rich-text (Qt) for the About dialog. (Kept for compatibility)"""
     try:
-        from ..qt_bindings import get_binding_name
+        from ..ui.qt.bindings import get_binding_name
         binding_name = get_binding_name()
     except Exception:
         binding_name = "pyside6"

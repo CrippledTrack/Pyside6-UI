@@ -11,7 +11,7 @@ import logging
 from pathlib import Path
 from typing import Optional, List, Any
 
-from ...qt_bindings import (
+from ..bindings import (
     Qt,
     Signal,
     QObject,
@@ -32,8 +32,8 @@ from ...qt_bindings import (
     QPalette,
 )
 
-from ...utils.paths import logs_dir
-from ...services.logging_service import CustomFormatter, LOG_FORMAT
+from ....utils.paths import logs_dir
+from ....services.logging_service import CustomFormatter, LOG_FORMAT
 
 logger = logging.getLogger(__name__)
 
@@ -209,7 +209,7 @@ class LogViewerDialog(QDialog):
     
     def _font_exists(self, font_name: str) -> bool:
         """Check if a font exists on the system."""
-        from ...qt_bindings import QFontDatabase
+        from ..bindings import QFontDatabase
         try:
             return font_name in QFontDatabase().families()
         except Exception:

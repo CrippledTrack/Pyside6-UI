@@ -9,15 +9,16 @@ from __future__ import annotations
 
 import logging
 import platform
-from typing import Any, Dict, Optional, TYPE_CHECKING, Callable
+import uuid
+from typing import Any, Dict, Optional, TYPE_CHECKING, Callable, Set
 
 # PERF: We use TYPE_CHECKING to hide these imports from the runtime. This provides full
 # IDE autocompletion and static analysis support without paying the 100ms+ startup
 # penalty of importing these heavy UI controllers during module load.
 if TYPE_CHECKING:
-    from ..services.container import ServiceContainer
-    from ..services.interfaces import ISettingsService, IAdminService, IDaemonService, INotificationService
-    from ...themes.theme_manager import ThemeManager
+    from ...services.container import ServiceContainer
+    from ...services.interfaces import ISettingsService, IAdminService, IDaemonService, INotificationService
+    from .themes.theme_manager import ThemeManager
     from .dialogs.plugin_dialog import PluginManagementDialog
     from .dialogs.theme_dialog import ThemeDialog
     from .dialogs.log_viewer_dialog import LogViewerDialog
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
     from .controllers.shortcut_manager import ShortcutManager
     from .controllers.toast_manager import ToastManager
 
-from ..qt_bindings import (
+from .bindings import (
     QPoint,
     Qt,
     Slot,
@@ -48,13 +49,23 @@ from ..qt_bindings import (
     QIcon,
 )
 
-from ..services.interfaces import IAdminService, IDaemonService, ISettingsService
-from ..services.plugin_service import PluginService
-from ..services.tab_loader_service import TabLoaderThread
-from ..services.plugin_registry_facade import PluginRegistryFacade
+from ...services.interfaces import IAdminService, IDaemonService, ISettingsService
+from ...services.plugin_service import PluginService
+from .tab_loader import TabLoaderThread
+from ...services.plugin_registry_facade import PluginRegistryFacade
+from ....plugin_system.registry import PluginRegistry
 from .controllers.tab_controller import TabController
 from .controllers.plugin_controller import PluginController
-from ..utils.imports import get_platforms_constants
+from ...utils.imports import get_platforms_constants
+from ..abstractions.types import (
+    MenuItemHandle,
+    MenuItemSpec,
+    StatusWidgetHandle,
+    ToolbarActionHandle,
+    ToolbarActionSpec,
+    ToastType,
+)
+from ...services.notification_service import Notification, NotificationType
 
 # Import platform constants using the utility function
 constants = get_platforms_constants()
@@ -63,7 +74,7 @@ VERSION_INFO = constants.VERSION_INFO
 VERSION_NAME = constants.VERSION_NAME
 
 # Import centralized platform constant
-from ..constants import CURRENT_PLATFORM
+from ...constants import CURRENT_PLATFORM
 
 
 logger = logging.getLogger(__name__)
@@ -99,7 +110,7 @@ class MainWindow(QMainWindow):
         
         # Get ThemeManager from container if not explicitly provided
         if theme_manager is None:
-            from ...themes.theme_manager import ThemeManager
+            from .themes.theme_manager import ThemeManager
             theme_manager = container.get(ThemeManager)
         self.theme_manager = theme_manager
         
@@ -108,6 +119,10 @@ class MainWindow(QMainWindow):
         self._log_viewer_dialog: Optional["LogViewerDialog"] = None
         self._about_dialog: Optional[QDialog] = None
         self._plugin_toolbar: Optional[QToolBar] = None
+        self._menu_handle_map: Dict[MenuItemHandle, tuple] = {}
+        self._toolbar_handle_map: Dict[ToolbarActionHandle, QAction] = {}
+        self._status_handle_map: Dict[StatusWidgetHandle, QWidget] = {}
+        self._created_menu_titles: Set[str] = set()
         
         # Get services from container
         self.admin_service = container.get(IAdminService)
@@ -195,7 +210,10 @@ class MainWindow(QMainWindow):
         
         # Connect context menu directly to tab_controller
         self.tab_widget.customContextMenuRequested.connect(self.tab_controller.show_tab_context_menu)
-        
+
+        registry = self.container.get(PluginRegistry)
+        registry.subscribe_lifecycle(self.tab_controller)
+
         # Create plugin controller - now accepts container directly
         self.plugin_controller = PluginController(
             self.container,
@@ -219,7 +237,7 @@ class MainWindow(QMainWindow):
         
         # Create status bar manager - now passes dependencies directly
         from .controllers.status_bar_manager import StatusBarManager
-        from ..services.interfaces import INotificationService
+        from ...services.interfaces import INotificationService
         self.status_bar_manager = StatusBarManager(
             status_bar=status_bar, 
             notification_service=self.container.get(INotificationService),
@@ -320,7 +338,7 @@ class MainWindow(QMainWindow):
         
         # Fix for table header resizing issues (only in new UI)
         if self.settings_service and self.settings_service.get_new_ui_enabled():
-            from ..qt_bindings import QTableView, QHeaderView, QTreeWidget
+            from .bindings import QTableView, QHeaderView, QTreeWidget
             for i in range(self.tab_widget.count()):
                 widget = self.tab_widget.widget(i)
                 # Recursively find all QTableViews and QTreeWidgets
@@ -389,7 +407,7 @@ class MainWindow(QMainWindow):
     
     def get_version_details(self) -> Dict[str, str]:
         """Get version details."""
-        from ..utils.display_utils import build_version_details
+        from ...utils.display_utils import build_version_details
         return build_version_details(VERSION_INFO, CURRENT_PLATFORM)
     
     def prompt_for_admin_operation(self, operation_description: str) -> bool:
@@ -401,7 +419,7 @@ class MainWindow(QMainWindow):
         Returns:
             True if admin is available, False otherwise
         """
-        return self.admin_service.prompt_for_admin_operation(operation_description, self)
+        return self.admin_service.prompt_for_admin_operation(operation_description)
     
     def open_plugin_management_dialog(self) -> None:
         """Open the plugin management dialog (non-modal)."""
@@ -508,7 +526,7 @@ class MainWindow(QMainWindow):
     
     def show_about_dialog(self) -> None:
         """Show the About dialog without blocking the main window."""
-        from ..constants import GUI_API_VERSION as GUI_VERSION, VERSION_NAME as DEFAULT_VERSION_NAME
+        from ...constants import GUI_API_VERSION as GUI_VERSION, VERSION_NAME as DEFAULT_VERSION_NAME
         from .dialogs import create_about_dialog
         
         if self._about_dialog and self._about_dialog.isVisible():
@@ -634,7 +652,7 @@ class MainWindow(QMainWindow):
             enabled: True if cross-platform tabs should be shown
         """
         # Human-readable names for known platforms, used in toast messages.
-        from ..utils.display_utils import get_other_platforms_text
+        from ...utils.display_utils import get_other_platforms_text
         other_text = get_other_platforms_text()
         
         # Reload plugins with the new cross-platform setting applied.
@@ -675,7 +693,7 @@ class MainWindow(QMainWindow):
     def setup_toast_manager(self) -> None:
         """Setup the toast notification manager."""
         from .controllers.toast_manager import ToastManager
-        from ..services.interfaces import INotificationService
+        from ...services.interfaces import INotificationService
         self.toast_manager = ToastManager(
             theme_manager=self.theme_manager,
             notification_service=self.container.get(INotificationService),
@@ -787,7 +805,7 @@ class MainWindow(QMainWindow):
             self.status_bar_manager.clear_status()
             
     # =========================================================================
-    # IMainWindowDelegate Implementation
+    # Internal Qt menu helpers (used by IMainWindowShell)
     # =========================================================================
 
     def add_menu_action(
@@ -802,7 +820,7 @@ class MainWindow(QMainWindow):
         separator_after: bool = False
     ) -> tuple[QAction, QMenu, bool, Optional[QAction], Optional[QAction]]:
         """Add a menu action to a top-level menu."""
-        from ..qt_bindings import is_valid as _qt_is_valid
+        from .bindings import is_valid as _qt_is_valid
         
         menu_bar = self.menuBar()
         target_menu = None
@@ -844,14 +862,14 @@ class MainWindow(QMainWindow):
 
     def remove_menu_action(self, action: QAction, target_menu: QMenu) -> None:
         """Remove a menu action from a target menu."""
-        from ..qt_bindings import is_valid as _qt_is_valid
+        from .bindings import is_valid as _qt_is_valid
         if target_menu and _qt_is_valid(target_menu) and _qt_is_valid(action):
             target_menu.removeAction(action)
             action.deleteLater()
 
-    def remove_menu_if_empty(self, menu: QMenu) -> None:
+    def _remove_qmenu_if_empty(self, menu: QMenu) -> None:
         """Remove a top-level menu if it contains no actions."""
-        from ..qt_bindings import is_valid as _qt_is_valid
+        from .bindings import is_valid as _qt_is_valid
         if not _qt_is_valid(menu):
             return
         if len(menu.actions()) == 0:
@@ -869,31 +887,15 @@ class MainWindow(QMainWindow):
                         menu.deleteLater()
                     break
 
-    def add_status_widget_for_plugin(self, plugin_name: str, plugin_instance: Any) -> QWidget:
-        """Create and add a status widget for a plugin."""
-        widget = plugin_instance.create_status_widget(self.statusBar())
-        if widget:
-            self.statusBar().addPermanentWidget(widget)
-        return widget
-
-    def remove_status_widget(self, widget: QWidget) -> None:
-        """Remove a status widget from the status bar."""
-        from ..qt_bindings import is_valid as _qt_is_valid
-        if widget and _qt_is_valid(widget):
-            self.statusBar().removeWidget(widget)
-            widget.hide()
-            widget.deleteLater()
-
-    def add_toolbar_action(
+    def _add_toolbar_action_qt(
         self,
         label: str,
         callback: Callable[[], None],
         icon: Optional[str] = None,
         tooltip: Optional[str] = None,
         checkable: bool = False,
-        checked: bool = False
+        checked: bool = False,
     ) -> QAction:
-        """Add a toolbar action to the plugin toolbar."""
         toolbar = self._get_or_create_plugin_toolbar()
         action = QAction(label, self)
         action.triggered.connect(callback)
@@ -909,26 +911,125 @@ class MainWindow(QMainWindow):
             toolbar.show()
         return action
 
-    def remove_toolbar_action(self, action: QAction) -> None:
-        """Remove a toolbar action from the plugin toolbar."""
-        from ..qt_bindings import is_valid as _qt_is_valid
+    def _remove_toolbar_action_qt(self, action: QAction) -> None:
+        from .bindings import is_valid as _qt_is_valid
         if self._plugin_toolbar and _qt_is_valid(action):
             self._plugin_toolbar.removeAction(action)
             action.deleteLater()
             if not self._plugin_toolbar.actions():
                 self._plugin_toolbar.hide()
 
+    def _remove_status_widget_qt(self, widget: QWidget) -> None:
+        from .bindings import is_valid as _qt_is_valid
+        if widget and _qt_is_valid(widget):
+            self.statusBar().removeWidget(widget)
+            widget.hide()
+            widget.deleteLater()
+
     def has_plugin_tab(self, plugin_name: str) -> bool:
-        """Check if a plugin tab is currently loaded."""
         return plugin_name in self.tab_controller.loaded_tabs
 
     def add_plugin_tab(self, plugin_name: str, plugin_class: type) -> None:
-        """Add a tab for a plugin."""
         self.tab_controller.add_tab(plugin_name, plugin_class)
 
     def remove_plugin_tab(self, plugin_name: str) -> None:
-        """Remove a tab for a plugin."""
         self.tab_controller.remove_tab(plugin_name)
+
+    # IMainWindowShell — toast, notifications, handle-based chrome
+
+    def show_toast(
+        self,
+        message: str,
+        notification_type: ToastType = ToastType.INFO,
+        duration: Optional[int] = None,
+    ) -> None:
+        if self.toast_manager:
+            method = getattr(self.toast_manager, f"show_{notification_type.value}", None)
+            if callable(method):
+                if duration is not None:
+                    method(message, duration)
+                else:
+                    method(message)
+            else:
+                self.toast_manager.show_toast(message, notification_type.value, duration or 3000)
+
+    def on_notification_added(self, notification: Notification) -> None:
+        toast_type = ToastType(notification.type.value)
+        self.show_toast(notification.message, toast_type)
+        if self.status_bar_manager and self.status_bar_manager._notification_widget:
+            self.status_bar_manager._notification_widget.on_notification_added(notification)
+
+    def on_unread_count_changed(self, count: int) -> None:
+        if self.status_bar_manager:
+            self.status_bar_manager._update_unread_count(count)
+
+    def add_menu_item(self, spec: MenuItemSpec) -> MenuItemHandle:
+        handle = MenuItemHandle(str(uuid.uuid4()))
+        action, target_menu, was_created, sep_before, sep_after = self.add_menu_action(
+            menu_title=spec.menu_title,
+            label=spec.label,
+            callback=spec.callback,
+            shortcut=spec.shortcut,
+            icon=spec.icon,
+            enabled=spec.enabled,
+            separator_before=spec.separator_before,
+            separator_after=spec.separator_after,
+        )
+        self._menu_handle_map[handle] = (action, target_menu, sep_before, sep_after)
+        if was_created:
+            self._created_menu_titles.add(spec.menu_title)
+        return handle
+
+    def remove_menu_item(self, handle: MenuItemHandle) -> None:
+        entry = self._menu_handle_map.pop(handle, None)
+        if not entry:
+            return
+        action, target_menu, sep_before, sep_after = entry
+        for item in (sep_before, action, sep_after):
+            if item is not None:
+                self.remove_menu_action(item, target_menu)
+
+    def remove_menu_if_empty(self, menu_title: str) -> None:
+        menu_bar = self.menuBar()
+        for action in menu_bar.actions():
+            try:
+                menu = action.menu()
+            except Exception:
+                continue
+            if action.text().replace("&", "") == menu_title:
+                self._remove_qmenu_if_empty(menu)
+                break
+
+    def add_status_widget_for_plugin(self, plugin_name: str, plugin_instance: Any) -> StatusWidgetHandle:
+        widget = plugin_instance.create_status_widget(self.statusBar())
+        handle = StatusWidgetHandle(str(uuid.uuid4()))
+        if widget:
+            self.statusBar().addPermanentWidget(widget)
+            self._status_handle_map[handle] = widget
+        return handle
+
+    def remove_status_widget(self, handle: StatusWidgetHandle) -> None:
+        widget = self._status_handle_map.pop(handle, None)
+        if widget is not None:
+            self._remove_status_widget_qt(widget)
+
+    def add_toolbar_action(self, spec: ToolbarActionSpec) -> ToolbarActionHandle:
+        handle = ToolbarActionHandle(str(uuid.uuid4()))
+        action = self._add_toolbar_action_qt(
+            label=spec.label,
+            callback=spec.callback,
+            icon=spec.icon,
+            tooltip=spec.tooltip,
+            checkable=spec.checkable,
+            checked=spec.checked,
+        )
+        self._toolbar_handle_map[handle] = action
+        return handle
+
+    def remove_toolbar_action(self, handle: ToolbarActionHandle) -> None:
+        action = self._toolbar_handle_map.pop(handle, None)
+        if action is not None:
+            self._remove_toolbar_action_qt(action)
 
     def _get_or_create_plugin_toolbar(self) -> QToolBar:
         """Get or create the plugin toolbar."""

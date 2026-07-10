@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from typing import Dict, Callable, Optional
-from ...qt_bindings import QObject, Signal, QShortcut, QKeySequence, QWidget
+from ..bindings import QObject, Signal, QShortcut, QKeySequence, QWidget
 
 logger = logging.getLogger(__name__)
 

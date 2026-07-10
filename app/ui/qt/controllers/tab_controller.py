@@ -10,14 +10,14 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional, Callable, TYPE_CHECKING, List
 
-from ...qt_bindings import Signal, QObject, QTabWidget, QWidget, QMenu, QAction, QKeySequence, QMessageBox, QPoint
+from ..bindings import Signal, QObject, QTabWidget, QWidget, QMenu, QAction, QKeySequence, QMessageBox, QPoint
 
 if TYPE_CHECKING:
-    from ...services.container import ServiceContainer
+    from ....services.container import ServiceContainer
 
-from ...services.plugin_registry_facade import PluginRegistryFacade
-from ...services.interfaces import IAdminService, IDaemonService
-from ...services.plugin_service import PluginService
+from ....services.plugin_registry_facade import PluginRegistryFacade
+from ....services.interfaces import IAdminService, IDaemonService
+from ....services.plugin_service import PluginService
 
 from ..widgets.admin_required_placeholder import AdminRequiredPlaceholder
 from ..widgets.error_placeholder import ErrorPlaceholder
@@ -395,6 +395,24 @@ class TabController(QObject):
         self.loaded_tabs.clear()
         self._previous_tab_index = -1
         logger.info("Cleared all loaded tab state")
+
+    def on_plugins_unloaded(self, plugin_names: List[str]) -> None:
+        """IPluginLifecycle: clear tab state when plugins are unloaded."""
+        self.clear_tabs_for_plugins(plugin_names)
+
+    def on_plugins_discovered(self, plugin_names: List[str]) -> None:
+        """IPluginLifecycle: no action needed on discovery."""
+        pass
+
+    def on_plugin_state_changed(self, plugin_name: str, enabled: bool) -> None:
+        """IPluginLifecycle: no action needed here (handled by plugin controller)."""
+        pass
+
+    def clear_tabs_for_plugins(self, plugin_names: List[str]) -> None:
+        """Remove tabs and clear stale references for unloaded plugins."""
+        for name in list(plugin_names):
+            if name in self.loaded_tabs:
+                self.remove_tab(name)
 
     def clear_all_tabs(self) -> None:
         """Clear all tabs, closing and deleting their widgets and resetting state."""

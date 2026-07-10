@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from ...qt_bindings import Qt, QFont, QSizePolicy, QLabel, QVBoxLayout, QWidget, QScrollArea, QFrame
+from ..bindings import Qt, QFont, QSizePolicy, QLabel, QVBoxLayout, QWidget, QScrollArea, QFrame
 
 
 class ErrorPlaceholder(QWidget):
@@ -78,8 +78,8 @@ class ErrorPlaceholder(QWidget):
     def _apply_styling(self) -> None:
         """Apply theme-aware styling to the error widget."""
         try:
-            from ....themes.theme_manager import ThemeManager
-            from ...qt_bindings import QApplication, QPalette
+            from ..themes.theme_manager import ThemeManager
+            from ..bindings import QApplication, QPalette
             highlight_color = QApplication.palette().color(QPalette.ColorRole.Highlight).name()
             error_color = ThemeManager.adjust_notification_color(highlight_color, "error")
         except Exception:

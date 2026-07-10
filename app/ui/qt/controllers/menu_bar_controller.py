@@ -10,11 +10,11 @@ from __future__ import annotations
 import logging
 from typing import Optional, Callable, TYPE_CHECKING, Any
 
-from ...qt_bindings import QObject, Signal, QAction, QMenuBar, QMenu, QWidget
+from ..bindings import QObject, Signal, QAction, QMenuBar, QMenu, QWidget
 
-from ...constants import CURRENT_PLATFORM
+from ....constants import CURRENT_PLATFORM
 
-from ...services.interfaces import IAdminService, IDaemonService, ISettingsService
+from ....services.interfaces import IAdminService, IDaemonService, ISettingsService
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,7 @@ class MenuBarController(QObject):
         settings_menu = QMenu("Settings", self.parent_widget)
         self.menu_bar.addMenu(settings_menu)
         
-        from ...utils.imports import get_platforms_constants
+        from ....utils.imports import get_platforms_constants
         constants = get_platforms_constants()
         if not getattr(constants, "SINGLE_PLUGIN_MODE", False):
             self.manage_plugins_action = QAction("Manage Plugins...", self.parent_widget)
@@ -156,7 +156,7 @@ class MenuBarController(QObject):
         force_show_for_dev = False
         try:
             # In dev mode, always show the Admin menu (temporary override)
-            from ...utils.admin import is_dev_mode
+            from ....utils.admin import is_dev_mode
             dev_mode_active = bool(is_dev_mode())
 
             if self.settings_service and self.settings_service.get_hide_admin_menu() and not dev_mode_active:
@@ -192,7 +192,7 @@ class MenuBarController(QObject):
                 is_running = self.daemon_service and self.daemon_service.is_available()
                 
                 # Check which daemon is active
-                from ...utils.imports import get_platforms_constants
+                from ....utils.imports import get_platforms_constants
                 use_pipe_daemon = getattr(get_platforms_constants(), 'USE_PIPE_DAEMON', False)
                 
                 if is_running:
@@ -241,7 +241,7 @@ class MenuBarController(QObject):
         Only shown when the application is started with -dev or --dev flag.
         """
         try:
-            from ...utils.admin import is_dev_mode, set_show_all_platforms, is_show_all_platforms
+            from ....utils.admin import is_dev_mode, set_show_all_platforms, is_show_all_platforms
         except ImportError:
             logger.debug("Dev mode utilities not available, skipping dev menu")
             return
@@ -249,7 +249,7 @@ class MenuBarController(QObject):
         if not is_dev_mode():
             return
             
-        from ...utils.imports import get_platforms_constants
+        from ....utils.imports import get_platforms_constants
         constants = get_platforms_constants()
         if getattr(constants, "SINGLE_PLUGIN_MODE", False):
             logger.debug("Single plugin mode active, skipping dev menu")
@@ -265,7 +265,7 @@ class MenuBarController(QObject):
         self.show_all_platforms_action.setChecked(is_show_all_platforms())
         
         # Build a human-readable list of other platforms for the tooltip
-        from ...utils.display_utils import get_other_platforms_text
+        from ....utils.display_utils import get_other_platforms_text
         other_text = get_other_platforms_text()
         
         self.show_all_platforms_action.setToolTip(
@@ -285,7 +285,7 @@ class MenuBarController(QObject):
             checked: True if the action is checked, False otherwise
         """
         try:
-            from ...utils.admin import set_show_all_platforms
+            from ....utils.admin import set_show_all_platforms
             set_show_all_platforms(checked)
             self.cross_platform_toggled.emit(checked)
             logger.info(f"Show all platforms set to: {checked}")
@@ -375,7 +375,7 @@ class MenuBarController(QObject):
         
         if CURRENT_PLATFORM == "linux":
             if self.daemon_service and self.daemon_service.is_available():
-                from ...utils.imports import get_platforms_constants
+                from ....utils.imports import get_platforms_constants
                 use_pipe_daemon = getattr(get_platforms_constants(), 'USE_PIPE_DAEMON', False)
                 if use_pipe_daemon:
                     self.restart_admin_action.setText("Pipe Daemon Running (Beta)")

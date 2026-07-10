@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from typing import Optional, TYPE_CHECKING
-from ...qt_bindings import (
+from ..bindings import (
     QWidget,
     QLabel,
     QVBoxLayout,
@@ -29,7 +29,7 @@ from ...qt_bindings import (
 )
 
 if TYPE_CHECKING:
-    from ....themes.theme_manager import ThemeManager
+    from ..themes.theme_manager import ThemeManager
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ class ToastNotification(QFrame):
     
     def _font_exists(self, font_name: str) -> bool:
         """Check if a font exists on the system."""
-        from ...qt_bindings import QFontDatabase
+        from ..bindings import QFontDatabase
         try:
             return font_name in QFontDatabase().families()
         except TypeError:
@@ -188,7 +188,7 @@ class ToastNotification(QFrame):
         text_color = palette.get('window_text', '#ffffff' if is_dark else '#000000')
         highlight_color = palette.get('highlight', '#0078d4')
         
-        from ....themes.theme_manager import ThemeManager
+        from ..themes.theme_manager import ThemeManager
         adjusted_hex = ThemeManager.adjust_notification_color(highlight_color, notification_type)
         r, g, b = ThemeManager.parse_hex_color(adjusted_hex)
         
@@ -253,14 +253,14 @@ class ToastNotification(QFrame):
     
     def show_toast(self, parent_widget: Optional[QWidget] = None, target_y: int = 40):
         """Show the toast notification with animation."""
-        from ...qt_bindings import QPoint
+        from ..bindings import QPoint
         
         target_parent = parent_widget or self.parent_window
         
         if target_parent:
             x = target_parent.width() - self.width() - 15
         else:
-            from ...qt_bindings import QApplication
+            from ..bindings import QApplication
             screen = QApplication.primaryScreen().geometry()
             x = screen.width() - self.width() - 15
             

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from typing import Optional, Dict, List, Any, Callable, TYPE_CHECKING
-from ..app.qt_bindings import (
+from ..app.ui.qt.bindings import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QTextEdit, QCheckBox, QSpinBox, QFormLayout, QMessageBox,
     QTimer

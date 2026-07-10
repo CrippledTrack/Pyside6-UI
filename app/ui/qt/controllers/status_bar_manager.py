@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Optional, TYPE_CHECKING
 
-from ...qt_bindings import (
+from ..bindings import (
     QTimer,
     QObject,
     Qt,
@@ -22,8 +22,8 @@ from ...qt_bindings import (
     QLabel,
 )
 
-from ....themes.theme_manager import ThemeManager
-from ...services.notification_service import NotificationService
+from ..themes.theme_manager import ThemeManager
+from ....services.notification_service import NotificationService
 
 if TYPE_CHECKING:
     from ..widgets.notification_center import NotificationCenterWidget
@@ -79,7 +79,7 @@ class StatusBarManager(QObject):
         self.status_bar.addPermanentWidget(container)
         
         # Connect signals
-        self.notification_service.unread_count_changed.connect(self._update_unread_count)
+        self.notification_service.subscribe_unread_changed(self._update_unread_count)
         
         # Initial update
         self._update_unread_count(self.notification_service.get_unread_count())

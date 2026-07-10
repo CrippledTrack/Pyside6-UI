@@ -53,5 +53,9 @@ class PluginRegistryFacade:
         """Get ServiceExtension plugin classes."""
         return self._registry.get_service_extensions(enabled_only=enabled_only)
 
+    def subscribe_lifecycle(self, subscriber: Any) -> None:
+        """Register a plugin lifecycle subscriber."""
+        self._registry.subscribe_lifecycle(subscriber)
+
 
 __all__ = ["PluginRegistryFacade"]

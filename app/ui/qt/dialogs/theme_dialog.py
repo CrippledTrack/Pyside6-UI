@@ -11,10 +11,10 @@ import json
 import logging
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
-from ....themes.theme_manager import ThemeManager, create_palette_from_data
-from ...services.settings_service import SettingsService
+from ..themes.theme_manager import ThemeManager, create_palette_from_data
+from ....services.settings_service import SettingsService
 
-from ...qt_bindings import (
+from ..bindings import (
     Qt,
     Signal,
     QPoint,
@@ -25,8 +25,8 @@ from ...qt_bindings import (
 )
 
 if TYPE_CHECKING:
-    from ...services.interfaces import ISettingsService
-from ...qt_bindings import (
+    from ....services.interfaces import ISettingsService
+from ..bindings import (
     QCheckBox,
     QComboBox,
     QDialog,
@@ -101,7 +101,7 @@ class ThemePreviewWidget(QFrame):
             # Use classic stylesheet when the app is in legacy/classic UI mode,
             # matching what ThemeManager.apply_theme() does for the full application.
             if self._theme_manager is not None and self._theme_manager.is_legacy_ui():
-                from ....themes.classic_theme_manager import get_classic_stylesheet
+                from ..themes.classic_theme_manager import get_classic_stylesheet
                 stylesheet = get_classic_stylesheet(preview_data)
             else:
                 stylesheet = preview_data.get('stylesheet', '')

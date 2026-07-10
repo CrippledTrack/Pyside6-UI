@@ -10,7 +10,7 @@ from abc import abstractmethod
 from typing import Optional, List, Dict, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..app.qt_bindings import QWidget
+    from ..app.ui.qt.bindings import QWidget
     from ..app.services.container import ServiceContainer
     from ..app.services.settings_service import SettingsService
     from .registry import PluginRegistry
@@ -143,7 +143,7 @@ class BaseTabPlugin:
         Scans both the plugin instance and its associated tab widget (self._widget) for
         active QTimers, QThreads, and QWidgets that need to be stopped or destroyed.
         """
-        from ..app.qt_bindings import QTimer, QThread, QWidget
+        from ..app.ui.qt.bindings import QTimer, QThread, QWidget
 
         try:
             # Scan the plugin instance and the tab widget's attributes,

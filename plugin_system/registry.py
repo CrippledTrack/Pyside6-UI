@@ -169,17 +169,53 @@ class PluginRegistry:
         
         # Rejected plugins tracking
         self._rejected_plugins: Dict[str, Tuple[Type[Any], str]] = {}
+
+        # Lifecycle subscribers (IPluginLifecycle)
+        self._lifecycle_subscribers: List[Any] = []
     
     def set_container(self, container: IServiceContainer | ServiceContainer) -> None:
-        """Set the service container for plugin instantiation.
-        
-        Args:
-            container: The application's service container
-        """
+        """Set the service container for plugin instantiation."""
         with self._lock:
             self._container = container
-            # Clear instance cache when container changes
+            unloaded = list(self._plugin_instances.keys())
             self._plugin_instances.clear()
+            if unloaded:
+                self._notify_plugins_unloaded(unloaded)
+
+    def subscribe_lifecycle(self, subscriber: Any) -> None:
+        """Register a lifecycle event subscriber."""
+        if subscriber not in self._lifecycle_subscribers:
+            self._lifecycle_subscribers.append(subscriber)
+
+    def unsubscribe_lifecycle(self, subscriber: Any) -> None:
+        """Remove a lifecycle subscriber."""
+        if subscriber in self._lifecycle_subscribers:
+            self._lifecycle_subscribers.remove(subscriber)
+
+    def _notify_plugins_unloaded(self, plugin_names: List[str]) -> None:
+        if not plugin_names:
+            return
+        for subscriber in list(self._lifecycle_subscribers):
+            try:
+                subscriber.on_plugins_unloaded(plugin_names)
+            except Exception as e:
+                logger.error(f"Lifecycle subscriber error on_plugins_unloaded: {e}")
+
+    def _notify_plugins_discovered(self, plugin_names: List[str]) -> None:
+        if not plugin_names:
+            return
+        for subscriber in list(self._lifecycle_subscribers):
+            try:
+                subscriber.on_plugins_discovered(plugin_names)
+            except Exception as e:
+                logger.error(f"Lifecycle subscriber error on_plugins_discovered: {e}")
+
+    def _notify_plugin_state_changed(self, plugin_name: str, enabled: bool) -> None:
+        for subscriber in list(self._lifecycle_subscribers):
+            try:
+                subscriber.on_plugin_state_changed(plugin_name, enabled)
+            except Exception as e:
+                logger.error(f"Lifecycle subscriber error on_plugin_state_changed: {e}")
 
     def register_plugin(self, plugin_class: Type[Any], is_core: bool = False) -> None:
         """Register a plugin class in the registry.
@@ -430,6 +466,8 @@ class PluginRegistry:
             self._external_plugins[plugin_name] = plugin_class
         
         self._categorize_plugin_by_interface(plugin_name, plugin_class)
+        self._notify_plugins_discovered([plugin_name])
+        self._notify_plugins_discovered([plugin_name])
     
     def _categorize_plugin_by_interface(self, plugin_name: str, plugin_class: Type[Any]) -> None:
         """Categorize a plugin by which interfaces it implements."""
@@ -477,7 +515,7 @@ class PluginRegistry:
     def clear(self) -> None:
         """Clear all registered plugins and cached instances."""
         with self._lock:
-            # Clean up all cached instances before clearing
+            unloaded_names = list(self._plugin_instances.keys())
             for name, instance in list(self._plugin_instances.items()):
                 if hasattr(instance, '_cleanup_plugin_resources'):
                     try:
@@ -495,6 +533,8 @@ class PluginRegistry:
                 category_map.clear()
             self._rejected_plugins.clear()
             self._shutdown_event_executor()
+            if unloaded_names:
+                self._notify_plugins_unloaded(unloaded_names)
 
     def _get_event_executor(self) -> ThreadPoolExecutor:
         """Get/create the bounded executor used for async event delivery."""
@@ -556,6 +596,7 @@ class PluginRegistry:
     def disable_plugin(self, name: str) -> None:
         """Disable a plugin by name."""
         self._disabled_plugins.add(name)
+        self._notify_plugin_state_changed(name, False)
 
     def unload_plugin_instance(self, name: str) -> None:
         """Remove a plugin instance from the cache and trigger its framework cleanup."""
@@ -568,10 +609,12 @@ class PluginRegistry:
                     except Exception as e:
                         logger.error(f"Error cleaning up resources during unload of '{name}': {e}")
                 logger.debug(f"Unloaded plugin instance: {name}")
+                self._notify_plugins_unloaded([name])
 
     def enable_plugin(self, name: str) -> None:
         """Enable a plugin by name."""
         self._disabled_plugins.discard(name)
+        self._notify_plugin_state_changed(name, True)
 
     def is_enabled(self, name: str) -> bool:
         """Check if a plugin is enabled."""
@@ -702,16 +745,11 @@ class PluginRegistry:
                         run_on_ui = getattr(cb, "_run_on_ui_thread", False) or getattr(getattr(cb, "__func__", None), "_run_on_ui_thread", False)
                         
                         if run_on_ui:
-                            # CRITICAL: We check if there is an active Qt application loop running.
-                            # If a Qt event loop is active, we MUST marshal the execution back onto the Qt Main Thread.
-                            from ..app.qt_bindings import QtCore
-                            app = QtCore.QCoreApplication.instance()
-                            if app is not None:
-                                # Route execution through our Qt main-thread event dispatcher.
-                                QtEventDispatcher.get_instance().dispatch(cb, data)
+                            event_loop = self._get_ui_event_loop()
+                            if event_loop is not None:
+                                event_loop.invoke_on_main(cb, data)
                                 return
-                                
-                        # Otherwise run directly in background thread (Option C / default fallback)
+
                         cb(data)
                     except Exception as e:
                         logger.error(f"Error delivering async event '{ev}' to '{name}': {e}")
@@ -722,60 +760,15 @@ class PluginRegistry:
 
         return futures
 
-
-class QtEventDispatcher:
-    """Helper to route arbitrary background thread callbacks onto the Qt Main Thread.
-
-    WHY THIS IS NEEDED:
-    Qt's UI system is not thread-safe. If any background thread tries to read/write UI widgets, 
-    it causes segmentation faults or undefined behavior. To prevent this, this class uses Qt's 
-    internal signal/slot event delivery system. When a signal is emitted across thread boundaries, 
-    Qt automatically routes it via a QueuedConnection, executing the connected slot (our callback) 
-    safely on the thread that created the QObject (which is the Main Thread where this dispatcher 
-    is initialized).
-    """
-    _instance = None
-
-    def __init__(self) -> None:
-        from ..app.qt_bindings import QtCore
-        
-        # We define a helper QObject subclass locally to declare a Qt Signal.
-        # This QObject is created on the main thread (during get_instance() lazy initialization).
-        class _DispatcherQObject(QtCore.QObject):
-            # The signal carries (callable_function, arguments_tuple, keyword_arguments_dict)
-            dispatch_signal = QtCore.Signal(object, tuple, dict)
-
-            def __init__(self) -> None:
-                super().__init__()
-                # The connection is made on the main thread.
-                self.dispatch_signal.connect(self._execute)
-
-            def _execute(self, func: Callable, args: tuple, kwargs: dict) -> None:
-                # This method executes in the event loop of the Main Thread.
-                try:
-                    func(*args, **kwargs)
-                except Exception as e:
-                    logging.getLogger(__name__).error(f"Error executing dispatched callback on Main Thread: {e}", exc_info=True)
-
-        self._qobject = _DispatcherQObject()
-
-    @classmethod
-    def get_instance(cls) -> "QtEventDispatcher":
-        """Get the singleton event dispatcher instance.
-
-        MUST be called for the first time from the Main GUI Thread (e.g., during app startup)
-        to guarantee that the underlying QObject is assigned to the Main Thread event loop.
-        """
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
-
-    def dispatch(self, func: Callable, *args: Any, **kwargs: Any) -> None:
-        """Post a callback to be executed on the Qt Main Thread.
-
-        Can be safely called from any background thread.
-        """
-        self._qobject.dispatch_signal.emit(func, args, kwargs)
+    def _get_ui_event_loop(self) -> Any:
+        """Get IUIEventLoop from container if registered."""
+        if self._container is None:
+            return None
+        try:
+            from ..app.ui.abstractions.event_loop import IUIEventLoop
+            return self._container.get(IUIEventLoop)
+        except Exception:
+            return None
 
 
 __all__ = ['PluginRegistry']

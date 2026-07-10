@@ -14,7 +14,7 @@ from typing import (
 )
 
 if TYPE_CHECKING:
-    from ..app.qt_bindings import QWidget
+    from ..app.ui.qt.bindings import QWidget
     from .types import MenuItemDefinition, ToolbarAction
     from ..app.services.container import ServiceContainer
 
@@ -204,9 +204,26 @@ class IServiceContainer(Protocol):
 @runtime_checkable
 class ISettingsService(Protocol):
     """Protocol for settings service to decouple plugin system from app settings."""
-    
+
     def is_extension_enabled(self, plugin_name: str, extension_type: str) -> bool:
         """Check if a specific extension type is enabled for a plugin."""
+        ...
+
+
+@runtime_checkable
+class IPluginLifecycle(Protocol):
+    """Toolkit-neutral plugin lifecycle events."""
+
+    def on_plugins_unloaded(self, plugin_names: List[str]) -> None:
+        """Called when plugin instances are unloaded and resources cleaned up."""
+        ...
+
+    def on_plugins_discovered(self, plugin_names: List[str]) -> None:
+        """Called when new plugins are discovered and registered."""
+        ...
+
+    def on_plugin_state_changed(self, plugin_name: str, enabled: bool) -> None:
+        """Called when a plugin is enabled or disabled."""
         ...
 
 
@@ -222,4 +239,5 @@ __all__ = [
     'SettingsExtension',
     'IServiceContainer',
     'ISettingsService',
+    'IPluginLifecycle',
 ]

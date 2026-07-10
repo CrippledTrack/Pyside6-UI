@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
 
-from ...qt_bindings import (
+from ..bindings import (
     Qt,
     QColor,
     QWidget,
@@ -19,12 +19,12 @@ from ...qt_bindings import (
 )
 
 if TYPE_CHECKING:
-    from ...services.notification_service import NotificationService, Notification
-    from ....themes.theme_manager import ThemeManager
+    from ....services.notification_service import NotificationService, Notification
+    from ..themes.theme_manager import ThemeManager
 
-from ...constants import CURRENT_PLATFORM
-from ...services.notification_service import NotificationType
-from ....themes.theme_manager import ThemeManager
+from ....constants import CURRENT_PLATFORM
+from ....services.notification_service import NotificationType
+from ..themes.theme_manager import ThemeManager
 
 
 class NotificationItemWidget(QFrame):
@@ -160,7 +160,7 @@ class NotificationCenterWidget(QWidget):
                 self.setFixedHeight(420)  # 400 + shadow margin
                 self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
                 
-                from ...qt_bindings import QGraphicsDropShadowEffect
+                from ..bindings import QGraphicsDropShadowEffect
                 shadow = QGraphicsDropShadowEffect(self)
                 shadow.setBlurRadius(15)
                 shadow.setOffset(0, 3)
@@ -176,7 +176,7 @@ class NotificationCenterWidget(QWidget):
         self.setup_ui()
         
         # Connect signals
-        self.notification_service.notification_added.connect(self.on_notification_added)
+        self._unsub_added = self.notification_service.subscribe_added(self.on_notification_added)
         
     def setup_ui(self):
         layout = QVBoxLayout(self)
@@ -391,7 +391,7 @@ class NotificationCenterWidget(QWidget):
                     self.setFixedHeight(420)
                     self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
                     
-                    from ...qt_bindings import QGraphicsDropShadowEffect
+                    from ..bindings import QGraphicsDropShadowEffect
                     shadow = QGraphicsDropShadowEffect(self)
                     shadow.setBlurRadius(15)
                     shadow.setOffset(0, 3)

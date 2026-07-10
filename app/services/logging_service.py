@@ -53,28 +53,10 @@ class CustomFormatter(logging.Formatter):
         if not hasattr(record, "threadName"):
             record.threadName = "MainThread"
         elif record.threadName and record.threadName.startswith("Dummy-"):
-            # Replace Qt internal thread names with more descriptive names
-            # This handles cases where Qt creates internal threads with "Dummy-X" names
             current_thread = threading.current_thread()
-            
-            # Retrieve the QThread name if available
-            qthread_name = None
-            try:
-                # Safely check if the qt_bindings module has been imported
-                if any(name.endswith('.qt_bindings') for name in sys.modules):
-                    from ..qt_bindings import QThread
-                    qthread = QThread.currentThread()
-                    if qthread and qthread.objectName():
-                        qthread_name = qthread.objectName()
-            except Exception:
-                pass
-
-            if qthread_name:
-                record.threadName = qthread_name
-            elif hasattr(current_thread, 'objectName') and current_thread.objectName():
+            if hasattr(current_thread, 'objectName') and current_thread.objectName():
                 record.threadName = current_thread.objectName()
             else:
-                # Create a meaningful name based on the logger context
                 logger_name = getattr(record, 'name', '')
                 if 'plugin' in logger_name.lower():
                     record.threadName = "PluginLoader"

@@ -19,7 +19,7 @@ class AppLifecycleService:
 
     def configure_qt_application(self, app, version_name: str, gui_api_version: str) -> None:
         """Configure Qt application style, fonts, and Windows AppUserModelID."""
-        from ..qt_bindings import QFont
+        from ..ui.qt.bindings import QFont
 
         sysname = platform.system().lower()
 

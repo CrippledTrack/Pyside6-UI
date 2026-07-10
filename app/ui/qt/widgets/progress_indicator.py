@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from ...qt_bindings import Qt, QLabel, QProgressBar, QVBoxLayout, QWidget
+from ..bindings import Qt, QLabel, QProgressBar, QVBoxLayout, QWidget
 
 
 class ProgressIndicator(QWidget):
@@ -55,7 +55,7 @@ class ProgressIndicator(QWidget):
     def _apply_styling(self) -> None:
         """Apply theme-aware styling to the progress bar."""
         try:
-            from ...qt_bindings import QApplication, QPalette
+            from ..bindings import QApplication, QPalette
             highlight = QApplication.palette().color(QPalette.ColorRole.Highlight).name()
             text_color = QApplication.palette().color(QPalette.ColorRole.Text).name()
         except Exception:

@@ -14,7 +14,7 @@ class ThemeInitService:
     """Initialize and register ThemeManager after QApplication is created."""
 
     def initialize(self, container: Any, settings_service: Any) -> Any:
-        from ...themes.theme_manager import ThemeManager
+        from ..ui.qt.themes.theme_manager import ThemeManager
 
         theme_manager = ThemeManager(settings_service=settings_service)
         container.register_singleton(ThemeManager, theme_manager)

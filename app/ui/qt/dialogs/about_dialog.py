@@ -7,7 +7,7 @@ from __future__ import annotations
 import platform
 from typing import Optional
 
-from ...qt_bindings import (
+from ..bindings import (
     QDialog,
     QVBoxLayout,
     QHBoxLayout,
@@ -20,7 +20,7 @@ from ...qt_bindings import (
     QPalette
 )
 
-from ...utils.about_info import (
+from ....utils.about_info import (
     _read_linux_pretty_name,
     _format_build_time,
 )
@@ -91,7 +91,7 @@ class AboutDialog(QDialog):
             
         details.append(("GUI API Version", self.gui_api_version))
         
-        from ...utils.display_utils import _format_platform_name
+        from ....utils.display_utils import _format_platform_name
         pretty_platform = _format_platform_name(self.platform_name)
         details.append(("Platform", pretty_platform))
         
@@ -102,14 +102,14 @@ class AboutDialog(QDialog):
                 
         # Dev-only build details
         try:
-            from ...utils.admin import is_dev_mode
+            from ....utils.admin import is_dev_mode
             dev_mode = is_dev_mode()
         except Exception:
             dev_mode = False
             
         if dev_mode:
             try:
-                from ...build_info import BUILD_DISTRO, BUILD_TIME_UTC, GIT_COMMIT
+                from ....build_info import BUILD_DISTRO, BUILD_TIME_UTC, GIT_COMMIT
                 
                 # Distribution & Build Time
                 if BUILD_DISTRO and BUILD_DISTRO != "unknown":
@@ -136,7 +136,7 @@ class AboutDialog(QDialog):
                 
         # Qt bindings
         try:
-            from ...qt_bindings import get_binding_name
+            from ..bindings import get_binding_name
             binding_name = get_binding_name()
         except Exception:
             binding_name = "pyside6"
@@ -197,14 +197,14 @@ class AboutDialog(QDialog):
         clipboard = QApplication.clipboard()
         clipboard.setText(self.plain_text_info)
         self._copy_btn.setText("Copied!")
-        from ...qt_bindings import QTimer
+        from ..bindings import QTimer
         QTimer.singleShot(2000, lambda: self._copy_btn.setText("Copy Info"))
         
     def apply_theme(self) -> None:
         """Apply theme-aware styling to the About dialog."""
         try:
             highlight = QApplication.palette().color(QPalette.ColorRole.Highlight).name()
-            from ....themes.theme_manager import ThemeManager
+            from ..themes.theme_manager import ThemeManager
             highlight_hover = ThemeManager.adjust_color(highlight, 1.15)
             highlight_pressed = ThemeManager.adjust_color(highlight, 0.85)
             highlighted_text = QApplication.palette().color(QPalette.ColorRole.HighlightedText).name()

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from ...qt_bindings import (
+from ..bindings import (
     Qt,
     QFrame,
     QHBoxLayout,

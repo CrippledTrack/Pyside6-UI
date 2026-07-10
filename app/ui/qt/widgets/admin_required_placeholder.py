@@ -10,7 +10,7 @@ from __future__ import annotations
 import platform
 from typing import Optional
 
-from ...qt_bindings import Qt, Signal, QLabel, QPushButton, QVBoxLayout, QWidget, QFont, QSizePolicy
+from ..bindings import Qt, Signal, QLabel, QPushButton, QVBoxLayout, QWidget, QFont, QSizePolicy
 
 
 class AdminRequiredPlaceholder(QWidget):
@@ -93,10 +93,10 @@ class AdminRequiredPlaceholder(QWidget):
     def _apply_styling(self) -> None:
         """Apply theme-aware styling to the widget and button."""
         try:
-            from ...qt_bindings import QApplication, QPalette
+            from ..bindings import QApplication, QPalette
             highlight = QApplication.palette().color(QPalette.ColorRole.Highlight).name()
             # Derive hover and pressed colors
-            from ....themes.theme_manager import ThemeManager
+            from ..themes.theme_manager import ThemeManager
             highlight_hover = ThemeManager.adjust_color(highlight, 1.15)
             highlight_pressed = ThemeManager.adjust_color(highlight, 0.85)
             
