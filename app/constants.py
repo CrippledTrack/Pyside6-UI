@@ -53,11 +53,6 @@ SINGLE_PLUGIN_NAME = ""
 # Default theme override (can be overridden by app_plugins/constants.py, blank defaults to system dark/light check)
 DEFAULT_THEME = ""
 
-# Use pipe daemon instead of socket daemon on Linux (default is False for compatibility).
-# Note: This sets the daemon type used at launch when REQUIRE_ADMIN_BY_DEFAULT is True.
-# Otherwise, users can choose to activate either the legacy daemon or the pipe daemon if they want elevation after launch.
-USE_PIPE_DAEMON = False
-
 # =============================================================================
 # GUI Internal (app_plugins will NOT override these)
 # =============================================================================
@@ -81,7 +76,6 @@ __all__ = [
     'SINGLE_PLUGIN_MODE',
     'SINGLE_PLUGIN_NAME',
     'DEFAULT_THEME',
-    'USE_PIPE_DAEMON',
     # GUI internal
     'GUI_API_VERSION',
     'CURRENT_PLATFORM',

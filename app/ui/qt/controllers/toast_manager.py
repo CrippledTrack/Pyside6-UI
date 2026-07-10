@@ -33,6 +33,8 @@ class ToastManager(QObject):
         self.theme_manager = theme_manager
         self.notification_service = notification_service
         self.active_toasts: list[ToastNotification] = []
+        # When True, NotificationShellBridge should not display again (we already will).
+        self._suppress_bridge_display = False
         
         if self.parent_widget:
             self.parent_widget.installEventFilter(self)
@@ -44,50 +46,58 @@ class ToastManager(QObject):
         return super().eventFilter(obj, event)
     
     def show_toast(self, message: str, notification_type: str = "info", duration: int = 3000) -> None:
-        """Show a toast notification."""
-        
-        # Add to notification history if service is available
+        """Show a toast and record it in notification history (once)."""
         if self.notification_service:
             try:
-                # Map string type to enum
                 type_map = {
                     "info": NotificationType.INFO,
                     "success": NotificationType.SUCCESS,
                     "warning": NotificationType.WARNING,
                     "error": NotificationType.ERROR,
-                    "loading": NotificationType.INFO
+                    "loading": NotificationType.INFO,
                 }
                 service_type = type_map.get(notification_type, NotificationType.INFO)
-                self.notification_service.add_notification(message, service_type)
+                # Suppress bridge display so we don't toast twice for the same event.
+                self._suppress_bridge_display = True
+                try:
+                    self.notification_service.add_notification(message, service_type)
+                finally:
+                    self._suppress_bridge_display = False
             except Exception as e:
                 logger.error(f"Failed to add notification to history: {e}")
+                self._suppress_bridge_display = False
 
-        # Limit maximum active toasts to prevent covering too much screen
+        self.display_toast(message, notification_type, duration)
+
+    def display_toast(
+        self,
+        message: str,
+        notification_type: str = "info",
+        duration: int = 3000,
+    ) -> None:
+        """Show a toast visually without writing to notification history."""
         max_toasts = 5
         while len(self.active_toasts) >= max_toasts:
             oldest = self.active_toasts.pop(0)
             oldest.close_toast()
             self._reposition_toasts(animate=True)
-        
-        # Create and show new toast
-        toast = ToastNotification(message, notification_type, duration, self.parent_widget, self.theme_manager)
-        
-        # Determine target Y based on existing toasts
+
+        toast = ToastNotification(
+            message, notification_type, duration, self.parent_widget, self.theme_manager
+        )
+
         target_y = 40
         for t in self.active_toasts:
             target_y += t.height() + 10
-            
+
         toast.show_toast(self.parent_widget, target_y)
-        
-        # Track active toasts
         self.active_toasts.append(toast)
-        
-        # Clean up when toast closes
-        def remove_toast():
+
+        def remove_toast() -> None:
             if toast in self.active_toasts:
                 self.active_toasts.remove(toast)
                 self._reposition_toasts(animate=True)
-        
+
         toast.toast_closed.connect(remove_toast)
         
     def _reposition_toasts(self, animate: bool = True) -> None:

@@ -280,7 +280,6 @@ class MainWindow(QMainWindow):
             on_view_logs=self.open_log_viewer_dialog,
             on_about=self.show_about_dialog,
             on_toggle_new_ui=None,  # Moved to theme dialog
-            on_start_pipe_daemon=self.start_pipe_daemon
         )
     
         # Connect dev menu signals
@@ -603,27 +602,6 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Failed to restart as administrator: {e}")
             self.toast_manager.show_error(f"Failed to restart as administrator: {e}")
-
-    def start_pipe_daemon(self) -> None:
-        """Start the privileged daemon in pipe mode (Beta)."""
-        try:
-            if CURRENT_PLATFORM == "linux":
-                success, error_msg = self.daemon_service.start_pipe()
-                
-                if success:
-                    self.toast_manager.show_success("Pipe daemon (Beta) started successfully")
-                else:
-                    self.toast_manager.show_error(
-                        f"Failed to start pipe daemon: {error_msg or 'Check system permissions'}"
-                    )
-            else:
-                logger.warning(f"Pipe daemon not supported on platform: {CURRENT_PLATFORM}")
-                self.toast_manager.show_warning(
-                    f"Not supported on {CURRENT_PLATFORM}"
-                )
-        except Exception as e:
-            logger.error(f"Failed to start pipe daemon: {e}")
-            self.toast_manager.show_error(f"Failed to start pipe daemon: {e}")
     
     def _refresh_admin_tabs(self) -> None:
         """Refresh tabs that require admin privileges.
@@ -951,13 +929,20 @@ class MainWindow(QMainWindow):
                 else:
                     method(message)
             else:
-                self.toast_manager.show_toast(message, notification_type.value, duration or 3000)
+                self.toast_manager.show_toast(
+                    message, notification_type.value, duration or 3000
+                )
 
     def on_notification_added(self, notification: Notification) -> None:
-        toast_type = ToastType(notification.type.value)
-        self.show_toast(notification.message, toast_type)
-        if self.status_bar_manager and self.status_bar_manager._notification_widget:
-            self.status_bar_manager._notification_widget.on_notification_added(notification)
+        """Display a toast for notifications not already shown by ToastManager."""
+        if not self.toast_manager:
+            return
+        if getattr(self.toast_manager, "_suppress_bridge_display", False):
+            return
+        self.toast_manager.display_toast(
+            notification.message,
+            notification.type.value,
+        )
 
     def on_unread_count_changed(self, count: int) -> None:
         if self.status_bar_manager:

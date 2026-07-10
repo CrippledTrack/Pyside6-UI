@@ -1,15 +1,14 @@
-"""Privileged daemon server for executing root operations."""
+"""Privileged daemon server for executing root operations via stdin/stdout pipes."""
 
 from __future__ import annotations
 
 import os
 import sys
-import socket
 import logging
 import subprocess
 import threading
 import signal
-import struct
+import select
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any, List, Optional
 from .protocol import (
@@ -17,7 +16,6 @@ from .protocol import (
     OPERATION_RUN_COMMAND_STREAM,
     OPERATION_CANCEL,
     OPERATION_SHUTDOWN,
-    get_socket_path,
     deserialize_message,
     create_response,
     create_stream_chunk,
@@ -26,7 +24,6 @@ from .protocol import (
 
 logger = logging.getLogger(__name__)
 
-# Configure logging for daemon
 log_format = '[Daemon] %(asctime)s - %(name)s - %(levelname)s - %(message)s'
 logging.basicConfig(level=logging.INFO, format=log_format)
 
@@ -35,35 +32,20 @@ SHUTDOWN_REQUESTED = threading.Event()
 
 
 class PrivilegedDaemon:
-    """Daemon server for executing privileged operations."""
-    
-    def __init__(self, socket_path: Optional[str] = None, max_workers: int = MAX_WORKERS):
-        # Get original user's UID/GID from environment (set by sudo/pkexec)
+    """Daemon server for executing privileged operations over stdin/stdout."""
+
+    def __init__(self, max_workers: int = MAX_WORKERS):
         self.allowed_uid = self._get_original_uid()
         self.allowed_gid = self._get_original_gid()
-        
-        # Determine socket path based on user UID (more secure location)
-        if socket_path is None:
-            self.socket_path = get_socket_path(self.allowed_uid)
-        else:
-            self.socket_path = socket_path
-        
-        self.server_socket: Optional[socket.socket] = None
         self.executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix='daemon-worker')
         self._lock = threading.Lock()
-        
-        # Active subprocess jobs (for cancellation support)
         self._active_jobs: Dict[str, subprocess.Popen] = {}
         self._jobs_lock = threading.Lock()
-        
-        # Connection tracking for automatic shutdown
-        self._active_connections = 0
-        self._connections_lock = threading.Lock()
-        self._has_had_connections = False
-    
+        self._pipe_stdout = None
+        self._stdout_lock = threading.Lock()
+
     def _get_original_uid(self) -> Optional[int]:
         """Get the original user's UID from environment variables."""
-        # sudo sets SUDO_UID, pkexec sets PKEXEC_UID
         uid_str = os.environ.get('SUDO_UID') or os.environ.get('PKEXEC_UID')
         if uid_str:
             try:
@@ -71,10 +53,9 @@ class PrivilegedDaemon:
             except ValueError:
                 pass
         return None
-    
+
     def _get_original_gid(self) -> Optional[int]:
         """Get the original user's GID from environment variables."""
-        # sudo sets SUDO_GID, pkexec sets PKEXEC_GID
         gid_str = os.environ.get('SUDO_GID') or os.environ.get('PKEXEC_GID')
         if gid_str:
             try:
@@ -82,127 +63,82 @@ class PrivilegedDaemon:
             except ValueError:
                 pass
         return None
-    
-    def _verify_client_credentials(self, client_socket: socket.socket) -> bool:
-        """Verify that the connecting client belongs to the authorized user using SO_PEERCRED."""
-        try:
-            # SO_PEERCRED is Linux-specific and returns (pid, uid, gid) as a struct
-            # Format: '3i' means 3 integers (pid, uid, gid)
-            SOL_SOCKET = socket.SOL_SOCKET
-            SO_PEERCRED = 17  # Linux-specific constant
-            
-            creds = client_socket.getsockopt(SOL_SOCKET, SO_PEERCRED, struct.calcsize('3i'))
-            pid, uid, gid = struct.unpack('3i', creds)
-            
-            # Verify UID matches the original user
-            if self.allowed_uid is not None and uid != self.allowed_uid:
-                logger.warning(f"Connection rejected: UID {uid} does not match allowed UID {self.allowed_uid} (PID {pid})")
-                return False
-            
-            logger.debug(f"Client verified: PID {pid}, UID {uid}, GID {gid}")
-            return True
-            
-        except (OSError, struct.error, AttributeError) as e:
-            # SO_PEERCRED might not be available on all systems
-            # Fall back to less secure but still better than nothing
-            logger.warning(f"Could not verify client credentials: {e}. Falling back to socket ownership check.")
-            # If we can't verify, we'll rely on socket file permissions
-            return True
-    
-    def _cleanup_socket(self):
-        """Remove existing socket file if it exists."""
-        try:
-            if os.path.exists(self.socket_path):
-                os.unlink(self.socket_path)
-        except OSError as e:
-            logger.warning(f"Could not remove socket file: {e}")
-    
+
     def _setup_signal_handlers(self):
         """Setup signal handlers for graceful shutdown."""
         def signal_handler(signum, frame):
             logger.info(f"Received signal {signum}, shutting down...")
             SHUTDOWN_REQUESTED.set()
             self.shutdown()
-        
+
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
-    
+
     def _handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Handle a single request."""
         request_id = request.get('id', 'unknown')
         operation = request.get('operation')
         params = request.get('params', {})
-        
+
         logger.debug(f"Handling request {request_id}: {operation}")
-        
+
         try:
             if operation == OPERATION_RUN_COMMAND:
                 result = self._execute_command(request_id, params)
                 return create_response(request_id, True, result)
-            
+
             elif operation == OPERATION_RUN_COMMAND_STREAM:
-                # Streaming is handled inline — intermediate chunks are
-                # written directly to the pipe by _execute_command_stream.
-                # Only the final response is returned here.
                 result = self._execute_command_stream(request_id, params)
                 return create_response(request_id, True, result)
-            
+
             elif operation == OPERATION_CANCEL:
                 result = self._handle_cancel(params)
                 return create_response(request_id, True, result)
-            
+
             elif operation == 'ping':
                 return create_response(request_id, True, 'pong')
 
             elif operation == OPERATION_SHUTDOWN:
                 logger.info("Shutdown requested")
-                with self._connections_lock:
-                    active = self._active_connections
-                if active > 1:
-                    logger.info(f"Ignored shutdown request: {active} active connections exist")
-                    return create_response(request_id, True, {'message': f'Kept alive, {active} connections active'})
                 SHUTDOWN_REQUESTED.set()
                 return create_response(request_id, True, {'message': 'Shutting down'})
-            
+
             else:
                 return create_response(
                     request_id, False,
                     error=f"Unknown operation: {operation}"
                 )
-                
+
         except Exception as e:
             logger.error(f"Error handling request {request_id}: {e}", exc_info=True)
             return create_response(request_id, False, error=str(e))
-    
+
     def _execute_command(self, request_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a command as root."""
         command = params.get('command')
         if not command:
             raise ValueError("Command parameter is required")
-        
+
         if not isinstance(command, list):
             raise ValueError("Command must be a list")
-        
-        # Execute command
+
         logger.info(f"Executing command: {' '.join(command)}")
-        
+
         try:
-            # Handle timeout: None means no timeout
             cmd_timeout = params.get('timeout')
             if cmd_timeout is not None:
                 cmd_timeout = int(cmd_timeout)
-            
+
             proc = subprocess.Popen(
                 command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True
             )
-            
-            # Register for cancellation support
+
             with self._jobs_lock:
                 self._active_jobs[request_id] = proc
-            
+
             try:
                 stdout, stderr = proc.communicate(timeout=cmd_timeout)
             except subprocess.TimeoutExpired:
@@ -218,14 +154,14 @@ class PrivilegedDaemon:
             finally:
                 with self._jobs_lock:
                     self._active_jobs.pop(request_id, None)
-            
+
             return {
                 'returncode': proc.returncode,
                 'stdout': stdout,
                 'stderr': stderr,
                 'success': proc.returncode == 0
             }
-            
+
         except Exception as e:
             logger.error(f"Command execution failed: {e}")
             return {
@@ -234,73 +170,56 @@ class PrivilegedDaemon:
                 'stderr': str(e),
                 'success': False
             }
-    
+
     def _execute_command_stream(self, request_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a command as root, streaming stdout line-by-line over the pipe.
-        
+
         Each line of output is sent as an intermediate streaming chunk response
         via the pipe. The final response contains the aggregated output and
         return code.
-        
-        This method writes directly to the pipe under _stdout_lock and should
-        only be used in pipe mode.
-        
-        Raises:
-            ValueError: If called in legacy socket mode (no pipe available).
         """
-        # Streaming requires pipe mode — _pipe_stdout and _stdout_lock
-        # are only initialized in start_pipe_mode().
-        if not hasattr(self, '_pipe_stdout'):
-            raise ValueError(
-                "run_command_stream is only supported in pipe mode. "
-                "Use run_command instead."
-            )
-        
         command = params.get('command')
         if not command:
             raise ValueError("Command parameter is required")
-        
+
         if not isinstance(command, list):
             raise ValueError("Command must be a list")
-        
+
         logger.info(f"Executing streaming command: {' '.join(command)}")
-        
+
         try:
-            # Merge stdout and stderr so all output is streamed in order
             proc = subprocess.Popen(
                 command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True
             )
-            
-            # Register for cancellation support
+
             with self._jobs_lock:
                 self._active_jobs[request_id] = proc
-            
+
             aggregated_output = []
             try:
                 for line in proc.stdout:
                     aggregated_output.append(line)
-                    # Send intermediate chunk
                     chunk_msg = create_stream_chunk(request_id, line)
                     chunk_data = serialize_message(chunk_msg)
                     with self._stdout_lock:
                         self._pipe_stdout.write(chunk_data)
                         self._pipe_stdout.flush()
-                
+
                 proc.wait()
             finally:
                 with self._jobs_lock:
                     self._active_jobs.pop(request_id, None)
-            
+
             return {
                 'returncode': proc.returncode,
                 'stdout': ''.join(aggregated_output),
                 'stderr': '',
                 'success': proc.returncode == 0
             }
-            
+
         except Exception as e:
             logger.error(f"Streaming command execution failed: {e}")
             return {
@@ -309,23 +228,23 @@ class PrivilegedDaemon:
                 'stderr': str(e),
                 'success': False
             }
-    
+
     def _handle_cancel(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Cancel a running job by terminating its subprocess.
-        
+
         Uses SIGTERM first, waits 2 seconds for graceful exit, then SIGKILL.
         """
         target_id = params.get('target_id')
         if not target_id:
             raise ValueError("target_id parameter is required")
-        
+
         with self._jobs_lock:
             proc = self._active_jobs.get(target_id)
-        
+
         if proc is None:
             logger.debug(f"Cancel requested for {target_id} but no active job found")
             return {'cancelled': False, 'target_id': target_id, 'reason': 'not found'}
-        
+
         logger.info(f"Cancelling job {target_id} (PID {proc.pid})")
         try:
             proc.terminate()
@@ -335,193 +254,12 @@ class PrivilegedDaemon:
                 logger.warning(f"Job {target_id} did not exit after SIGTERM, sending SIGKILL")
                 proc.kill()
                 proc.wait(timeout=5.0)
-            
+
             return {'cancelled': True, 'target_id': target_id}
         except Exception as e:
             logger.error(f"Failed to cancel job {target_id}: {e}")
             return {'cancelled': False, 'target_id': target_id, 'reason': str(e)}
-    
-    def _handle_client(self, client_socket: socket.socket, addr):
-        """Handle a client connection."""
-        logger.debug(f"Client connected: {addr}")
-        
-        # Verify client credentials before processing requests
-        if not self._verify_client_credentials(client_socket):
-            logger.error(f"Unauthorized connection attempt from {addr}, closing connection")
-            client_socket.close()
-            return
-        
-        with self._connections_lock:
-            self._active_connections += 1
-            self._has_had_connections = True
-        
-        try:
-            while not SHUTDOWN_REQUESTED.is_set():
-                # Read request
-                data = b''
-                while b'\n' not in data:
-                    chunk = client_socket.recv(4096)
-                    if not chunk:
-                        return  # Client closed connection
-                    data += chunk
-                
-                # Parse request
-                request_line = data.split(b'\n', 1)[0]
-                request = deserialize_message(request_line)
-                
-                # Handle request in thread pool
-                future = self.executor.submit(self._handle_request, request)
-                response = future.result()
-                
-                # Send response
-                response_data = serialize_message(response)
-                client_socket.sendall(response_data)
-                
-        except socket.error as e:
-            logger.debug(f"Client connection error: {e}")
-        except Exception as e:
-            logger.error(f"Error handling client: {e}", exc_info=True)
-        finally:
-            client_socket.close()
-            logger.debug(f"Client disconnected: {addr}")
-            with self._connections_lock:
-                self._active_connections -= 1
-                active = self._active_connections
-            
-            if self._has_had_connections and active == 0:
-                logger.info("No active connections remaining. Initiating automatic daemon shutdown...")
-                SHUTDOWN_REQUESTED.set()
-    
-    def start(self):
-        """Start the daemon server in legacy socket mode (To be removed after 5.x)."""
-        # Log immediately to stderr so we can see what's happening
-        print("[Daemon] Starting privileged daemon...", file=sys.stderr, flush=True)
-        print(f"[Daemon] Current EUID: {os.geteuid()}, UID: {os.getuid()}", file=sys.stderr, flush=True)
-        
-        # Verify we're running as root
-        if os.geteuid() != 0:
-            error_msg = f"Daemon must run as root (current EUID: {os.geteuid()})"
-            logger.error(error_msg)
-            print(f"[Daemon] ERROR: {error_msg}", file=sys.stderr, flush=True)
-            sys.exit(1)
-        
-        logger.info("Starting privileged daemon")
-        logger.info(f"Socket path will be: {self.socket_path}")
-        logger.info(f"Allowed UID: {self.allowed_uid}, Allowed GID: {self.allowed_gid}")
-        print(f"[Daemon] Socket path: {self.socket_path}", file=sys.stderr, flush=True)
-        print(f"[Daemon] Allowed UID: {self.allowed_uid}, Allowed GID: {self.allowed_gid}", file=sys.stderr, flush=True)
-        
-        # Setup signal handlers
-        self._setup_signal_handlers()
-        
-        # Cleanup old socket
-        self._cleanup_socket()
-        
-        # Ensure socket directory exists and has correct permissions/ownership
-        socket_dir = os.path.dirname(self.socket_path)
-        if socket_dir:
-            # Under no circumstances should we chmod/chown root directory or /tmp
-            is_critical_dir = socket_dir in ('/', '/tmp') or os.path.abspath(socket_dir) in ('/', '/tmp')
-            try:
-                if not os.path.exists(socket_dir):
-                    os.makedirs(socket_dir, mode=0o700, exist_ok=True)
-                    logger.info(f"Created socket directory: {socket_dir}")
-                elif not is_critical_dir:
-                    # If it exists, ensure it has the correct permissions (0o700)
-                    os.chmod(socket_dir, 0o700)
-                    logger.info(f"Ensured socket directory permissions are 0o700: {socket_dir}")
-                
-                # Always set/correct ownership of the directory to the allowed user
-                if self.allowed_uid is not None and self.allowed_gid is not None and not is_critical_dir:
-                    os.chown(socket_dir, self.allowed_uid, self.allowed_gid)
-                    logger.info(f"Ensured socket directory ownership is UID {self.allowed_uid}, GID {self.allowed_gid}")
-            except OSError as e:
-                logger.error(f"Failed to create/chown/chmod socket directory {socket_dir}: {e}")
-                raise
 
-        # Create socket with safe umask
-        orig_umask = os.umask(0o177)
-        try:
-            print(f"[Daemon] Creating socket at: {self.socket_path}", file=sys.stderr, flush=True)
-            self.server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            self.server_socket.bind(self.socket_path)
-            print(f"[Daemon] Socket bound successfully", file=sys.stderr, flush=True)
-            self.server_socket.listen(5)
-            logger.info(f"Socket created and bound successfully")
-            print(f"[Daemon] Socket created and bound successfully", file=sys.stderr, flush=True)
-        except OSError as e:
-            error_msg = f"Failed to create/bind socket at {self.socket_path}: {e}"
-            logger.error(error_msg)
-            print(f"[Daemon] ERROR: {error_msg}", file=sys.stderr, flush=True)
-            raise
-        finally:
-            os.umask(orig_umask)
-        
-        # Set socket ownership and permissions to only allow the original user
-        if self.allowed_uid is not None and self.allowed_gid is not None:
-            try:
-                os.chown(self.socket_path, self.allowed_uid, self.allowed_gid)
-                os.chmod(self.socket_path, 0o600)  # Only owner can read/write
-                logger.info(f"Socket restricted to UID {self.allowed_uid}, GID {self.allowed_gid}")
-            except OSError as e:
-                logger.error(f"Could not set socket ownership: {e}. Aborting to prevent insecure operation.")
-                raise
-        else:
-            logger.error("Could not determine original user UID/GID. Aborting to prevent insecure operation.")
-            raise ValueError("Could not determine original user UID/GID")
-        
-        logger.info(f"Daemon listening on {self.socket_path}")
-        print(f"[Daemon] Daemon is now listening on socket: {self.socket_path}", file=sys.stderr, flush=True)
-        
-        # Main accept loop
-        while not SHUTDOWN_REQUESTED.is_set():
-            try:
-                self.server_socket.settimeout(1.0)  # Check shutdown flag periodically
-                client_socket, addr = self.server_socket.accept()
-                
-                # Handle client in separate thread
-                client_thread = threading.Thread(
-                    target=self._handle_client,
-                    args=(client_socket, addr),
-                    name="SocketClientHandler",
-                    daemon=True
-                )
-                client_thread.start()
-                
-            except socket.timeout:
-                continue  # Check shutdown flag
-            except socket.error as e:
-                if not SHUTDOWN_REQUESTED.is_set():
-                    logger.error(f"Socket error: {e}")
-                    break
-        
-        self.shutdown()
-    
-    def shutdown(self):
-        """Shutdown the daemon gracefully."""
-        logger.info("Shutting down daemon...")
-        
-        # Stop accepting new connections
-        if self.server_socket:
-            try:
-                self.server_socket.close()
-            except Exception:
-                pass
-        
-        # Wait for active tasks to complete
-        try:
-            self.executor.shutdown(wait=True, cancel_futures=True)
-        except TypeError:
-            self.executor.shutdown(wait=True)
-        
-        # Cleanup socket file
-        self._cleanup_socket()
-        
-        logger.info("Daemon stopped")
-
-    # =========================================================================
-    # Pipe Mode Worker Execution
-    # =========================================================================
     def _handle_async_pipe_request(self, request: Dict[str, Any]):
         """Handle a pipe request asynchronously and write the response thread-safely."""
         try:
@@ -532,7 +270,6 @@ class PrivilegedDaemon:
                 self._pipe_stdout.flush()
         except Exception as e:
             logger.error(f"Error in async pipe handler: {e}", exc_info=True)
-            # Attempt to send an error response
             try:
                 request_id = request.get('id', 'unknown')
                 error_response = create_response(request_id, False, error=str(e))
@@ -543,84 +280,75 @@ class PrivilegedDaemon:
             except Exception:
                 logger.error("Failed to send error response", exc_info=True)
 
-    def start_pipe_mode(self):
-        """Start the daemon in standard I/O pipe mode."""
-        # ── stdout pollution guard ───────────────────────────────────────────
+    def start(self):
+        """Start the daemon in stdin/stdout pipe mode."""
         # Save the raw binary stdout for exclusive IPC use, then redirect
         # Python-level stdout to stderr so any rogue print() from imported
         # libraries cannot corrupt the JSON pipe.
         self._pipe_stdout = sys.stdout.buffer
         sys.stdout = sys.stderr
-        
-        # Ensure all logging explicitly targets stderr
+
         logging.basicConfig(
             stream=sys.stderr, level=logging.INFO,
             format='[Daemon] %(asctime)s - %(name)s - %(levelname)s - %(message)s',
             force=True
         )
-        # ─────────────────────────────────────────────────────────────────────
-        
-        print("[Daemon] Starting privileged daemon in pipe mode...", file=sys.stderr, flush=True)
+
+        print("[Daemon] Starting privileged daemon...", file=sys.stderr, flush=True)
         print(f"[Daemon] Current EUID: {os.geteuid()}, UID: {os.getuid()}", file=sys.stderr, flush=True)
-        
-        # Verify we're running as root
+
         if os.geteuid() != 0:
             error_msg = f"Daemon must run as root (current EUID: {os.geteuid()})"
             logger.error(error_msg)
             print(f"[Daemon] ERROR: {error_msg}", file=sys.stderr, flush=True)
             sys.exit(1)
-            
-        # Setup signal handlers
+
         self._setup_signal_handlers()
 
-        # Stdout lock for thread-safe response writing
-        self._stdout_lock = threading.Lock()
-            
         logger.info("Pipe daemon started and ready")
         print("[Daemon] Pipe daemon started and ready", file=sys.stderr, flush=True)
-        
-        # Read from stdin.buffer line-by-line
-        import select
+
         while not SHUTDOWN_REQUESTED.is_set():
             try:
-                # Poll stdin with a 1.0s timeout to allow checking shutdown event
                 r, _, _ = select.select([sys.stdin.buffer], [], [], 1.0)
                 if not r:
-                    continue  # Timeout, check shutdown flag
-                
+                    continue
+
                 line = sys.stdin.buffer.readline()
                 if not line:
                     logger.info("Pipe EOF reached, shutting down")
                     break
-                
-                # Parse request
+
                 request = deserialize_message(line)
-                
-                # Hand off to thread pool — do NOT block on result.
-                # Responses are written back by _handle_async_pipe_request
-                # under _stdout_lock, so they never interleave.
                 self.executor.submit(self._handle_async_pipe_request, request)
-                
+
             except Exception as e:
                 logger.error(f"Error in pipe mode loop: {e}", exc_info=True)
                 break
-                
+
         self.shutdown()
+
+    def shutdown(self):
+        """Shutdown the daemon gracefully."""
+        logger.info("Shutting down daemon...")
+
+        try:
+            self.executor.shutdown(wait=True, cancel_futures=True)
+        except TypeError:
+            self.executor.shutdown(wait=True)
+
+        logger.info("Daemon stopped")
 
 
 def run_daemon(argv: Optional[List[str]] = None) -> int:
     """
-    Run the daemon (entry point for --daemon mode).
-    
-    Args:
-        argv: Command-line arguments (defaults to sys.argv)
+    Run the privileged pipe daemon.
+
+    Accepts ``--pipe`` or ``--daemon`` (alias) as the entry flag.
     """
-    # Ensure sys is available (imported at module level, but explicit access helps)
-    import sys
     if argv is None:
         argv = sys.argv
-    
-    # Parse UID/GID from command-line arguments (pkexec doesn't preserve env vars)
+
     uid = None
     gid = None
     if '--uid' in argv:
@@ -633,7 +361,7 @@ def run_daemon(argv: Optional[List[str]] = None) -> int:
                 logger.warning(f"Failed to parse UID from command line: {e}")
     else:
         logger.warning("--uid argument not found in daemon command line")
-    
+
     if '--gid' in argv:
         idx = argv.index('--gid')
         if idx + 1 < len(argv):
@@ -642,47 +370,31 @@ def run_daemon(argv: Optional[List[str]] = None) -> int:
                 logger.info(f"Parsed GID from command line: {gid}")
             except (ValueError, IndexError) as e:
                 logger.warning(f"Failed to parse GID from command line: {e}")
-                
-    # Set environment variables from command-line if not already set
-    # (helps with socket path determination)
+
     if uid is not None and 'PKEXEC_UID' not in os.environ and 'SUDO_UID' not in os.environ:
         os.environ['PKEXEC_UID'] = str(uid)
         os.environ['SUDO_UID'] = str(uid)
     if gid is not None and 'PKEXEC_GID' not in os.environ and 'SUDO_GID' not in os.environ:
         os.environ['PKEXEC_GID'] = str(gid)
         os.environ['SUDO_GID'] = str(gid)
-    
+
     try:
         print(f"[Daemon] Initializing daemon with UID: {uid}, GID: {gid}", file=sys.stderr, flush=True)
         daemon = PrivilegedDaemon()
-        # Override UID/GID if provided via command line
         if uid is not None:
             daemon.allowed_uid = uid
             print(f"[Daemon] Set allowed_uid to {uid}", file=sys.stderr, flush=True)
         if gid is not None:
             daemon.allowed_gid = gid
             print(f"[Daemon] Set allowed_gid to {gid}", file=sys.stderr, flush=True)
-        # Recalculate socket path with correct UID
-        if uid is not None:
-            from .protocol import get_socket_path
-            daemon.socket_path = get_socket_path(uid)
-            print(f"[Daemon] Set socket_path to {daemon.socket_path}", file=sys.stderr, flush=True)
-        
-        if '--pipe' in argv:
-            print("[Daemon] Calling daemon.start_pipe_mode()...", file=sys.stderr, flush=True)
-            daemon.start_pipe_mode()
-            return 0
-        else:
-            # Legacy Socket Mode (To be removed after 5.x)
-            print("[Daemon] Calling daemon.start()...", file=sys.stderr, flush=True)
-            daemon.start()
-            print("[Daemon] daemon.start() returned (should not happen)", file=sys.stderr, flush=True)
-            return 0
+
+        print("[Daemon] Calling daemon.start()...", file=sys.stderr, flush=True)
+        daemon.start()
+        return 0
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
         return 0
     except SystemExit as e:
-        # Re-raise SystemExit but log it first
         logger.error(f"Daemon SystemExit: {e.code}")
         return e.code if isinstance(e.code, int) else 1
     except Exception as e:

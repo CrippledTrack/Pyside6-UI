@@ -10,14 +10,13 @@ import time
 import threading
 from pathlib import Path
 from typing import Optional
-from ..daemon.protocol import get_socket_path, get_effective_uid_gid
+from ..daemon.protocol import get_effective_uid_gid
 
 logger = logging.getLogger(__name__)
 
 # Timeout constants (in seconds)
 PKEXEC_COMMAND_TIMEOUT = 600  # 10 minutes for privileged commands
 DAEMON_SHUTDOWN_TIMEOUT = 2   # Wait for daemon shutdown
-DAEMON_QUICK_TIMEOUT = 1      # Quick daemon status check
 
 # Global daemon process reference
 _daemon_process: Optional[subprocess.Popen] = None
@@ -394,80 +393,35 @@ def run_as_admin() -> bool:
     raise RuntimeError("Neither pkexec nor sudo is available. Cannot restart with elevated privileges.")
 
 
-def is_daemon_running(socket_path: Optional[str] = None) -> bool:
-    """Check if daemon is running.
-    
-    If USE_PIPE_DAEMON is enabled, checks if the daemon process is active.
-    Otherwise, checks if the socket exists and responds (Legacy Socket Mode, to be removed after 5.x).
-    """
-    from .imports import get_platforms_constants
-    use_pipe_daemon = getattr(get_platforms_constants(), 'USE_PIPE_DAEMON', False)
-    if use_pipe_daemon:
-        global _daemon_process
-        return _daemon_process is not None and _daemon_process.poll() is None
-
-    if socket_path is None:
-        socket_path = get_socket_path()
-    if not os.path.exists(socket_path):
-        return False
-    
-    # Try to connect to verify it's actually working
-    try:
-        import socket
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(0.5)
-        sock.connect(socket_path)
-        sock.close()
-        return True
-    except Exception:
-        return False
+def is_daemon_running() -> bool:
+    """Check if the privileged pipe daemon process is active."""
+    global _daemon_process
+    return _daemon_process is not None and _daemon_process.poll() is None
 
 
-def start_daemon(socket_path: Optional[str] = None) -> Optional[object]:
-    """Start the privileged daemon process (Socket or Pipe mode).
-    
+def start_daemon() -> Optional[object]:
+    """Start the privileged pipe daemon process.
+
     Returns:
         DaemonClient instance if successful, None otherwise
     """
     global _daemon_process
-    from .imports import get_platforms_constants
-    use_pipe_daemon = getattr(get_platforms_constants(), 'USE_PIPE_DAEMON', False)
-    
-    if socket_path is None and not use_pipe_daemon:
-        socket_path = get_socket_path()
-        logger.info(f"Determined socket path: {socket_path}")
-    
-    # Check if already running
-    if is_daemon_running(socket_path):
+
+    if is_daemon_running():
         logger.info("Daemon already running")
-        if use_pipe_daemon:
-            from ..daemon import get_daemon_client, is_daemon_available
-            if is_daemon_available():
-                return get_daemon_client()
-            else:
-                from ..daemon.client import DaemonClient
-                return DaemonClient(process=_daemon_process)
-        else:
-            from ..daemon.client import DaemonClient
-            client = DaemonClient(socket_path)
-            if client.connect():
-                return client
-            logger.warning("Socket exists but connection failed, cleaning up...")
-    
-    # Get path to current executable
-    # Find the main script path
+        from ..daemon import get_daemon_client, is_daemon_available
+        if is_daemon_available():
+            return get_daemon_client()
+        from ..daemon.client import DaemonClient
+        return DaemonClient(process=_daemon_process)
+
     if hasattr(sys, 'frozen') and sys.frozen:
-        # PyInstaller bundle - executable is the script
         exe_path = sys.executable
-        daemon_cmd = [exe_path, '--pipe' if use_pipe_daemon else '--daemon']
+        daemon_cmd = [exe_path, '--pipe']
     else:
-        # Development mode - need to run python with the script
-        exe_path = sys.executable  # python executable
-        
-        # Try to find the main script dynamically
+        exe_path = sys.executable
         script_path = None
-        
-        # First, try sys.argv[0] (the script that was invoked)
+
         if sys.argv and sys.argv[0] and sys.argv[0] != '-c':
             potential_path = Path(sys.argv[0])
             if potential_path.is_absolute() and potential_path.exists():
@@ -476,8 +430,7 @@ def start_daemon(socket_path: Optional[str] = None) -> Optional[object]:
                 script_path = Path.cwd() / potential_path
             elif potential_path.exists():
                 script_path = potential_path.resolve()
-        
-        # If that didn't work, try to find __main__.__file__
+
         if script_path is None or not script_path.exists():
             try:
                 import __main__
@@ -487,51 +440,41 @@ def start_daemon(socket_path: Optional[str] = None) -> Optional[object]:
                         script_path = main_file
             except Exception:
                 pass
-        
-        # If still not found, try to find the app.py entry point
+
         if script_path is None or not script_path.exists():
-            # Look for app.py which contains the run() function
             app_py = Path(__file__).parent.parent / 'app' / 'app.py'
             if app_py.exists():
-                # Find the root script that imports from the GUI module
-                # Check common locations relative to app.py
                 root_dir = app_py.parent.parent.parent
                 gui_pkg = app_py.parent.parent.name
-                # Look for any .py file in root that might be the entry point
                 for py_file in root_dir.glob('*.py'):
                     try:
-                        # Quick check: does it import from the gui package app.app?
                         content = py_file.read_text(encoding='utf-8', errors='ignore')
                         if f'from {gui_pkg}.app.app import run' in content or f'{gui_pkg}.app.app' in content:
                             script_path = py_file
                             break
                     except Exception:
                         continue
-        
+
         if script_path is None or not script_path.exists():
             logger.error("Could not determine main script path for daemon")
             return None
-        
+
         logger.info(f"Daemon script path: {script_path}")
-        daemon_cmd = [exe_path, str(script_path), '--pipe' if use_pipe_daemon else '--daemon']
-    
-    # Get UID/GID before starting daemon (needed for socket path and permissions)
-    # When running normally (not via sudo/pkexec), we need to get current user's UID
+        daemon_cmd = [exe_path, str(script_path), '--pipe']
+
     original_uid, original_gid = get_effective_uid_gid()
     if os.environ.get('SUDO_UID') or os.environ.get('PKEXEC_UID'):
         logger.info(f"Running via elevation, original UID: {original_uid}, GID: {original_gid}")
     else:
         logger.info(f"Running as normal user, UID: {original_uid}, GID: {original_gid}")
-    
-    # Pass UID/GID as command-line arguments (pkexec doesn't preserve env vars)
+
     if original_uid is not None:
         daemon_cmd.extend(['--uid', str(original_uid)])
         logger.info(f"Passing --uid {original_uid} to daemon")
     if original_gid is not None:
         daemon_cmd.extend(['--gid', str(original_gid)])
         logger.info(f"Passing --gid {original_gid} to daemon")
-    
-    # Prepare environment (still pass it, but UID/GID are in command line as backup)
+
     daemon_env = os.environ.copy()
     if original_uid is not None:
         daemon_env['PKEXEC_UID'] = str(original_uid)
@@ -539,218 +482,122 @@ def start_daemon(socket_path: Optional[str] = None) -> Optional[object]:
     if original_gid is not None:
         daemon_env['PKEXEC_GID'] = str(original_gid)
         daemon_env['SUDO_GID'] = str(original_gid)
-    
+
     process = None
-    # Try pkexec first, then sudo
     if check_pkexec_available():
         logger.info("Starting daemon with pkexec...")
         try:
-            # Capture stderr to see daemon startup errors and prevent deadlocks
             process = subprocess.Popen(
                 ['pkexec'] + daemon_cmd,
                 env=daemon_env,
-                stdin=subprocess.PIPE if use_pipe_daemon else None,
-                stdout=subprocess.PIPE if use_pipe_daemon else None,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                start_new_session=True,  # Detach from parent
+                start_new_session=True,
                 preexec_fn=_set_pdeathsig
             )
             _daemon_process = process
             logger.info(f"Daemon process started via pkexec with PID {process.pid}")
-            
-            # Start stderr draining thread
             threading.Thread(target=_drain_stderr, name="DaemonStderrDrainer", args=(process,), daemon=True).start()
-            
         except Exception as e:
             logger.error(f"Failed to start daemon with pkexec: {e}")
             process = None
-    
+
     if process is None and check_sudo_available():
         logger.info("Starting daemon with sudo...")
         try:
-            # Capture stderr in all modes to prevent buffer deadlocks
             process = subprocess.Popen(
                 ['sudo', '-E'] + daemon_cmd,
                 env=daemon_env,
-                stdin=subprocess.PIPE if use_pipe_daemon else None,
-                stdout=subprocess.PIPE if use_pipe_daemon else None,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                start_new_session=True,  # Detach from parent
+                start_new_session=True,
                 preexec_fn=_set_pdeathsig
             )
             _daemon_process = process
             logger.info(f"Daemon process started via sudo with PID {process.pid}")
-            
-            # Start stderr draining thread
             threading.Thread(target=_drain_stderr, name="DaemonStderrDrainer", args=(process,), daemon=True).start()
-            
         except Exception as e:
             logger.error(f"Failed to start daemon with sudo: {e}")
             return None
-            
+
     if process is None:
         logger.error("Neither pkexec nor sudo available")
         return None
-    
-    # Verify/wait for connection based on active mode
-    if use_pipe_daemon:
-        logger.info("Verifying pipe daemon connection via ping...")
-        from ..daemon.client import DaemonClient
-        client = DaemonClient(process=process)
-        
-        # Poll for up to 60 seconds (120 * 0.5s) to accommodate password prompting
-        for i in range(120):
-            if process.poll() is not None:
-                logger.error(f"Pipe daemon process exited with return code {process.returncode}")
-                _daemon_process = None
-                return None
-            try:
-                response = client.request('ping', {}, timeout=1.0)
-                if response.get('success') and response.get('result') == 'pong':
-                    logger.info("Successfully connected to pipe daemon via ping")
-                    return client
-            except Exception as e:
-                logger.debug(f"Ping attempt {i} failed: {e}")
-            time.sleep(0.5)
-            
-        logger.error("Pipe daemon failed to respond to ping within timeout")
-        try:
-            process.terminate()
-            process.wait(timeout=2.0)
-        except Exception:
-            try:
-                process.kill()
-            except Exception:
-                pass
-        _daemon_process = None
-        return None
-    
-    else:
-        # Legacy Socket Mode wait (To be removed after 5.x)
-        using_interactive = check_pkexec_available() or check_sudo_available()
-        max_wait = 600 if using_interactive else 20  # 5 minutes for interactive, 10 seconds for non-interactive
-        check_interval = 0.5
-        
-        logger.info(f"Waiting for daemon to start... (checking socket at: {socket_path})")
-        
-        for i in range(max_wait):
-            time.sleep(check_interval)
-            
-            # Periodically check if process is still running
-            if i > 0 and i % 4 == 0:
-                is_running = process.poll() is None
-                logger.debug(f"Daemon process status: {'running' if is_running else 'exited'}")
-            
-            # Check if process is still alive
-            if process.poll() is not None:
-                returncode = process.returncode
-                logger.error(f"Daemon process exited with return code {returncode}")
-                _daemon_process = None
-                return None
-            
-            # Check if socket appeared (daemon started)
-            if is_daemon_running(socket_path):
-                logger.info(f"Daemon started successfully, socket found at: {socket_path}")
-                from ..daemon.client import DaemonClient
-                client = DaemonClient(socket_path)
-                if client.connect():
-                    logger.info("Successfully connected to daemon")
-                    return client
-                else:
-                    logger.warning("Socket exists but connection failed, continuing to wait...")
-            
-            # Log progress every 10 seconds
-            if i > 0 and i % 20 == 0:
-                elapsed = i * check_interval
-                logger.debug(f"Still waiting for daemon... ({elapsed:.1f}s elapsed, process running: {process.poll() is None})")
-        
-        # Timeout reached
-        logger.warning(f"Daemon process still running (PID {process.pid}) but socket not accessible after timeout")
-        return None
 
+    logger.info("Verifying pipe daemon connection via ping...")
+    from ..daemon.client import DaemonClient
+    client = DaemonClient(process=process)
 
-def stop_daemon(socket_path: Optional[str] = None):
-    """Stop the daemon process gracefully."""
-    from .imports import get_platforms_constants
-    use_pipe_daemon = getattr(get_platforms_constants(), 'USE_PIPE_DAEMON', False)
-    global _daemon_process
-    
-    if use_pipe_daemon:
-        if not _daemon_process or _daemon_process.poll() is not None:
-            logger.info("Pipe daemon not running")
+    for i in range(120):
+        if process.poll() is not None:
+            logger.error(f"Pipe daemon process exited with return code {process.returncode}")
             _daemon_process = None
-            return
-        
+            return None
         try:
-            from ..daemon import get_daemon_client, is_daemon_available
-            if is_daemon_available():
-                client = get_daemon_client()
-                logger.info("Sending shutdown request to pipe daemon...")
-                client.request('shutdown', {}, timeout=2.0)
-                client.disconnect()
-            else:
-                logger.info("No active daemon client, terminating pipe daemon process...")
-                _daemon_process.terminate()
-                try:
-                    _daemon_process.wait(timeout=2.0)
-                except Exception:
-                    try:
-                        _daemon_process.kill()
-                    except Exception:
-                        pass
+            response = client.request('ping', {}, timeout=1.0)
+            if response.get('success') and response.get('result') == 'pong':
+                logger.info("Successfully connected to pipe daemon via ping")
+                return client
         except Exception as e:
-            if "Connection closed by daemon" in str(e) or "pipe EOF" in str(e):
-                logger.info(f"Pipe daemon already stopped or shutting down (connection closed: {e})")
-            else:
-                logger.error(f"Error requesting pipe daemon shutdown: {e}")
-            if _daemon_process:
-                try:
-                    _daemon_process.terminate()
-                    _daemon_process.wait(timeout=DAEMON_SHUTDOWN_TIMEOUT)
-                except Exception:
-                    try:
-                        _daemon_process.kill()
-                    except Exception:
-                        pass
-        _daemon_process = None
-        return
-        
-    if socket_path is None:
-        socket_path = get_socket_path()
-        
-    if not is_daemon_running(socket_path):
-        logger.info("Daemon not running")
-        return
-    
-    try:
-        from ..daemon.client import DaemonClient
-        client = DaemonClient(socket_path)
-        if client.connect():
-            logger.info("Sending shutdown request to daemon...")
-            client.request('shutdown', {})
-            client.disconnect()
-            logger.info("Daemon shutdown requested")
-        
-        # Wait a bit for daemon to exit
+            logger.debug(f"Ping attempt {i} failed: {e}")
         time.sleep(0.5)
-        
-        # Clean up process reference
-        if _daemon_process:
-            try:
-                _daemon_process.wait(timeout=DAEMON_QUICK_TIMEOUT)
-            except:
-                pass
-            _daemon_process = None
-        
-    except Exception as e:
-        logger.error(f"Error stopping daemon: {e}")
-    
-    # Clean up socket file if it still exists
-    if os.path.exists(socket_path):
+
+    logger.error("Pipe daemon failed to respond to ping within timeout")
+    try:
+        process.terminate()
+        process.wait(timeout=2.0)
+    except Exception:
         try:
-            os.unlink(socket_path)
+            process.kill()
         except Exception:
             pass
+    _daemon_process = None
+    return None
 
 
-__all__ = ['is_admin', 'run_command_as_admin', 'get_sudo_status', 'start_daemon', 'stop_daemon']
+def stop_daemon():
+    """Stop the privileged pipe daemon process gracefully."""
+    global _daemon_process
+
+    if not _daemon_process or _daemon_process.poll() is not None:
+        logger.info("Pipe daemon not running")
+        _daemon_process = None
+        return
+
+    try:
+        from ..daemon import get_daemon_client, is_daemon_available
+        if is_daemon_available():
+            client = get_daemon_client()
+            logger.info("Sending shutdown request to pipe daemon...")
+            client.request('shutdown', {}, timeout=2.0)
+            client.disconnect()
+        else:
+            logger.info("No active daemon client, terminating pipe daemon process...")
+            _daemon_process.terminate()
+            try:
+                _daemon_process.wait(timeout=2.0)
+            except Exception:
+                try:
+                    _daemon_process.kill()
+                except Exception:
+                    pass
+    except Exception as e:
+        if "Connection closed by daemon" in str(e) or "pipe EOF" in str(e):
+            logger.info(f"Pipe daemon already stopped or shutting down (connection closed: {e})")
+        else:
+            logger.error(f"Error requesting pipe daemon shutdown: {e}")
+        if _daemon_process:
+            try:
+                _daemon_process.terminate()
+                _daemon_process.wait(timeout=DAEMON_SHUTDOWN_TIMEOUT)
+            except Exception:
+                try:
+                    _daemon_process.kill()
+                except Exception:
+                    pass
+    _daemon_process = None
+
+
+__all__ = ['is_admin', 'run_command_as_admin', 'get_sudo_status', 'start_daemon', 'stop_daemon', 'is_daemon_running']
