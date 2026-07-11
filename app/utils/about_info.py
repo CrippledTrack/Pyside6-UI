@@ -1,8 +1,7 @@
 """
 About dialog information helpers.
 
-This module centralizes About-dialog content generation and dialog creation,
-keeping `ui/main_window.py` focused on window behavior.
+Toolkit-neutral field gathering plus HTML/text formatters for Qt and TUI.
 """
 
 from __future__ import annotations
@@ -10,7 +9,8 @@ from __future__ import annotations
 import datetime
 import platform
 import sys
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import List, Optional, Tuple
 
 
 def _read_linux_pretty_name() -> Optional[str]:
@@ -43,71 +43,122 @@ def _format_build_time(raw: str) -> str:
         return raw
 
 
-def _build_distro_line(platform_name: str) -> str:
-    """Build distro/time line for About dialog. Only shown when running from a frozen binary."""
+@dataclass
+class AboutFields:
+    """Structured About content shared by Qt and TUI."""
+
+    app_name: str
+    gui_api_version: str
+    platform_name: str
+    app_version: Optional[str] = None
+    distro: Optional[str] = None
+    build_distro: Optional[str] = None
+    build_time: Optional[str] = None
+    python: Optional[str] = None
+    git_commit: Optional[str] = None
+    ui_backend_label: Optional[str] = None
+    detail_rows: List[Tuple[str, str]] = field(default_factory=list)
+
+
+def get_about_fields(
+    *,
+    app_name: str,
+    gui_api_version: str,
+    platform_name: str,
+    app_version: Optional[str] = None,
+    ui_backend_label: Optional[str] = None,
+) -> AboutFields:
+    """Gather About dialog fields without toolkit imports."""
+    from .display_utils import _format_platform_name
+
+    pretty_platform = _format_platform_name(platform_name)
+    rows: List[Tuple[str, str]] = []
+
+    if app_version:
+        rows.append(("Version", app_version))
+    rows.append(("GUI API Version", gui_api_version))
+    rows.append(("Platform", pretty_platform))
+
+    distro: Optional[str] = None
+    if str(platform_name).lower() == "linux":
+        distro = _read_linux_pretty_name()
+        if distro:
+            rows.append(("Distro", distro))
+
+    build_distro: Optional[str] = None
+    build_time: Optional[str] = None
+    python_line: Optional[str] = None
+    git_commit: Optional[str] = None
+
     try:
         from .admin import is_dev_mode
-        from ..build_info import BUILD_DISTRO, BUILD_TIME_UTC
-
-        if not getattr(sys, "frozen", False):
-            return ""
-        if not is_dev_mode():
-            return ""
-
-        # On Windows, show build time only (avoid redundant Platform/Distro lines).
-        if str(platform_name).lower() == "windows":
-            if BUILD_TIME_UTC and BUILD_TIME_UTC != "unknown":
-                return f"<p><b>Build time:</b> {_format_build_time(BUILD_TIME_UTC)}</p>"
-            return ""
-
-        if BUILD_DISTRO and BUILD_DISTRO != "unknown":
-            if BUILD_TIME_UTC and BUILD_TIME_UTC != "unknown":
-                return f"<p><b>Build distro:</b> {BUILD_DISTRO} <small>({_format_build_time(BUILD_TIME_UTC)})</small></p>"
-            return f"<p><b>Build distro:</b> {BUILD_DISTRO}</p>"
+        dev_mode = bool(is_dev_mode())
     except Exception:
-        pass
-    return ""
+        dev_mode = False
+
+    if dev_mode:
+        try:
+            from ..build_info import BUILD_DISTRO, BUILD_TIME_UTC, GIT_COMMIT
+
+            if getattr(sys, "frozen", False):
+                if BUILD_DISTRO and BUILD_DISTRO != "unknown":
+                    build_distro = BUILD_DISTRO
+                    rows.append(("Build Distro", BUILD_DISTRO))
+                if BUILD_TIME_UTC and BUILD_TIME_UTC != "unknown":
+                    build_time = _format_build_time(BUILD_TIME_UTC)
+                    rows.append(("Build Time", build_time))
+
+            if GIT_COMMIT and GIT_COMMIT != "unknown":
+                is_dirty = GIT_COMMIT.endswith("-dirty")
+                base_commit = GIT_COMMIT[:-6] if is_dirty else GIT_COMMIT
+                if len(base_commit) == 40:
+                    base_commit = base_commit[:8]
+                git_commit = f"{base_commit}-dirty" if is_dirty else base_commit
+                rows.append(("Git Commit", git_commit))
+
+            python_line = (
+                f"{platform.python_implementation()} "
+                f"{platform.python_version()} "
+                f"({platform.machine() or 'unknown'})"
+            )
+            rows.append(("Python", python_line))
+        except Exception:
+            pass
+
+    if ui_backend_label:
+        # Skip redundant default Qt binding label
+        if ui_backend_label.lower() not in ("pyside6",):
+            rows.append(("UI Backend", ui_backend_label))
+
+    return AboutFields(
+        app_name=app_name,
+        gui_api_version=gui_api_version,
+        platform_name=pretty_platform,
+        app_version=app_version,
+        distro=distro,
+        build_distro=build_distro,
+        build_time=build_time,
+        python=python_line,
+        git_commit=git_commit,
+        ui_backend_label=ui_backend_label,
+        detail_rows=rows,
+    )
 
 
-def _python_version_line() -> str:
-    """Return a Python version line, only visible in dev mode."""
-    try:
-        from .admin import is_dev_mode
-
-        if not is_dev_mode():
-            return ""
-
-        version = platform.python_version()
-        impl = platform.python_implementation()
-        arch = platform.machine() or "unknown"
-        return f"<p><b>Python:</b> {impl} {version} ({arch})</p>"
-    except Exception:
-        pass
-    return ""
+def format_about_html(fields: AboutFields) -> str:
+    """Format About fields as Qt rich-text HTML."""
+    lines = [f"<h2>{fields.app_name}</h2>"]
+    for label, value in fields.detail_rows:
+        lines.append(f"<p><b>{label}:</b> {value}</p>")
+    return "".join(lines)
 
 
-def _git_commit_line() -> str:
-    """Return a Git commit line, only visible in dev mode."""
-    try:
-        from .admin import is_dev_mode
-        from ..build_info import GIT_COMMIT
-
-        if not is_dev_mode():
-            return ""
-
-        if GIT_COMMIT and GIT_COMMIT != "unknown":
-            is_dirty = GIT_COMMIT.endswith("-dirty")
-            base_commit = GIT_COMMIT[:-6] if is_dirty else GIT_COMMIT
-            
-            # Shorten base commit if it looks like a full SHA
-            if len(base_commit) == 40:
-                base_commit = base_commit[:8]
-                
-            commit_str = f"{base_commit}-dirty" if is_dirty else base_commit
-            return f"<p><b>Git Commit:</b> {commit_str}</p>"
-    except Exception:
-        pass
-    return ""
+def format_about_text(fields: AboutFields) -> str:
+    """Format About fields as plain text for TUI / clipboard."""
+    lines = [fields.app_name, ""]
+    for label, value in fields.detail_rows:
+        lines.append(f"{label}: {value}")
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def build_about_info(
@@ -116,46 +167,38 @@ def build_about_info(
     gui_api_version: str,
     platform_name: str,
     app_version: Optional[str] = None,
+    ui_backend_label: Optional[str] = None,
 ) -> str:
-    """Build rich-text (Qt) for the About dialog. (Kept for compatibility)"""
-    try:
-        from ..ui.qt.bindings import get_binding_name
-        binding_name = get_binding_name()
-    except Exception:
-        binding_name = "pyside6"
+    """Build rich-text (Qt) for the About dialog.
 
-    version_line = f"<p><b>Version:</b> {app_version}</p>" if app_version else ""
-    binding_line = (
-        f"<p><b>Qt Binding:</b> {binding_name}</p>"
-        if binding_name != "pyside6"
-        else ""
+    Prefer ``get_about_fields`` + ``format_about_html`` / ``format_about_text``.
+    If ``ui_backend_label`` is omitted, attempts to resolve the Qt binding name
+    without failing when Qt is unavailable.
+    """
+    label = ui_backend_label
+    if label is None:
+        try:
+            from ..ui.qt.bindings import get_binding_name
+            label = get_binding_name()
+        except Exception:
+            label = None
+
+    fields = get_about_fields(
+        app_name=app_name,
+        gui_api_version=gui_api_version,
+        platform_name=platform_name,
+        app_version=app_version,
+        ui_backend_label=label,
     )
-
-    distro_line = ""
-    if str(platform_name).lower() == "linux":
-        pretty = _read_linux_pretty_name()
-        if pretty:
-            distro_line = f"<p><b>Distro:</b> {pretty}</p>"
-
-    build_distro_line = _build_distro_line(str(platform_name))
-    python_line = _python_version_line()
-    git_line = _git_commit_line()
-
-    from .display_utils import _format_platform_name
-    pretty_platform = _format_platform_name(platform_name)
-
-    return (
-        f"<h2>{app_name}</h2>"
-        f"{version_line}"
-        f"<p><b>GUI API Version:</b> {gui_api_version}</p>"
-        f"<p><b>Platform:</b> {pretty_platform}</p>"
-        f"{distro_line}"
-        f"{build_distro_line}"
-        f"{python_line}"
-        f"{git_line}"
-        f"{binding_line}"
-    )
+    return format_about_html(fields)
 
 
-__all__ = ["build_about_info"]
-
+__all__ = [
+    "AboutFields",
+    "get_about_fields",
+    "format_about_html",
+    "format_about_text",
+    "build_about_info",
+    "_read_linux_pretty_name",
+    "_format_build_time",
+]

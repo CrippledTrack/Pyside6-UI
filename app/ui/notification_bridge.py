@@ -3,20 +3,11 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
-from ...services.notification_service import Notification, NotificationService
-from ..abstractions.shell import IMainWindowShell
-from ..abstractions.types import ToastType
+from ..services.notification_service import Notification, NotificationService
+from .abstractions.shell import IMainWindowShell
 
 logger = logging.getLogger(__name__)
-
-_TOAST_MAP = {
-    "info": ToastType.INFO,
-    "success": ToastType.SUCCESS,
-    "warning": ToastType.WARNING,
-    "error": ToastType.ERROR,
-}
 
 
 class NotificationShellBridge:
