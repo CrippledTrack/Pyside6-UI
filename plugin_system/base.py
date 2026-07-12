@@ -98,15 +98,10 @@ class BaseTabPlugin:
         self._widget: Optional["QWidget"] = None
         
         # Convenience accessors for common services
-        # We try to get the settings service using interface first to avoid circular imports
         try:
             self.settings = container.get(ISettingsService)
         except (ValueError, KeyError, TypeError):
-            try:
-                from ..app.services.settings_service import SettingsService
-                self.settings = container.get(SettingsService)
-            except (ValueError, KeyError, ImportError):
-                self.settings = None
+            self.settings = None
     
     @abstractmethod
     def create_widget(self, parent: Optional["QWidget"] = None) -> "QWidget":

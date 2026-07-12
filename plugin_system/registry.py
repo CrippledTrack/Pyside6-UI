@@ -675,8 +675,7 @@ class PluginRegistry:
                 try:
                     settings_svc = self._container.get(ISettingsService)
                 except (ValueError, KeyError, TypeError):
-                    from ..app.services.settings_service import SettingsService
-                    settings_svc = self._container.get(SettingsService)
+                    settings_svc = None
                 if settings_svc and not settings_svc.is_extension_enabled(plugin_name, "Events"):
                     return None
         except Exception:

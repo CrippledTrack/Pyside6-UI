@@ -169,26 +169,17 @@ def build_about_info(
     app_version: Optional[str] = None,
     ui_backend_label: Optional[str] = None,
 ) -> str:
-    """Build rich-text (Qt) for the About dialog.
+    """Build rich-text HTML for the About dialog (no toolkit imports).
 
     Prefer ``get_about_fields`` + ``format_about_html`` / ``format_about_text``.
-    If ``ui_backend_label`` is omitted, attempts to resolve the Qt binding name
-    without failing when Qt is unavailable.
+    Pass ``ui_backend_label`` from the UI layer when a binding name is needed.
     """
-    label = ui_backend_label
-    if label is None:
-        try:
-            from ..ui.qt.bindings import get_binding_name
-            label = get_binding_name()
-        except Exception:
-            label = None
-
     fields = get_about_fields(
         app_name=app_name,
         gui_api_version=gui_api_version,
         platform_name=platform_name,
         app_version=app_version,
-        ui_backend_label=label,
+        ui_backend_label=ui_backend_label,
     )
     return format_about_html(fields)
 

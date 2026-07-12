@@ -1,14 +1,12 @@
-"""
-Qt dependency validation service for Linux.
-"""
+"""Qt dependency validation for Linux (Qt backend only)."""
+
 from __future__ import annotations
 
 import logging
 import platform
 from typing import Optional, Tuple
 
-from ..utils.qt_dependencies_linux import APT_PACKAGES
-
+from .dependencies_linux import APT_PACKAGES
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +25,7 @@ class QtDepsService:
             return True, None
 
         try:
-            from ..utils.qt_dependencies_linux import ensure_qt_xcb_dependencies_installed
+            from .dependencies_linux import ensure_qt_xcb_dependencies_installed
 
             if not ensure_qt_xcb_dependencies_installed():
                 logger.error("Required Qt xcb dependencies are missing.")

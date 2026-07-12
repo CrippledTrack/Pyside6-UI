@@ -102,18 +102,16 @@ class ServiceContainer:
         if DevModeService not in self._services:
             dev_mode_service = DevModeService()
             self.register_singleton(DevModeService, dev_mode_service)
-            # Wire into admin.py backward-compat shim
+            # Wire into admin.py early-bootstrap shim (set_dev_mode before container exists)
             try:
                 from ..utils.admin import set_dev_mode_service
                 set_dev_mode_service(dev_mode_service)
             except Exception as e:
                 logger.debug(f"Failed to wire DevModeService into admin shim: {e}")
 
-        # 1. Settings service (no dependencies)
-        if SettingsService not in self._services:
+        # 1. Settings service (no dependencies) — interface registrations only
+        if IAppSettingsService not in self._services:
             settings_service = SettingsService()
-            # DEPRECATED: Concrete registration for backward compatibility, will be removed in v6.0.0
-            self.register_singleton(SettingsService, settings_service)
             self.register_singleton(ISettingsService, settings_service)
             self.register_singleton(IAppSettingsService, settings_service)
             try:
@@ -123,18 +121,14 @@ class ServiceContainer:
                 logger.debug(f"Failed to configure dev mode settings: {e}")
         
         # 2. Daemon service (no dependencies)
-        if DaemonService not in self._services:
+        if IDaemonService not in self._services:
             daemon_service = DaemonService()
-            # DEPRECATED: Concrete registration for backward compatibility, will be removed in v6.0.0
-            self.register_singleton(DaemonService, daemon_service)
             self.register_singleton(IDaemonService, daemon_service)
         
         # 3. Admin service (depends on daemon service)
-        if AdminService not in self._services:
-            daemon_service = self.get(DaemonService)
+        if IAdminService not in self._services:
+            daemon_service = self.get(IDaemonService)
             admin_service = AdminService(daemon_service)
-            # DEPRECATED: Concrete registration for backward compatibility, will be removed in v6.0.0
-            self.register_singleton(AdminService, admin_service)
             self.register_singleton(IAdminService, admin_service)
         
         # 4. Plugin registry (no dependencies initially, container set below)
@@ -144,7 +138,7 @@ class ServiceContainer:
 
         # 4a. Plugin service (depends on settings service + registry)
         if PluginService not in self._services:
-            settings_service = self.get(SettingsService)
+            settings_service = self.get(IAppSettingsService)
             registry = self.get(PluginRegistry)
             plugin_service = PluginService(
                 settings_service=settings_service,
@@ -159,10 +153,8 @@ class ServiceContainer:
             self.register_singleton(PluginRegistryFacade, registry_facade)
 
         # 5. Notification service (no dependencies)
-        if NotificationService not in self._services:
+        if INotificationService not in self._services:
             notification_service = NotificationService()
-            # DEPRECATED: Concrete registration for backward compatibility, will be removed in v6.0.0
-            self.register_singleton(NotificationService, notification_service)
             self.register_singleton(INotificationService, notification_service)
         
         self._initialized = True
@@ -176,7 +168,7 @@ class ServiceContainer:
         logger.debug("Service container reset")
 
 
-# Global container instance (for backward compatibility during migration)
+# Global application container (set by app bootstrap)
 _global_container: Optional[ServiceContainer] = None
 
 

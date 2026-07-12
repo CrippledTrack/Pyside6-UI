@@ -1,6 +1,6 @@
 """Qt dependencies management for Linux platforms.
 
-This module handles detection and installation of Qt xcb platform dependencies
+Handles detection and installation of Qt xcb platform dependencies
 required for Qt applications to run on Linux systems.
 """
 
@@ -26,7 +26,7 @@ APT_PACKAGES = [
 
 def _detect_distribution_id() -> str:
     """Detect the Linux distribution ID.
-    
+
     Returns:
         Distribution ID string (e.g., 'debian', 'ubuntu') or 'unknown'
     """
@@ -44,16 +44,7 @@ def _detect_distribution_id() -> str:
 
 
 def _run(cmd: list[str], env: dict[str, str] | None = None, timeout: int = 600) -> tuple[str, str, int]:
-    """Run a command and return stdout, stderr, and return code.
-    
-    Args:
-        cmd: Command and arguments as a list
-        env: Optional environment variables dictionary
-        timeout: Command timeout in seconds (default 600)
-        
-    Returns:
-        Tuple of (stdout, stderr, returncode)
-    """
+    """Run a command and return stdout, stderr, and return code."""
     try:
         proc = subprocess.run(
             cmd,
@@ -94,29 +85,22 @@ def _get_missing_packages_debian(packages: list[str]) -> list[str]:
 
 
 def _install_qt_xcb_dependencies_debian(packages: list[str] | None = None) -> bool:
-    """Install required Qt xcb dependencies on Debian/Ubuntu systems.
-    
-    Returns:
-        True if installation succeeded, False otherwise
-    """
+    """Install required Qt xcb dependencies on Debian/Ubuntu systems."""
     apt_packages = packages or APT_PACKAGES
 
     try:
-        # Use interactive=True so password prompt can display
-        # Use relative import since we're in the same directory
-        from .elevation_linux import run_command_as_admin
+        from ...utils.elevation_linux import run_command_as_admin
         logger.info("Successfully imported run_command_as_admin from elevation_linux")
     except Exception as e:
         logger.error(f"Failed to import run_command_as_admin: {e}")
-        # Fallback that won't work for elevation but prevents crashes
+
         def run_command_as_admin(cmd, description="", interactive=False):
-            logger.error(f"Using fallback run_command_as_admin - NO ELEVATION!")
+            logger.error("Using fallback run_command_as_admin - NO ELEVATION!")
             return subprocess.run(cmd, capture_output=True, text=True)
 
     env = os.environ.copy()
     env['DEBIAN_FRONTEND'] = 'noninteractive'
 
-    # Combine apt-get update and install into a single command to avoid double authentication
     logger.info('Updating apt package lists and installing Qt xcb dependencies...')
     packages_str = ' '.join(apt_packages)
     combined_cmd = [
@@ -135,7 +119,7 @@ def _install_qt_xcb_dependencies_debian(packages: list[str] | None = None) -> bo
 
 def ensure_qt_xcb_dependencies_installed() -> bool:
     """Ensure Qt can load the xcb platform plugin by installing missing system libs if needed.
-    
+
     Returns True if Qt can initialize with xcb after this call, False otherwise.
     """
     distro = _detect_distribution_id()
@@ -149,8 +133,10 @@ def ensure_qt_xcb_dependencies_installed() -> bool:
         )
         installed = _install_qt_xcb_dependencies_debian(missing)
     else:
-        # Skip dependency check on non-Debian distros for now - assume Qt deps are available
-        logger.warning(f"Qt dependency check skipped for distribution '{distro}'. If the app fails to start, please install Qt xcb dependencies manually.")
+        logger.warning(
+            f"Qt dependency check skipped for distribution '{distro}'. "
+            "If the app fails to start, please install Qt xcb dependencies manually."
+        )
         return True
 
     if not installed:

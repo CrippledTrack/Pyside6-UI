@@ -50,9 +50,5 @@ class QtEventDispatcher:
         """Post a callback to the Qt main thread."""
         self._qobject.dispatch_signal.emit(callback, args, kwargs)
 
-    def dispatch(self, func: Callable, *args: Any, **kwargs: Any) -> None:
-        """Alias for invoke_on_main (backward compat within Qt layer)."""
-        self.invoke_on_main(func, *args, **kwargs)
-
 
 __all__ = ['QtEventDispatcher']

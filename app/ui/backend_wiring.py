@@ -8,8 +8,7 @@ from typing import Any, Optional
 from ..constants import GUI_API_VERSION
 from ..services.container import ServiceContainer
 from ..services.daemon_lifecycle_service import DaemonLifecycleService
-from ..services.interfaces import IAdminService, ISettingsService
-from ..services.notification_service import NotificationService
+from ..services.interfaces import IAdminService, ISettingsService, INotificationService
 from .abstractions.event_loop import IUIEventLoop
 from .abstractions.presenters import IDialogPresenter
 from .abstractions.shell import IMainWindowShell
@@ -62,7 +61,7 @@ def wire_notifications(
 ) -> NotificationShellBridge:
     """Subscribe NotificationService to the main window shell."""
     return NotificationShellBridge(
-        container.get(NotificationService),
+        container.get(INotificationService),
         shell,
     )
 

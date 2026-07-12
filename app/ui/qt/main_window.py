@@ -272,14 +272,13 @@ class MainWindow(QMainWindow):
             parent_widget=self,
         )
         
-        # Setup menu bar (UI toggle removed - now in theme dialog)
+        # Setup menu bar (new vs classic UI is toggled in the theme dialog)
         self.menu_controller.setup(
             on_manage_plugins=self.open_plugin_management_dialog,
             on_select_theme=self.open_theme_dialog,
             on_restart_admin=self.restart_as_admin,
             on_view_logs=self.open_log_viewer_dialog,
             on_about=self.show_about_dialog,
-            on_toggle_new_ui=None,  # Moved to theme dialog
         )
     
         # Connect dev menu signals
