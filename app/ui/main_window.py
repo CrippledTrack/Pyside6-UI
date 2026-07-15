@@ -287,7 +287,11 @@ class MainWindow(QMainWindow):
                 self.tab_loader.cancel()
                 self.tab_loader.wait(5000)  # Wait up to 5 seconds
                 if self.tab_loader.isRunning():
-                    logger.warning("Previous tab loader thread did not finish in time")
+                    logger.warning(
+                        "Previous tab loader thread did not finish in time; "
+                        "refusing to start a second loader"
+                    )
+                    return
         
         plugin_service = self.container.get(PluginService)
         self.tab_loader = TabLoaderThread(
@@ -438,7 +442,10 @@ class MainWindow(QMainWindow):
             if plugin_class:
                 # Check if Tab extension is enabled
                 if self.settings_service.is_extension_enabled(plugin_name, "Tab"):
-                    self.tab_controller.add_tab(plugin_name, plugin_class)
+                    # Avoid duplicate tabs when Enable All / Enable Selected
+                    # re-emits toggle for already-enabled plugins.
+                    if plugin_name not in self.tab_controller.loaded_tabs:
+                        self.tab_controller.add_tab(plugin_name, plugin_class)
         else:
             self.tab_controller.remove_tab(plugin_name)
         
@@ -479,12 +486,21 @@ class MainWindow(QMainWindow):
             current_theme = self.theme_manager.get_current_theme()
             if current_theme:
                 self.theme_manager.apply_theme(current_theme, new_ui_enabled=enabled)
+            # Keep chrome consistent with on_theme_selected
+            if self.toast_manager:
+                self.toast_manager.update_theme_manager(self.theme_manager)
+                self.toast_manager.refresh_theme()
+            if self.status_bar_manager:
+                self.status_bar_manager.refresh_theme()
+            if self.menu_controller:
+                self.menu_controller.refresh_for_theme_change()
         
         # Show notification
         state_text = "enabled" if enabled else "disabled"
-        self.toast_manager.show_info(
-            f"New UI {state_text}. Some changes may require restart to take full effect."
-        )
+        if self.toast_manager:
+            self.toast_manager.show_info(
+                f"New UI {state_text}. Some changes may require restart to take full effect."
+            )
         
         logger.info(f"New UI toggled from theme dialog: {enabled}")
     
@@ -727,6 +743,21 @@ class MainWindow(QMainWindow):
     
     def closeEvent(self, event: QCloseEvent) -> None:
         """Handle window close event to save settings."""
+        # Stop tab loader first so it cannot race teardown of the registry/tabs.
+        tab_loader = getattr(self, "tab_loader", None)
+        if tab_loader is not None:
+            try:
+                tab_loader.finished.disconnect()
+                tab_loader.error.disconnect()
+                tab_loader.add_tab.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+            if tab_loader.isRunning():
+                tab_loader.cancel()
+                if not tab_loader.wait(5000):
+                    logger.warning("TabLoaderThread did not finish before window close")
+            self.tab_loader = None
+
         if self.settings_service:
             # Save window geometry
             geom = self.geometry()
@@ -764,7 +795,7 @@ class MainWindow(QMainWindow):
         # PERF: Shut down the plugin registry's ThreadPoolExecutor so worker threads
         # are joined on app exit, not just during plugin reload.
         try:
-            self.registry._registry._shutdown_event_executor()
+            self.plugin_registry._registry._shutdown_event_executor()
         except Exception:
             pass
         

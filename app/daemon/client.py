@@ -558,6 +558,21 @@ class LocalDaemonClient:
                         'success': False
                     }
                 }
+        elif operation == 'run_command_stream':
+            # Local (root) path: no real streaming transport; emit full
+            # stdout/stderr via on_chunk-equivalent by returning aggregated
+            # output. Callers must use request_stream() for chunk callbacks.
+            return self.request('run_command', params, timeout=timeout)
+        elif operation == 'cancel':
+            return {
+                'id': request_id,
+                'success': True,
+                'result': {
+                    'cancelled': False,
+                    'target_id': params.get('target_id'),
+                    'message': 'LocalDaemonClient has no cancellable subprocesses',
+                },
+            }
         elif operation == 'ping':
             return {
                 'id': request_id,
@@ -576,6 +591,86 @@ class LocalDaemonClient:
                 'success': False,
                 'error': f"Unknown operation: {operation}"
             }
+
+    def request_stream(self, operation: str, params: Dict[str, Any],
+                       on_chunk: Callable[[str], None],
+                       timeout: float = None) -> Dict[str, Any]:
+        """Local streaming: run the command once and invoke on_chunk for each line."""
+        import uuid
+        import subprocess
+
+        request_id = str(uuid.uuid4())
+        if operation not in ('run_command_stream', 'run_command'):
+            return {
+                'id': request_id,
+                'success': False,
+                'error': f"Unsupported stream operation: {operation}",
+            }
+
+        command = params.get('command')
+        if not command or not isinstance(command, list):
+            return {
+                'id': request_id,
+                'success': False,
+                'error': "Command must be a non-empty list",
+            }
+
+        cmd_timeout = params.get('timeout', timeout)
+        if cmd_timeout is not None:
+            try:
+                cmd_timeout = int(cmd_timeout)
+            except (TypeError, ValueError):
+                cmd_timeout = None
+
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=cmd_timeout,
+            )
+            for stream_text in (result.stdout or "", result.stderr or ""):
+                for line in stream_text.splitlines():
+                    try:
+                        on_chunk(line)
+                    except Exception:
+                        pass
+            return {
+                'id': request_id,
+                'success': True,
+                'result': {
+                    'returncode': result.returncode,
+                    'stdout': result.stdout,
+                    'stderr': result.stderr,
+                    'success': result.returncode == 0,
+                },
+            }
+        except subprocess.TimeoutExpired as e:
+            return {
+                'id': request_id,
+                'success': True,
+                'result': {
+                    'returncode': -1,
+                    'stdout': '',
+                    'stderr': f'Command timed out: {e}',
+                    'success': False,
+                },
+            }
+        except Exception as e:
+            return {
+                'id': request_id,
+                'success': True,
+                'result': {
+                    'returncode': -1,
+                    'stdout': '',
+                    'stderr': str(e),
+                    'success': False,
+                },
+            }
+
+    def cancel_request(self, target_id: str, timeout: float = 5.0) -> Dict[str, Any]:
+        """Local client has no background jobs; report not cancelled."""
+        return self.request('cancel', {'target_id': target_id}, timeout=timeout)
 
     def __enter__(self):
         return self

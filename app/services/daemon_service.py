@@ -88,14 +88,10 @@ class DaemonService:
         """
         if not self._is_linux:
             return False, "Daemon is only available on Linux"
-            
-        try:
-            from ..utils.imports import get_platforms_constants
-            constants = get_platforms_constants()
-            constants.USE_PIPE_DAEMON = False
-        except Exception as e:
-            logger.error(f"Failed to reset USE_PIPE_DAEMON constant: {e}")
-            
+
+        switch_err = self._switch_daemon_mode(use_pipe=False)
+        if switch_err:
+            return False, switch_err
         return self.start()
 
     def start_pipe(self) -> tuple[bool, Optional[str]]:
@@ -106,15 +102,44 @@ class DaemonService:
         """
         if not self._is_linux:
             return False, "Daemon is only available on Linux"
-            
+
+        switch_err = self._switch_daemon_mode(use_pipe=True)
+        if switch_err:
+            return False, switch_err
+        return self.start()
+
+    def _switch_daemon_mode(self, use_pipe: bool) -> Optional[str]:
+        """Stop the opposite daemon mode (if any) then set USE_PIPE_DAEMON.
+
+        Returns:
+            Error message on failure, otherwise None.
+        """
         try:
             from ..utils.imports import get_platforms_constants
+            from ..utils.elevation_linux import stop_daemon
+            from ..daemon import set_daemon_client
+
             constants = get_platforms_constants()
-            constants.USE_PIPE_DAEMON = True
+            currently_pipe = bool(getattr(constants, "USE_PIPE_DAEMON", False))
+            if currently_pipe != use_pipe:
+                logger.info(
+                    "Switching daemon mode %s -> %s; stopping previous daemon",
+                    "pipe" if currently_pipe else "socket",
+                    "pipe" if use_pipe else "socket",
+                )
+                try:
+                    stop_daemon()
+                except Exception as e:
+                    logger.warning(f"Error stopping previous daemon mode: {e}")
+                try:
+                    set_daemon_client(None)
+                except Exception:
+                    pass
+            constants.USE_PIPE_DAEMON = use_pipe
+            return None
         except Exception as e:
-            logger.error(f"Failed to set USE_PIPE_DAEMON constant: {e}")
-            
-        return self.start()
+            logger.error(f"Failed to switch daemon mode: {e}")
+            return f"Failed to switch daemon mode: {e}"
 
     def start(self) -> tuple[bool, Optional[str]]:
         """Start the privileged daemon.

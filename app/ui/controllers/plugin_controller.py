@@ -54,6 +54,7 @@ class PluginController(QObject):
         self._plugin_toolbar_actions: Dict[str, list] = {}  # plugin_name -> [action, ...]
         self._plugin_status_widgets: Dict[str, list] = {}  # plugin_name -> [widget, ...]
         self._plugin_created_menus: Dict[str, list] = {}  # plugin_name -> [menu, ...] menus created by plugin
+        self._plugin_service_started: set[str] = set()  # service extensions already started
         self._service_extensions_started: bool = False  # Track if service extensions have been started
 
         # Map of extension names to integration functions
@@ -109,8 +110,9 @@ class PluginController(QObject):
                 has_menu = plugin_name in self._plugin_menu_actions
                 has_toolbar = plugin_name in self._plugin_toolbar_actions
                 has_status = plugin_name in self._plugin_status_widgets
+                has_service = plugin_name in self._plugin_service_started
                 
-                if not (has_menu or has_toolbar or has_status):
+                if not (has_menu or has_toolbar or has_status or has_service):
                     self._integrate_plugin_extensions_dynamic(plugin_name, plugin_class)
                 else:
                     logger.debug(f"Extensions already integrated for '{plugin_name}'")
@@ -240,6 +242,7 @@ class PluginController(QObject):
                         )
                 except Exception as e:
                     logger.error(f"Error shutting down service extension '{plugin_name}': {e}")
+            self._plugin_service_started.discard(plugin_name)
                     
         except Exception as e:
             logger.error(f"Error removing extensions for '{plugin_name}': {e}")
@@ -607,9 +610,13 @@ class PluginController(QObject):
     
     def _integrate_service_extension(self, name: str, plugin_class: type) -> None:
         """Start a ServiceExtension plugin."""
+        if name in self._plugin_service_started:
+            logger.debug(f"Service extension already started: {name}")
+            return
         instance = self.registry.get_plugin_instance(name)
         logger.info(f"Starting service extension: {name}")
         instance.on_application_start(self.container)
+        self._plugin_service_started.add(name)
 
     def start_service_extensions(self) -> None:
         """Start all ServiceExtension plugins."""
@@ -646,6 +653,7 @@ class PluginController(QObject):
                     logger.error(f"Error shutting down service extension '{name}': {e}")
             # Mark that service extensions have been shut down
             self._service_extensions_started = False
+            self._plugin_service_started.clear()
         except Exception as e:
             logger.error(f"Error shutting down service extensions: {e}")
 

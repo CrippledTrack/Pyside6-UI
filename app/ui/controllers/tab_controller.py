@@ -89,6 +89,9 @@ class TabController(QObject):
             tab_name: Name of the tab
             plugin_class: Plugin class for the tab
         """
+        if tab_name in self.loaded_tabs:
+            logger.debug(f"Tab already present, skipping add: {tab_name}")
+            return
         placeholder = LoadingPlaceholder(tab_name)
         self.loaded_tabs[tab_name] = {
             "plugin_class": plugin_class,
@@ -119,10 +122,12 @@ class TabController(QObject):
                 break
         
         if tab_name in self.loaded_tabs:
-            # Call deactivation hook if instance exists
+            # Call deactivation hook only for real plugin widgets (not placeholders)
             tab_info = self.loaded_tabs[tab_name]
-            if tab_info.get("instance"):
-                # Call deactivation hook
+            instance = tab_info.get("instance")
+            if instance and not isinstance(
+                instance, (LoadingPlaceholder, ErrorPlaceholder, AdminRequiredPlaceholder)
+            ):
                 try:
                     plugin_instance = self.registry.get_plugin_instance(tab_name)
                     if hasattr(plugin_instance, 'on_tab_deactivated'):
@@ -131,14 +136,10 @@ class TabController(QObject):
                     logger.debug(f"Error calling deactivation hook: {e}")
             
             del self.loaded_tabs[tab_name]
-            
-            # PERF: Unload the plugin instance from the registry cache to free
-            # the entire plugin object graph (timers, threads, sub-widgets).
-            # The instance will be re-created on demand if the tab is re-added.
-            try:
-                self.registry.unload_plugin_instance(tab_name)
-            except Exception as e:
-                logger.debug(f"Error unloading plugin instance '{tab_name}': {e}")
+
+            # Keep the registry instance cached. Instances are shared across
+            # Tab/Menu/Toolbar/Service extensions and must only be unloaded when
+            # the plugin is disabled or the registry is cleared.
             
             self.tab_removed.emit(tab_name)
             self.title_update_requested.emit()
@@ -382,9 +383,12 @@ class TabController(QObject):
         tracking of loaded tabs without removing the actual tab widgets
         (which should be removed separately).
         """
-        # Call deactivation hooks for all tabs with instances
+        # Call deactivation hooks only for real plugin widgets (not placeholders)
         for tab_name, tab_info in self.loaded_tabs.items():
-            if tab_info.get("instance"):
+            instance = tab_info.get("instance")
+            if instance and not isinstance(
+                instance, (LoadingPlaceholder, ErrorPlaceholder, AdminRequiredPlaceholder)
+            ):
                 try:
                     plugin_instance = self.registry.get_plugin_instance(tab_name)
                     if hasattr(plugin_instance, 'on_tab_deactivated'):

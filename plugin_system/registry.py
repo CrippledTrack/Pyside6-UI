@@ -308,8 +308,15 @@ class PluginRegistry:
             
             if not self._container:
                 raise ValueError("ServiceContainer not set - call set_container() first")
-            # Instantiate strict new-architecture plugin directly
-            instance = plugin_class(self._container)
+            container = self._container
+
+        # Construct outside the lock so plugin __init__ can safely touch the
+        # registry without deadlocking (Lock is not re-entrant).
+        instance = plugin_class(container)
+        with self._lock:
+            existing = self._plugin_instances.get(name)
+            if existing is not None:
+                return existing
             self._plugin_instances[name] = instance
             
             logger.debug(f"Created instance for plugin: {name}")

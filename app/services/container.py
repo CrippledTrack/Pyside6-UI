@@ -158,15 +158,23 @@ class ServiceContainer:
             registry_facade = PluginRegistryFacade(self, registry=registry)
             self.register_singleton(PluginRegistryFacade, registry_facade)
 
-        # 5. Notification service (no dependencies)
+        # 5. Notification service requires QApplication (QObject). Defer until
+        # initialize_qt_services() after QApplication is created.
+        
+        self._initialized = True
+        logger.info("Services initialized successfully")
+
+    def initialize_qt_services(self) -> None:
+        """Register services that require a live QApplication.
+
+        Must be called after QApplication is constructed.
+        """
         if NotificationService not in self._services:
             notification_service = NotificationService()
             # DEPRECATED: Concrete registration for backward compatibility, will be removed in v6.0.0
             self.register_singleton(NotificationService, notification_service)
             self.register_singleton(INotificationService, notification_service)
-        
-        self._initialized = True
-        logger.info("Services initialized successfully")
+            logger.info("Qt-dependent services initialized")
     
     def reset(self) -> None:
         """Reset the container (mainly for testing)."""

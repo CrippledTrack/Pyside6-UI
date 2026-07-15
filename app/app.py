@@ -100,6 +100,9 @@ def run(argv: List[str]) -> int:
 
     app = QApplication(argv)
 
+    # Register QObject-based services only after QApplication exists
+    container.initialize_qt_services()
+
     # Initialize the QtEventDispatcher on the main thread to ensure proper thread affinity
     from ..plugin_system.registry import QtEventDispatcher
     QtEventDispatcher.get_instance()

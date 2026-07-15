@@ -441,12 +441,32 @@ def start_daemon(socket_path: Optional[str] = None) -> Optional[object]:
     if is_daemon_running(socket_path):
         logger.info("Daemon already running")
         if use_pipe_daemon:
-            from ..daemon import get_daemon_client, is_daemon_available
+            from ..daemon import (
+                get_daemon_client,
+                is_daemon_available,
+                peek_daemon_client,
+                set_daemon_client,
+            )
             if is_daemon_available():
                 return get_daemon_client()
-            else:
-                from ..daemon.client import DaemonClient
-                return DaemonClient(process=_daemon_process)
+            # Prefer reconnecting an existing client that already owns this
+            # process so we do not start a second stdout reader thread.
+            existing = peek_daemon_client()
+            if (
+                existing is not None
+                and getattr(existing, "_process", None) is _daemon_process
+            ):
+                if existing.connect():
+                    set_daemon_client(existing)
+                    return existing
+                logger.warning(
+                    "Existing pipe client could not reconnect; creating a replacement client"
+                )
+                set_daemon_client(None)
+            from ..daemon.client import DaemonClient
+            client = DaemonClient(process=_daemon_process)
+            set_daemon_client(client)
+            return client
         else:
             from ..daemon.client import DaemonClient
             client = DaemonClient(socket_path)

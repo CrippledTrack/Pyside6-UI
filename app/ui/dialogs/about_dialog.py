@@ -198,7 +198,15 @@ class AboutDialog(QDialog):
         clipboard.setText(self.plain_text_info)
         self._copy_btn.setText("Copied!")
         from ...qt_bindings import QTimer
-        QTimer.singleShot(2000, lambda: self._copy_btn.setText("Copy Info"))
+
+        def _restore_copy_label() -> None:
+            try:
+                self._copy_btn.setText("Copy Info")
+            except RuntimeError:
+                # Dialog may already be deleted (WA_DeleteOnClose)
+                pass
+
+        QTimer.singleShot(2000, _restore_copy_label)
         
     def apply_theme(self) -> None:
         """Apply theme-aware styling to the About dialog."""

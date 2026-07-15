@@ -20,6 +20,11 @@ def set_daemon_client(client: Optional['DaemonClient']) -> None:
     _daemon_client = client
 
 
+def peek_daemon_client() -> Optional['DaemonClient']:
+    """Return the global daemon client without raising if unset."""
+    return _daemon_client
+
+
 def get_daemon_client() -> 'DaemonClient':
     """Get the global daemon client instance.
     
@@ -44,4 +49,9 @@ def is_daemon_available() -> bool:
         return False
 
 
-__all__ = ['set_daemon_client', 'get_daemon_client', 'is_daemon_available']
+__all__ = [
+    'set_daemon_client',
+    'peek_daemon_client',
+    'get_daemon_client',
+    'is_daemon_available',
+]
