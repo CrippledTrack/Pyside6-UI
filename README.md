@@ -78,6 +78,25 @@ To leave the environment later, run:
 deactivate
 ```
 
+For the complete runtime and build dependencies, install the platform
+requirements file instead of installing only PySide6:
+
+```bash
+# Linux
+pip install -r requirements-linux.txt
+
+# Windows
+pip install -r requirements-win.txt
+
+# macOS
+pip install PySide6 psutil pyinstaller
+```
+
+On Debian, Ubuntu, and Linux Mint, startup checks for the Qt xcb system
+libraries and attempts to install missing packages through `pkexec` or `sudo`.
+If automatic installation fails, the terminal error includes the required
+`apt-get install` command.
+
 ### Building a standalone binary (PyInstaller)
 
 You can build a single executable so that no external start script is needed.
@@ -94,11 +113,21 @@ You can build a single executable so that no external start script is needed.
 
 The resulting binary is self-contained; you do **not** need to ship or run `main.py` or any other launcher. Build options (e.g. `--onedir`, `--name`, `--icon`) are documented in the script help: `python3 scripts/build.py --help`.
 
-- The build script uses `run.py` as the entry; it adds the parent of the GUI directory (or the bundle root when frozen) to the path so PyInstaller sees the GUI package and the bundle is correct.
+- In standalone layout the build script uses `run.py` as the entry; it adds the
+  parent of the GUI directory (or the bundle root when frozen) to the path so
+  PyInstaller sees the GUI package. In a parent-project layout the build uses
+  the project's `main.py`.
 
 ### Standalone and external plugin directories
 
 When you run standalone (`cd GUI && python run.py`), if the **parent** of `GUI/` contains an `app_plugins` or `platforms` folder that looks like this GUI’s plugin tree (e.g. has `constants.py`, `core_plugins.py`, or `linux/` / `windows/` subdirs), the app will load constants and plugins from those directories. That lets you use the full repo layout without running from the repo root. If the parent has a folder named `app_plugins` or `platforms` that is **not** for this app (e.g. another project’s), avoid running standalone from that location so the app doesn’t use the wrong constants or plugins.
+
+### Engineering guides
+
+- [Plugin development](docs/PLUGINS.md): discovery order, extension
+  interfaces, compatibility, single-plugin mode, and cleanup.
+- [Linux privileged daemon](docs/DAEMON.md): startup modes, command API,
+  protocol constraints, shutdown behavior, and troubleshooting.
 
 ### Troubleshooting
 
