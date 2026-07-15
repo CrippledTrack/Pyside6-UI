@@ -1,7 +1,15 @@
+import importlib
+import sys
 import unittest
+from pathlib import Path
 from unittest.mock import Mock
 
-from app.ui.controllers.tab_controller import TabController
+
+package_dir = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(package_dir.parent))
+TabController = importlib.import_module(
+    f"{package_dir.name}.app.ui.controllers.tab_controller"
+).TabController
 
 
 class TabControllerTests(unittest.TestCase):
