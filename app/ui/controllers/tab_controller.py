@@ -131,15 +131,7 @@ class TabController(QObject):
                     logger.debug(f"Error calling deactivation hook: {e}")
             
             del self.loaded_tabs[tab_name]
-            
-            # PERF: Unload the plugin instance from the registry cache to free
-            # the entire plugin object graph (timers, threads, sub-widgets).
-            # The instance will be re-created on demand if the tab is re-added.
-            try:
-                self.registry.unload_plugin_instance(tab_name)
-            except Exception as e:
-                logger.debug(f"Error unloading plugin instance '{tab_name}': {e}")
-            
+
             self.tab_removed.emit(tab_name)
             self.title_update_requested.emit()
             logger.debug(f"Removed tab: {tab_name}")
