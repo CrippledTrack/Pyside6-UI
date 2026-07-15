@@ -376,28 +376,20 @@ class TabController(QObject):
         return order
 
     def clear_loaded_tabs(self) -> None:
-        """Clear all loaded tab state.
-        
-        This is used when reloading all plugins. It clears the internal
-        tracking of loaded tabs without removing the actual tab widgets
-        (which should be removed separately).
+        """Clear loaded-tab tracking without touching the tab bar.
+
+        Prefer :meth:`clear_all_tabs` for full teardown (close / reload).
+        This only drops bookkeeping after instances were already unloaded.
         """
-        # Call deactivation hooks for all tabs with instances
-        for tab_name, tab_info in self.loaded_tabs.items():
-            if tab_info.get("instance"):
-                try:
-                    plugin_instance = self.registry.get_plugin_instance(tab_name)
-                    if hasattr(plugin_instance, 'on_tab_deactivated'):
-                        plugin_instance.on_tab_deactivated()
-                except Exception as e:
-                    logger.debug(f"Error calling deactivation hook for {tab_name}: {e}")
-        
         self.loaded_tabs.clear()
         self._previous_tab_index = -1
         logger.info("Cleared all loaded tab state")
 
     def on_plugins_unloaded(self, plugin_names: List[str]) -> None:
         """IPluginLifecycle: clear tab state when plugins are unloaded."""
+        if self._batch_loading:
+            # Bulk teardown (clear_all_tabs) owns tab removal; avoid re-entrant remove_tab.
+            return
         self.clear_tabs_for_plugins(plugin_names)
 
     def on_plugins_discovered(self, plugin_names: List[str]) -> None:
@@ -415,22 +407,45 @@ class TabController(QObject):
                 self.remove_tab(name)
 
     def clear_all_tabs(self) -> None:
-        """Clear all tabs, closing and deleting their widgets and resetting state."""
+        """Clear all tabs: detach from tab bar, then unload instances safely."""
         self.set_batch_loading(True)
         try:
-            # First, call deactivation hooks and clear dict tracking
-            self.clear_loaded_tabs()
-            
-            # Close and delete all tab widgets in the tab bar
+            for tab_name in list(self.loaded_tabs.keys()):
+                tab_info = self.loaded_tabs.pop(tab_name, {})
+                instance = tab_info.get("instance")
+                if instance is not None:
+                    try:
+                        if hasattr(instance, 'on_tab_deactivated'):
+                            instance.on_tab_deactivated()
+                    except Exception as e:
+                        logger.debug(f"Error calling deactivation hook for {tab_name}: {e}")
+
+                # Detach from QTabWidget *before* cleanup deleteLater (avoids Qt abort)
+                for i in range(self.tab_widget.count()):
+                    if self.tab_widget.tabText(i) == tab_name:
+                        self.tab_widget.removeTab(i)
+                        break
+
+                try:
+                    self.registry.unload_plugin_instance(tab_name)
+                except Exception as e:
+                    logger.debug(f"Error unloading plugin instance '{tab_name}': {e}")
+
+            # Leftover placeholders / tabs without loaded_tabs entries
             while self.tab_widget.count() > 0:
                 widget = self.tab_widget.widget(0)
                 self.tab_widget.removeTab(0)
                 if widget:
                     try:
+                        widget.setParent(None)
                         widget.close()
                         widget.deleteLater()
+                    except RuntimeError:
+                        pass
                     except Exception as e:
-                        logger.debug(f"Error closing/deleting tab widget: {e}")
+                        logger.debug(f"Error closing/deleting leftover tab widget: {e}")
+
+            self._previous_tab_index = -1
         finally:
             self.set_batch_loading(False)
         logger.info("Cleared and destroyed all tab widgets and state")

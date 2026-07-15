@@ -63,10 +63,17 @@ class DaemonService:
                 logger.info("Daemon client set globally")
                 self._notify_refresh_callbacks()
                 return True, None
-            return False, "Failed to start the privileged daemon"
+            return False, (
+                "Failed to start the privileged daemon. "
+                "Ensure pkexec or sudo is installed, approve the elevation prompt, "
+                "and check the application log for details."
+            )
         except Exception as e:
             logger.error(f"Error starting daemon: {e}", exc_info=True)
-            return False, f"Error starting daemon: {e}"
+            return False, (
+                f"Error starting privileged daemon: {e}. "
+                "Ensure pkexec or sudo is available and try again."
+            )
 
     def register_refresh_callback(self, callback: Callable[[], None]) -> None:
         """Register a callback to be called when daemon becomes available."""

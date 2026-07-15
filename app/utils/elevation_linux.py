@@ -22,6 +22,22 @@ DAEMON_SHUTDOWN_TIMEOUT = 2   # Wait for daemon shutdown
 _daemon_process: Optional[subprocess.Popen] = None
 
 
+def clear_daemon_process() -> None:
+    """Clear the module-level daemon process pointer (does not kill the process).
+
+    Used when a client takes ownership of restarting so ``start_daemon()``
+    will spawn a new process instead of returning the dead handle.
+    """
+    global _daemon_process
+    _daemon_process = None
+
+
+def set_daemon_process(process: Optional[subprocess.Popen]) -> None:
+    """Update the module-level daemon process pointer."""
+    global _daemon_process
+    _daemon_process = process
+
+
 def _set_pdeathsig():
     """Ask the Linux kernel to send SIGTERM when our parent process dies.
     
@@ -600,4 +616,13 @@ def stop_daemon():
     _daemon_process = None
 
 
-__all__ = ['is_admin', 'run_command_as_admin', 'get_sudo_status', 'start_daemon', 'stop_daemon', 'is_daemon_running']
+__all__ = [
+    'is_admin',
+    'run_command_as_admin',
+    'get_sudo_status',
+    'start_daemon',
+    'stop_daemon',
+    'is_daemon_running',
+    'clear_daemon_process',
+    'set_daemon_process',
+]

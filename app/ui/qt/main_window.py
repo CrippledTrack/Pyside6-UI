@@ -486,10 +486,6 @@ class MainWindow(QMainWindow):
     
     def _on_ui_toggle_from_dialog(self, enabled: bool) -> None:
         """Handle UI toggle change from theme dialog."""
-        # Update menu action if it exists (for consistency)
-        if self.menu_controller:
-            self.menu_controller.update_new_ui_action()
-        
         # Reapply current theme with new UI flag setting
         if self.theme_manager:
             current_theme = self.theme_manager.get_current_theme()
@@ -589,10 +585,14 @@ class MainWindow(QMainWindow):
             if CURRENT_PLATFORM == "linux":
                 if success:
                     self.toast_manager.show_success("Privileged daemon started successfully")
+                    if self.menu_controller:
+                        self.menu_controller.update_admin_menu()
                 else:
-                    self.toast_manager.show_error(
-                        f"Failed to start daemon: {error_msg or 'Check system permissions'}"
+                    detail = error_msg or (
+                        "Could not start the privileged daemon. "
+                        "Approve the pkexec/sudo prompt and check logs."
                     )
+                    self.toast_manager.show_error(f"Failed to start daemon: {detail}")
             elif CURRENT_PLATFORM != "windows":
                 if not success:
                     self.toast_manager.show_warning(
@@ -600,7 +600,10 @@ class MainWindow(QMainWindow):
                     )
         except Exception as e:
             logger.error(f"Failed to restart as administrator: {e}")
-            self.toast_manager.show_error(f"Failed to restart as administrator: {e}")
+            if CURRENT_PLATFORM == "linux":
+                self.toast_manager.show_error(f"Failed to start privileged daemon: {e}")
+            else:
+                self.toast_manager.show_error(f"Failed to restart as administrator: {e}")
     
     def _refresh_admin_tabs(self) -> None:
         """Refresh tabs that require admin privileges.

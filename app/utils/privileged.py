@@ -8,9 +8,20 @@ from __future__ import annotations
 
 import logging
 import subprocess
-from typing import List, Union
+from dataclasses import dataclass
+from typing import Callable, List, Optional, Union
+
+from ..daemon.client import StreamRequestHandle
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PrivilegedStreamResult:
+    """Result of a streaming privileged command."""
+
+    completed: subprocess.CompletedProcess
+    request_id: Optional[str] = None
 
 
 def run_privileged_command(command: Union[str, List[str]], timeout: int = 300):
@@ -80,6 +91,120 @@ def run_privileged_command(command: Union[str, List[str]], timeout: int = 300):
     except Exception as e:
         logger.error(f"Error running privileged command: {str(e)}", exc_info=True)
         raise
+
+
+def run_privileged_command_stream(
+    command: Union[str, List[str]],
+    on_chunk: Callable[[str], None],
+    timeout: int = 300,
+    on_started: Optional[Callable[[StreamRequestHandle], None]] = None,
+) -> PrivilegedStreamResult:
+    """Run a privileged command and stream stdout lines via ``on_chunk``.
+
+    Args:
+        command: Command list or shell string.
+        on_chunk: Called for each output line as it arrives.
+        timeout: Idle timeout in seconds (resets on each chunk). ``None`` uses
+            the daemon client default.
+        on_started: Optional callback receiving a :class:`StreamRequestHandle`
+            so the caller can cancel via :func:`cancel_privileged_request`.
+
+    Returns:
+        :class:`PrivilegedStreamResult` with the completed process and request id.
+
+    Raises:
+        RuntimeError: If the daemon is unavailable.
+        subprocess.CalledProcessError: If the daemon reports failure without a result.
+    """
+    try:
+        from ..daemon import get_daemon_client
+
+        daemon = get_daemon_client()
+
+        if isinstance(command, str):
+            cmd_to_send = ['sh', '-c', command]
+        else:
+            cmd_to_send = command
+
+        if timeout is None:
+            timeout_for_request = None
+        else:
+            timeout_for_request = int(timeout) if timeout else 300
+
+        handle_box: dict[str, Optional[StreamRequestHandle]] = {'handle': None}
+
+        def _on_started(handle: StreamRequestHandle) -> None:
+            handle_box['handle'] = handle
+            if on_started is not None:
+                on_started(handle)
+
+        response = daemon.request_stream(
+            'run_command_stream',
+            {
+                'command': cmd_to_send,
+                'timeout': timeout_for_request,
+            },
+            on_chunk=on_chunk,
+            timeout=timeout_for_request,
+            on_started=_on_started,
+        )
+
+        request_id = None
+        if handle_box['handle'] is not None:
+            request_id = handle_box['handle'].request_id
+        elif response.get('id'):
+            request_id = str(response['id'])
+
+        if not response.get('success', False):
+            error_msg = str(response.get('error', 'Unknown error'))
+            result = response.get('result', {}) or {}
+            stderr_msg = str(result.get('stderr', '')) or error_msg
+            raise subprocess.CalledProcessError(
+                result.get('returncode', -1),
+                command,
+                str(result.get('stdout', '')),
+                stderr_msg,
+            )
+
+        result = response.get('result', {}) or {}
+        completed = subprocess.CompletedProcess(
+            command,
+            result.get('returncode', 0),
+            str(result.get('stdout', '')),
+            str(result.get('stderr', '')),
+        )
+        return PrivilegedStreamResult(completed=completed, request_id=request_id)
+
+    except RuntimeError as e:
+        logger.error(f"Daemon not available ({e}). Privileged operations are disabled.")
+        raise RuntimeError(
+            "Privileged operations require daemon. Start application with admin privileges to enable."
+        ) from e
+    except Exception as e:
+        logger.error(f"Error running privileged stream command: {e}", exc_info=True)
+        raise
+
+
+def cancel_privileged_request(target_id: str, timeout: float = 5.0) -> bool:
+    """Cancel a running privileged streaming request by id.
+
+    Returns:
+        True if the daemon reported the job as cancelled.
+    """
+    if not target_id:
+        return False
+    try:
+        from ..daemon import get_daemon_client
+
+        daemon = get_daemon_client()
+        response = daemon.cancel_request(target_id, timeout=timeout)
+        if not response.get('success', False):
+            return False
+        result = response.get('result', {}) or {}
+        return bool(result.get('cancelled'))
+    except Exception as e:
+        logger.error(f"Error cancelling privileged request {target_id}: {e}", exc_info=True)
+        return False
 
 
 def read_privileged_file(file_path: str) -> str:
@@ -172,4 +297,11 @@ def write_privileged_file(file_path: str, content: str) -> bool:
         return False
 
 
-__all__ = ['run_privileged_command', 'read_privileged_file', 'write_privileged_file']
+__all__ = [
+    'run_privileged_command',
+    'run_privileged_command_stream',
+    'cancel_privileged_request',
+    'PrivilegedStreamResult',
+    'read_privileged_file',
+    'write_privileged_file',
+]

@@ -179,8 +179,8 @@ class PluginRegistry:
             self._container = container
             unloaded = list(self._plugin_instances.keys())
             self._plugin_instances.clear()
-            if unloaded:
-                self._notify_plugins_unloaded(unloaded)
+        if unloaded:
+            self._notify_plugins_unloaded(unloaded)
 
     def subscribe_lifecycle(self, subscriber: Any) -> None:
         """Register a lifecycle event subscriber."""
@@ -515,26 +515,30 @@ class PluginRegistry:
     def clear(self) -> None:
         """Clear all registered plugins and cached instances."""
         with self._lock:
-            unloaded_names = list(self._plugin_instances.keys())
-            for name, instance in list(self._plugin_instances.items()):
-                if hasattr(instance, '_cleanup_plugin_resources'):
-                    try:
-                        instance._cleanup_plugin_resources()
-                    except Exception as e:
-                        logger.error(f"Error cleaning up resources during clear of '{name}': {e}")
+            instances = list(self._plugin_instances.items())
+            self._plugin_instances.clear()
+            unloaded_names = [name for name, _ in instances]
             self._plugins.clear()
             self._core_plugins.clear()
             self._external_plugins.clear()
             self._disabled_plugins.clear()
-            self._plugin_instances.clear()
             self._version_incompatibilities.clear()
             self._seen_plugins.clear()
             for category_map in self._extension_category_maps.values():
                 category_map.clear()
             self._rejected_plugins.clear()
-            self._shutdown_event_executor()
-            if unloaded_names:
-                self._notify_plugins_unloaded(unloaded_names)
+
+        # Cleanup outside the lock (may wait on QThreads / touch UI)
+        for name, instance in instances:
+            if hasattr(instance, '_cleanup_plugin_resources'):
+                try:
+                    instance._cleanup_plugin_resources()
+                except Exception as e:
+                    logger.error(f"Error cleaning up resources during clear of '{name}': {e}")
+
+        self._shutdown_event_executor()
+        if unloaded_names:
+            self._notify_plugins_unloaded(unloaded_names)
 
     def _get_event_executor(self) -> ThreadPoolExecutor:
         """Get/create the bounded executor used for async event delivery."""
@@ -599,17 +603,25 @@ class PluginRegistry:
         self._notify_plugin_state_changed(name, False)
 
     def unload_plugin_instance(self, name: str) -> None:
-        """Remove a plugin instance from the cache and trigger its framework cleanup."""
+        """Remove a plugin instance from the cache and trigger its framework cleanup.
+
+        Cleanup and lifecycle notify run *outside* the registry lock so
+        subscribers (e.g. TabController.remove_tab) cannot deadlock by
+        re-entering registry methods that also take ``_lock``.
+        """
         with self._lock:
             instance = self._plugin_instances.pop(name, None)
-            if instance is not None:
-                if hasattr(instance, '_cleanup_plugin_resources'):
-                    try:
-                        instance._cleanup_plugin_resources()
-                    except Exception as e:
-                        logger.error(f"Error cleaning up resources during unload of '{name}': {e}")
-                logger.debug(f"Unloaded plugin instance: {name}")
-                self._notify_plugins_unloaded([name])
+
+        if instance is None:
+            return
+
+        if hasattr(instance, '_cleanup_plugin_resources'):
+            try:
+                instance._cleanup_plugin_resources()
+            except Exception as e:
+                logger.error(f"Error cleaning up resources during unload of '{name}': {e}")
+        logger.debug(f"Unloaded plugin instance: {name}")
+        self._notify_plugins_unloaded([name])
 
     def enable_plugin(self, name: str) -> None:
         """Enable a plugin by name."""

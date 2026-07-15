@@ -138,19 +138,28 @@ class BaseTabPlugin:
         Scans both the plugin instance and its associated tab widget (self._widget) for
         active QTimers, QThreads, and QWidgets that need to be stopped or destroyed.
         """
-        from ..app.ui.qt.bindings import QTimer, QThread, QWidget
+        from ..app.ui.qt.bindings import QTimer, QThread, QWidget, is_valid
 
         try:
             # Scan the plugin instance and the tab widget's attributes,
             # since threads/timers typically live on the widget (e.g. QuickSetupTab),
             # not on the plugin class (e.g. QuickSetupPlugin).
             targets = [self]
-            if getattr(self, "_widget", None) is not None:
-                targets.append(self._widget)
+            widget = getattr(self, "_widget", None)
+            if widget is not None:
+                try:
+                    if is_valid(widget):
+                        targets.append(widget)
+                except Exception:
+                    pass
 
             for target in targets:
                 target_label = target.__class__.__name__
-                for attr_name in list(target.__dict__.keys()):
+                try:
+                    attr_names = list(target.__dict__.keys())
+                except RuntimeError:
+                    continue
+                for attr_name in attr_names:
                     try:
                         attr = getattr(target, attr_name, None)
                     except Exception:
@@ -161,16 +170,18 @@ class BaseTabPlugin:
                     # Stop active QTimers
                     if isinstance(attr, QTimer):
                         try:
-                            if attr.isActive():
+                            if is_valid(attr) and attr.isActive():
                                 attr.stop()
                                 logger.debug(f"Automatically stopped active QTimer '{attr_name}' on {target_label} for plugin '{self.plugin_name}'")
+                        except RuntimeError:
+                            pass
                         except Exception as e:
                             logger.warning(f"Error stopping QTimer '{attr_name}': {e}")
                     
                     # Stop active QThreads
                     elif isinstance(attr, QThread):
                         try:
-                            if attr.isRunning():
+                            if is_valid(attr) and attr.isRunning():
                                 attr.quit()
                                 if not attr.wait(1000):  # Wait up to 1 second
                                     logger.warning(
@@ -179,23 +190,26 @@ class BaseTabPlugin:
                                     )
                                 else:
                                     logger.debug(f"Automatically stopped active QThread '{attr_name}' on {target_label} for plugin '{self.plugin_name}'")
+                        except RuntimeError:
+                            pass
                         except Exception as e:
                             logger.warning(f"Error stopping QThread '{attr_name}': {e}")
                     
-                    # Delete QWidgets (skip self._widget itself, it's handled below)
+                    # Nested widgets under the tab are owned by the tab layout;
+                    # only stop timers/threads above — do not deleteLater children.
                     elif isinstance(attr, QWidget) and attr is not self._widget:
-                        try:
-                            attr.close()
-                            attr.deleteLater()
-                            logger.debug(f"Automatically requested deletion of QWidget '{attr_name}' on {target_label} for plugin '{self.plugin_name}'")
-                        except Exception as e:
-                            logger.warning(f"Error deleting QWidget '{attr_name}': {e}")
+                        continue
 
             # Close and schedule deletion of the tab widget itself
             if self._widget is not None:
                 try:
-                    self._widget.close()
-                    self._widget.deleteLater()
+                    if is_valid(self._widget):
+                        # Detach from any parent (QTabWidget) before deleteLater
+                        self._widget.setParent(None)
+                        self._widget.close()
+                        self._widget.deleteLater()
+                except RuntimeError:
+                    pass
                 except Exception as e:
                     logger.warning(f"Error closing/deleting plugin widget for '{self.plugin_name}': {e}")
             

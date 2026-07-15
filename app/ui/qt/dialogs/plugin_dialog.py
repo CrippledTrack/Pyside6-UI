@@ -314,11 +314,13 @@ class PluginManagementDialog(QDialog):
             self.parent()._reload_all_plugins()
             self.accept()
         else:
-            # Fallback
-            self.plugin_service.clear()
-            self.plugin_controller.plugin_service.discover_and_register_all_plugins()
-            QMessageBox.information(self, "Plugins Reloaded", "Plugins have been reloaded.")
-            self.load_plugins()
+            QMessageBox.warning(
+                self,
+                "Reload Unavailable",
+                "Plugin reload requires the main window so tabs and extensions "
+                "can be torn down safely. Close this dialog and use Manage Plugins "
+                "from the main window, or restart the application."
+            )
 
     def apply_filters(self) -> None:
         search_text = self.search_input.text().strip().lower()

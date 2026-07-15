@@ -314,7 +314,10 @@ class PluginDiscovery:
 
             for modinfo in pkgutil.iter_modules(pkg.__path__, prefix=f"{source.package}."):
                 try:
-                    module = importlib.import_module(modinfo.name)
+                    if modinfo.name in sys.modules:
+                        module = importlib.reload(sys.modules[modinfo.name])
+                    else:
+                        module = importlib.import_module(modinfo.name)
                 except Exception as e:
                     logger.warning(f"Failed to import plugin module {modinfo.name}: {e}")
                     continue

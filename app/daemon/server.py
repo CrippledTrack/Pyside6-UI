@@ -280,6 +280,33 @@ class PrivilegedDaemon:
             except Exception:
                 logger.error("Failed to send error response", exc_info=True)
 
+    def _install_parent_death_signal(self) -> None:
+        """Register PR_SET_PDEATHSIG and exit if the parent is already gone.
+
+        Elevation may already set PDEATHSIG via preexec_fn; calling again here
+        covers in-process / atypical spawn paths and closes the fork/exec race
+        where the parent dies before prctl runs.
+        """
+        try:
+            import ctypes
+
+            libc = ctypes.CDLL("libc.so.6", use_errno=True)
+            PR_SET_PDEATHSIG = 1
+            SIGTERM = 15
+            result = libc.prctl(PR_SET_PDEATHSIG, SIGTERM)
+            if result != 0:
+                errno = ctypes.get_errno()
+                logger.warning(f"prctl(PR_SET_PDEATHSIG) failed with errno {errno}")
+            else:
+                logger.info("Registered PR_SET_PDEATHSIG=SIGTERM")
+
+            # If the parent already died between fork and now, exit immediately.
+            if os.getppid() == 1:
+                logger.error("Parent process already gone (ppid=1); exiting")
+                sys.exit(1)
+        except Exception as e:
+            logger.warning(f"Could not install parent death signal: {e}")
+
     def start(self):
         """Start the daemon in stdin/stdout pipe mode."""
         # Save the raw binary stdout for exclusive IPC use, then redirect
@@ -296,6 +323,8 @@ class PrivilegedDaemon:
 
         print("[Daemon] Starting privileged daemon...", file=sys.stderr, flush=True)
         print(f"[Daemon] Current EUID: {os.geteuid()}, UID: {os.getuid()}", file=sys.stderr, flush=True)
+
+        self._install_parent_death_signal()
 
         if os.geteuid() != 0:
             error_msg = f"Daemon must run as root (current EUID: {os.geteuid()})"

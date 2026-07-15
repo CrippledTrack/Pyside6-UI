@@ -38,6 +38,18 @@ class QtEventDispatcher:
     def get_instance(cls) -> "QtEventDispatcher":
         """Get singleton; must be first called from the GUI main thread."""
         if cls._instance is None:
+            app = QtCore.QCoreApplication.instance()
+            if app is not None:
+                try:
+                    app_thread = app.thread()
+                    this_thread = QtCore.QThread.currentThread()
+                    if app_thread is not None and this_thread is not app_thread:
+                        logger.error(
+                            "QtEventDispatcher.get_instance() first called off the GUI "
+                            "thread; callbacks may run on the wrong thread"
+                        )
+                except Exception as e:
+                    logger.debug(f"Could not verify dispatcher thread affinity: {e}")
             cls._instance = cls()
         return cls._instance
 

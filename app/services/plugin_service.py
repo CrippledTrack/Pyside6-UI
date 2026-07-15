@@ -144,14 +144,28 @@ class PluginService:
     # =========================================================================
     
     def _invalidate_core_plugin_modules(self) -> None:
-        """Drop cached core plugin modules so the next discovery reloads them."""
-        for mod_name in [
+        """Drop cached plugin package modules so the next discovery reloads them."""
+        prefixes = (
+            "app_plugins.",
+            "platforms.",
+            "GUI.plugins.",
+        )
+        exact = {
+            "app_plugins",
             "app_plugins.core_plugins",
+            "platforms",
             "platforms.core_plugins",
             "GUI.plugin_system.core_plugins",
-        ]:
-            if mod_name in sys.modules:
-                del sys.modules[mod_name]
+            "GUI.plugins",
+        }
+        to_drop = [
+            name
+            for name in list(sys.modules)
+            if name in exact or any(name.startswith(prefix) for prefix in prefixes)
+        ]
+        for mod_name in to_drop:
+            del sys.modules[mod_name]
+        # Optional hook if a core_plugins module exposes it after re-import
         try:
             from app_plugins.core_plugins import invalidate_core_plugins_cache  # type: ignore
             invalidate_core_plugins_cache()
