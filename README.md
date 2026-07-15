@@ -78,8 +78,9 @@ To leave the environment later, run:
 deactivate
 ```
 
-For the complete runtime and build dependencies, install the platform
-requirements file instead of installing only PySide6:
+For the complete runtime and build dependencies, install from inside the
+`GUI/` directory using the platform requirements file instead of installing
+only PySide6:
 
 ```bash
 # Linux
