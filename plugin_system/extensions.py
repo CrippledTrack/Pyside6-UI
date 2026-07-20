@@ -77,12 +77,48 @@ def _validate_settings_extension(plugin_class: Type) -> bool:
         return False
 
 
+def _has_callable_method(plugin_class: Type, method_name: str) -> bool:
+    """Return True if *plugin_class* has a callable *method_name*."""
+    try:
+        member = inspect.getattr_static(plugin_class, method_name)
+    except Exception:
+        return False
+    return member is not None and callable(getattr(plugin_class, method_name, None))
+
+
+def _validate_tab_extension(plugin_class: Type) -> bool:
+    """Accept create_tab_content (preferred) or create_widget (legacy)."""
+    try:
+        from .base import BaseTabPlugin
+
+        has_content = _has_callable_method(plugin_class, "create_tab_content")
+        has_widget = _has_callable_method(plugin_class, "create_widget")
+
+        if issubclass(plugin_class, BaseTabPlugin):
+            content_overridden = (
+                has_content
+                and getattr(plugin_class, "create_tab_content", None)
+                is not BaseTabPlugin.create_tab_content
+            )
+            widget_overridden = (
+                has_widget
+                and getattr(plugin_class, "create_widget", None)
+                is not BaseTabPlugin.create_widget
+            )
+            return content_overridden or widget_overridden
+
+        return has_content or has_widget
+    except Exception:
+        return False
+
+
 # Global list of registered plugin extension points
 EXTENSION_POINTS = [
     ExtensionPoint(
         name="Tab",
         interface=TabExtension,
         required_methods=["create_widget"],
+        custom_validator=_validate_tab_extension,
     ),
     ExtensionPoint(
         name="Menu",

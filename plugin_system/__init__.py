@@ -13,8 +13,10 @@ from .interfaces import (
     ServiceExtension,
     EventSubscriberExtension,
     SettingsExtension,
+    IPluginResourceCleanup,
 )
-from .types import MenuItemDefinition, ToolbarAction, PluginEvent
+from .types import MenuItemDefinition, ToolbarAction, PluginEvent, TabContent, TabCreateContext
+from .tab_content import resolve_tab_content
 from .extensions import (
     ExtensionPoint,
     EXTENSION_POINTS,
@@ -38,10 +40,15 @@ __all__ = [
     "ServiceExtension",
     "EventSubscriberExtension",
     "SettingsExtension",
+    "IPluginResourceCleanup",
     # Types
     "MenuItemDefinition",
     "ToolbarAction",
     "PluginEvent",
+    "TabContent",
+    "TabCreateContext",
+    # Tab content helpers
+    "resolve_tab_content",
     # Extensions Registry
     "ExtensionPoint",
     "EXTENSION_POINTS",

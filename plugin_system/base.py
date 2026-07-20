@@ -6,13 +6,10 @@ from __future__ import annotations
 import logging
 import platform
 import re
-from abc import abstractmethod
 from typing import Optional, List, Dict, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..app.ui.qt.bindings import QWidget
     from ..app.services.container import ServiceContainer
-    from ..app.services.settings_service import SettingsService
     from .registry import PluginRegistry
 
 from .interfaces import (
@@ -26,7 +23,9 @@ from .interfaces import (
     SettingsExtension,
     IServiceContainer,
     ISettingsService,
+    IPluginResourceCleanup,
 )
+from .types import TabContent, TabCreateContext
 
 logger = logging.getLogger(__name__)
 
@@ -55,13 +54,16 @@ class BaseTabPlugin:
     This is now an instance-based class. Plugins receive a 
     ServiceContainer in their constructor and use instance methods.
     
+    Override exactly one of ``create_tab_content`` (preferred) or
+    ``create_widget`` (legacy). The other delegates automatically.
+    
     Example:
         class MyPlugin(BaseTabPlugin):
             plugin_name = "My Plugin"
             tab_title = "My Tab"
             
-            def create_widget(self, parent=None):
-                return MyWidget(parent, settings=self.settings)
+            def create_tab_content(self, context):
+                return MyView(context.parent)
     """
     
     # Required metadata (class-level)
@@ -77,6 +79,9 @@ class BaseTabPlugin:
     
     # Platform support (empty list = all platforms supported)
     supported_platforms: List[str] = []
+
+    # UI backends that can host this plugin's tab content (default: Qt only)
+    ui_backends: List[str] = ["qt"]
     
     # Plugin dependencies (optional)
     dependencies: List[str] = []
@@ -95,7 +100,7 @@ class BaseTabPlugin:
             container: The application's service container for DI
         """
         self.container = container
-        self._widget: Optional["QWidget"] = None
+        self._widget: Optional[TabContent] = None
         
         # Convenience accessors for common services
         try:
@@ -103,17 +108,29 @@ class BaseTabPlugin:
         except (ValueError, KeyError, TypeError):
             self.settings = None
     
-    @abstractmethod
-    def create_widget(self, parent: Optional["QWidget"] = None) -> "QWidget":
-        """Create and return the tab widget.
+    def create_tab_content(self, context: TabCreateContext) -> TabContent:
+        """Create tab content for the active UI backend.
         
-        Args:
-            parent: Parent widget (typically QTabWidget)
-            
-        Returns:
-            QWidget instance for the tab content
+        Subclasses should override this (preferred) or ``create_widget``.
         """
-        raise NotImplementedError("Subclasses must implement create_widget()")
+        if type(self).create_widget is not BaseTabPlugin.create_widget:
+            return self.create_widget(context.parent)
+        raise NotImplementedError(
+            f"{type(self).__name__} must override create_tab_content() or create_widget()"
+        )
+    
+    def create_widget(self, parent: Optional[Any] = None) -> TabContent:
+        """Legacy entry point for Qt-oriented tab content creation.
+        
+        Subclasses may override this instead of ``create_tab_content``.
+        """
+        if type(self).create_tab_content is not BaseTabPlugin.create_tab_content:
+            return self.create_tab_content(
+                TabCreateContext(backend_id="qt", parent=parent)
+            )
+        raise NotImplementedError(
+            f"{type(self).__name__} must override create_tab_content() or create_widget()"
+        )
     
     def on_tab_activated(self) -> None:
         """Called when the tab becomes active. Override as needed."""
@@ -132,89 +149,16 @@ class BaseTabPlugin:
         pass
     
     def _cleanup_plugin_resources(self) -> None:
-        """Framework-level cleanup of common resources (QTimers, QThreads, QWidgets).
+        """Release backend-specific resources via a registered cleanup service.
         
-        This is called automatically when the plugin is disabled or unloaded to prevent leaks.
-        Scans both the plugin instance and its associated tab widget (self._widget) for
-        active QTimers, QThreads, and QWidgets that need to be stopped or destroyed.
+        Qt hosts register ``IPluginResourceCleanup``; other backends may no-op.
         """
-        from ..app.ui.qt.bindings import QTimer, QThread, QWidget, is_valid
-
         try:
-            # Scan the plugin instance and the tab widget's attributes,
-            # since threads/timers typically live on the widget (e.g. QuickSetupTab),
-            # not on the plugin class (e.g. QuickSetupPlugin).
-            targets = [self]
-            widget = getattr(self, "_widget", None)
-            if widget is not None:
-                try:
-                    if is_valid(widget):
-                        targets.append(widget)
-                except Exception:
-                    pass
-
-            for target in targets:
-                target_label = target.__class__.__name__
-                try:
-                    attr_names = list(target.__dict__.keys())
-                except RuntimeError:
-                    continue
-                for attr_name in attr_names:
-                    try:
-                        attr = getattr(target, attr_name, None)
-                    except Exception:
-                        continue
-                    if attr is None:
-                        continue
-                    
-                    # Stop active QTimers
-                    if isinstance(attr, QTimer):
-                        try:
-                            if is_valid(attr) and attr.isActive():
-                                attr.stop()
-                                logger.debug(f"Automatically stopped active QTimer '{attr_name}' on {target_label} for plugin '{self.plugin_name}'")
-                        except RuntimeError:
-                            pass
-                        except Exception as e:
-                            logger.warning(f"Error stopping QTimer '{attr_name}': {e}")
-                    
-                    # Stop active QThreads
-                    elif isinstance(attr, QThread):
-                        try:
-                            if is_valid(attr) and attr.isRunning():
-                                attr.quit()
-                                if not attr.wait(1000):  # Wait up to 1 second
-                                    logger.warning(
-                                        f"QThread '{attr_name}' on {target_label} for plugin '{self.plugin_name}' "
-                                        f"failed to exit gracefully within timeout"
-                                    )
-                                else:
-                                    logger.debug(f"Automatically stopped active QThread '{attr_name}' on {target_label} for plugin '{self.plugin_name}'")
-                        except RuntimeError:
-                            pass
-                        except Exception as e:
-                            logger.warning(f"Error stopping QThread '{attr_name}': {e}")
-                    
-                    # Nested widgets under the tab are owned by the tab layout;
-                    # only stop timers/threads above — do not deleteLater children.
-                    elif isinstance(attr, QWidget) and attr is not self._widget:
-                        continue
-
-            # Close and schedule deletion of the tab widget itself
-            if self._widget is not None:
-                try:
-                    if is_valid(self._widget):
-                        # Detach from any parent (QTabWidget) before deleteLater
-                        self._widget.setParent(None)
-                        self._widget.close()
-                        self._widget.deleteLater()
-                except RuntimeError:
-                    pass
-                except Exception as e:
-                    logger.warning(f"Error closing/deleting plugin widget for '{self.plugin_name}': {e}")
-            
-            # Reset the framework-defined widget reference
-            self._widget = None
+            cleanup = self.container.get(IPluginResourceCleanup)
+        except (ValueError, KeyError, TypeError):
+            return
+        try:
+            cleanup.cleanup(self)
         except Exception as e:
             logger.error(f"Error during framework cleanup of '{self.plugin_name}': {e}")
     
@@ -222,8 +166,8 @@ class BaseTabPlugin:
         """Called when plugin settings are changed."""
         pass
     
-    def get_settings_widget(self, parent: Optional["QWidget"] = None) -> Optional["QWidget"]:
-        """Get a settings widget for this plugin. Override to provide settings UI."""
+    def get_settings_widget(self, parent: Optional[Any] = None) -> Optional[TabContent]:
+        """Get settings content for this plugin. Override to provide settings UI."""
         return None
     
     # Class methods that don't need instance state
@@ -241,6 +185,12 @@ class BaseTabPlugin:
             _normalize_platform_name_for_matching(p) for p in cls.supported_platforms
         }
         return target in supported_normalized
+    
+    @classmethod
+    def is_supported_ui_backend(cls, backend_id: str) -> bool:
+        """Check if this plugin supports the given UI backend."""
+        backends = getattr(cls, "ui_backends", None) or ["qt"]
+        return backend_id in backends
     
     @classmethod
     def get_current_platform(cls) -> str:
@@ -287,6 +237,7 @@ class BaseTabPlugin:
             'min_gui_version': getattr(cls, 'min_gui_version', None),
             'required_gui_version': getattr(cls, 'required_gui_version', None),
             'dependencies': getattr(cls, 'dependencies', []),
+            'ui_backends': list(getattr(cls, 'ui_backends', ["qt"]) or ["qt"]),
         }
     
     @classmethod
@@ -306,6 +257,15 @@ class BaseTabPlugin:
         
         if not cls.plugin_version:
             errors.append("Plugin must define plugin_version")
+
+        has_tab_content = (
+            getattr(cls, "create_tab_content", None) is not BaseTabPlugin.create_tab_content
+        )
+        has_widget = getattr(cls, "create_widget", None) is not BaseTabPlugin.create_widget
+        if not has_tab_content and not has_widget:
+            errors.append(
+                "Plugin must override create_tab_content() or create_widget()"
+            )
         
         # Validate version requirements format
         if hasattr(cls, 'min_gui_version') and cls.min_gui_version:
@@ -362,4 +322,6 @@ __all__ = [
     'MenuItemDefinition',
     'ToolbarAction',
     'PluginEvent',
+    'TabContent',
+    'TabCreateContext',
 ]

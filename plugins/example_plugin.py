@@ -3,7 +3,7 @@ Example plugin for Basic GUI Application.
 
 This demonstrates how to create a comprehensive plugin using all
 extension interfaces:
-- TabExtension (via BaseTabPlugin) - provides a tab in the main window
+- TabExtension (via BaseTabPlugin) - provides a tab via create_tab_content
 - MenuExtension - contributes menu items
 - StatusExtension - provides a status bar widget
 - ToolbarExtension - contributes toolbar actions
@@ -22,7 +22,7 @@ from ..app.ui.qt.bindings import (
 )
 
 from ..plugin_system.base import BaseTabPlugin
-from ..plugin_system.types import MenuItemDefinition, ToolbarAction
+from ..plugin_system.types import MenuItemDefinition, ToolbarAction, TabContent, TabCreateContext
 
 if TYPE_CHECKING:
     from ..app.services.container import ServiceContainer
@@ -42,12 +42,13 @@ class ExampleTabPlugin(BaseTabPlugin):
     plugin_description = "A comprehensive example plugin showing all extension points"
     supported_platforms = ["Windows", "Linux", "macOS"]
     requires_admin = False
-    plugin_version = "2.0.1"
+    plugin_version = "2.1.0"
     plugin_author = "Example Author"
     plugin_authors = ["Example Author", "Contributors"]
-    min_gui_version = "4.0.0"
-    required_gui_version = ">=4.0.0"
+    min_gui_version = "6.0.0"
+    required_gui_version = ">=6.0.0"
     disabled_by_default = True
+    ui_backends = ["qt"]
     
     # Dependencies on other plugins
     dependencies: List[str] = []
@@ -70,10 +71,13 @@ class ExampleTabPlugin(BaseTabPlugin):
     # TabExtension Interface
     # =========================================================================
     
-    def create_widget(self, parent: Optional[QWidget] = None) -> QWidget:
-        """Create the widget for this tab."""
-        # Pass self so widget can access plugin state/methods
-        return ExampleWidget(parent, self)
+    def create_tab_content(self, context: TabCreateContext) -> TabContent:
+        """Create tab content for the active UI backend."""
+        if context.backend_id != "qt":
+            raise NotImplementedError(
+                f"Example Plugin does not support UI backend '{context.backend_id}'"
+            )
+        return ExampleWidget(context.parent, self)
     
     def on_tab_activated(self) -> None:
         """Called when the tab becomes active."""
@@ -130,7 +134,7 @@ class ExampleTabPlugin(BaseTabPlugin):
             "<h2>Example Plugin v2.0</h2>"
             "<p>A comprehensive example demonstrating all extension interfaces:</p>"
             "<ul>"
-            "<li><b>TabExtension</b> - This tab you're viewing</li>"
+            "<li><b>TabExtension</b> - create_tab_content (toolkit-neutral entry)</li>"
             "<li><b>MenuExtension</b> - Tools → Example Plugin Action</li>"
             "<li><b>StatusExtension</b> - Status bar indicator</li>"
             "<li><b>ToolbarExtension</b> - Toolbar button</li>"
@@ -144,8 +148,8 @@ class ExampleTabPlugin(BaseTabPlugin):
     # StatusExtension Interface
     # =========================================================================
     
-    def create_status_widget(self, parent: Optional[QWidget] = None) -> QWidget:
-        """Create a widget to display in the status bar."""
+    def create_status_widget(self, parent: Optional[Any] = None) -> TabContent:
+        """Create content to display in the status bar."""
         self._status_label = QLabel("Example: Ready", parent)
         self._status_label.setStyleSheet(
             "padding: 2px 8px; "
@@ -235,8 +239,8 @@ class ExampleTabPlugin(BaseTabPlugin):
     # SettingsExtension Interface
     # =========================================================================
     
-    def get_settings_widget(self, parent: Optional[QWidget] = None) -> Optional[QWidget]:
-        """Get a settings widget for this plugin."""
+    def get_settings_widget(self, parent: Optional[Any] = None) -> Optional[TabContent]:
+        """Get settings content for this plugin."""
         return ExampleSettingsWidget(parent, self._settings)
     
     def on_settings_changed(self, settings_dict: Dict[str, Any]) -> None:
@@ -280,7 +284,7 @@ class ExampleWidget(QWidget):
         self.setup_ui()
         self._setup_refresh_timer()
         # Log that widget was created
-        self.plugin._log_event("Tab widget created")
+        self.plugin._log_event("Tab content created via create_tab_content")
     
     def setup_ui(self):
         """Set up the user interface."""
@@ -294,7 +298,7 @@ class ExampleWidget(QWidget):
         # Description
         desc_label = QLabel(
             "This plugin demonstrates all extension interfaces:\n"
-            "• TabExtension - This tab you're viewing\n"
+            "• TabExtension - create_tab_content (preferred; create_widget still works)\n"
             "• MenuExtension - Tools → Example Plugin Action (Ctrl+Shift+E)\n"
             "• StatusExtension - \"Example: Ready\" in status bar\n"
             "• ToolbarExtension - \"Example Plugin\" button in toolbar\n"

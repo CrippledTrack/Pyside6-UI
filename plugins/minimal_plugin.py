@@ -1,11 +1,15 @@
 """
 Minimal plugin example - contains only what's necessary to register as a plugin.
+
+Uses the toolkit-neutral ``create_tab_content`` entry point.
 """
 from __future__ import annotations
 
 from typing import Optional, TYPE_CHECKING
+
 from ..app.ui.qt.bindings import QWidget
 from ..plugin_system.base import BaseTabPlugin
+from ..plugin_system.types import TabContent, TabCreateContext
 
 if TYPE_CHECKING:
     from ..app.services.container import ServiceContainer
@@ -22,11 +26,12 @@ class MinimalTabPlugin(BaseTabPlugin):
     plugin_description = "A minimal plugin with only required components"
     supported_platforms = ["Windows", "Linux", "macOS"]
     requires_admin = False
-    plugin_version = "1.0.1"
+    plugin_version = "1.1.0"
     plugin_author = "Plugin Creator"
-    min_gui_version = "4.0.0"
-    required_gui_version = ">=4.0.0"
+    min_gui_version = "6.0.0"
+    required_gui_version = ">=6.0.0"
     disabled_by_default = True
+    ui_backends = ["qt"]
 
     def __init__(self, container: "ServiceContainer") -> None:
         """Initialize the plugin instance."""
@@ -36,9 +41,13 @@ class MinimalTabPlugin(BaseTabPlugin):
     # TabExtension Interface
     # =========================================================================
 
-    def create_widget(self, parent: Optional[QWidget] = None) -> QWidget:
-        """Create the widget for this tab."""
-        return MinimalWidget(parent)
+    def create_tab_content(self, context: TabCreateContext) -> TabContent:
+        """Create tab content for the active UI backend."""
+        if context.backend_id != "qt":
+            raise NotImplementedError(
+                f"Minimal Plugin does not support UI backend '{context.backend_id}'"
+            )
+        return MinimalWidget(context.parent)
 
 
 class MinimalWidget(QWidget):

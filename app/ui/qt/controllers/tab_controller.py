@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 from ....services.plugin_registry_facade import PluginRegistryFacade
 from ....services.interfaces import IAdminService, IDaemonService
 from ....services.plugin_service import PluginService
+from .....plugin_system.tab_content import resolve_tab_content
 
 from ..widgets.admin_required_placeholder import AdminRequiredPlaceholder
 from ..widgets.error_placeholder import ErrorPlaceholder
@@ -224,10 +225,14 @@ class TabController(QObject):
                     admin_widget = self._create_admin_placeholder(tab_name)
                     tab_info["instance"] = admin_widget
                 else:
-                    # Create the actual plugin widget using instance
+                    # Create the actual plugin content (create_tab_content or create_widget)
                     plugin_instance = self.registry.get_plugin_instance(tab_name)
-                    tab_info["instance"] = plugin_instance.create_widget(self.tab_widget)
-                    # Store reference on plugin so _cleanup_plugin_resources can find it
+                    tab_info["instance"] = resolve_tab_content(
+                        plugin_instance,
+                        parent=self.tab_widget,
+                        backend_id="qt",
+                    )
+                    # Store reference on plugin so cleanup can find it
                     plugin_instance._widget = tab_info["instance"]
                 
                 # Replace placeholder with actual widget
@@ -306,11 +311,15 @@ class TabController(QObject):
                 return
             
             logger.info(f"Creating widget for tab '{tab_name}' (daemon/privilege available)")
-            # Create the actual widget using instance
+            # Create the actual content using dual-path resolver
             plugin_instance = self.registry.get_plugin_instance(tab_name)
-            widget = plugin_instance.create_widget(self.tab_widget)
+            widget = resolve_tab_content(
+                plugin_instance,
+                parent=self.tab_widget,
+                backend_id="qt",
+            )
             tab_info["instance"] = widget
-            # Store reference on plugin so _cleanup_plugin_resources can find it
+            # Store reference on plugin so cleanup can find it
             plugin_instance._widget = widget
             
             # Replace the tab widget

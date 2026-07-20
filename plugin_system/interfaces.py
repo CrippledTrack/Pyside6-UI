@@ -8,14 +8,13 @@ can implement. Plugins can implement any combination of these interfaces.
 from __future__ import annotations
 
 from typing import (
-    Any, Callable, Dict, List, Optional, 
+    Any, Callable, Dict, List, Optional,
     Protocol, runtime_checkable, TYPE_CHECKING,
     Type, TypeVar
 )
 
 if TYPE_CHECKING:
-    from ..app.ui.qt.bindings import QWidget
-    from .types import MenuItemDefinition, ToolbarAction
+    from .types import MenuItemDefinition, ToolbarAction, TabContent, TabCreateContext
     from ..app.services.container import ServiceContainer
 
 
@@ -44,9 +43,10 @@ class PluginProtocol(Protocol):
 
 @runtime_checkable
 class TabExtension(Protocol):
-    """Interface for plugins that provide a tab widget.
+    """Interface for plugins that provide tab content.
     
-    This is the primary extension point for adding new tabs to the application.
+    Prefer ``create_tab_content`` for new plugins. ``create_widget`` remains
+    supported as a legacy Qt-oriented entry point; hosts may accept either.
     
     Attributes:
         plugin_name: Unique identifier for the plugin
@@ -58,14 +58,28 @@ class TabExtension(Protocol):
     tab_title: str
     requires_admin: bool
     
-    def create_widget(self, parent: Optional["QWidget"] = None) -> "QWidget":
-        """Create and return a UI widget to be used as the tab's content.
+    def create_tab_content(self, context: "TabCreateContext") -> "TabContent":
+        """Create and return tab content for the active UI backend.
         
         Args:
-            parent: The parent widget (e.g., QTabWidget for PySide6)
+            context: Backend id and parent handle for content creation
             
         Returns:
-            A QWidget instance for the tab content
+            Opaque content understood by the active UI backend
+        """
+        ...
+    
+    def create_widget(self, parent: Optional[Any] = None) -> "TabContent":
+        """Legacy entry point: create tab content with a parent handle.
+        
+        Qt hosts historically passed a QWidget parent. New plugins should
+        implement ``create_tab_content`` instead.
+        
+        Args:
+            parent: Backend-specific parent handle (may be ``None``)
+            
+        Returns:
+            Opaque tab content for the active UI backend
         """
         ...
     
@@ -95,18 +109,18 @@ class MenuExtension(Protocol):
 
 @runtime_checkable
 class StatusExtension(Protocol):
-    """Interface for plugins that contribute widgets to the status bar."""
+    """Interface for plugins that contribute content to the status bar."""
     
     plugin_name: str
     
-    def create_status_widget(self, parent: Optional["QWidget"] = None) -> "QWidget":
-        """Create and return a widget to display in the status bar.
+    def create_status_widget(self, parent: Optional[Any] = None) -> "TabContent":
+        """Create and return content to display in the status bar.
         
         Args:
-            parent: The parent widget (status bar)
+            parent: Backend-specific parent handle (status bar)
             
         Returns:
-            A UI widget to embed in the status bar
+            Opaque content to embed in the status bar
         """
         ...
 
@@ -173,14 +187,14 @@ class SettingsExtension(Protocol):
     
     plugin_name: str
     
-    def get_settings_widget(self, parent: Optional["QWidget"] = None) -> Optional["QWidget"]:
-        """Get a settings widget for this plugin.
+    def get_settings_widget(self, parent: Optional[Any] = None) -> Optional["TabContent"]:
+        """Get settings content for this plugin.
         
         Args:
-            parent: Parent widget for the settings widget
+            parent: Backend-specific parent handle
             
         Returns:
-            A widget containing settings controls, or None
+            Opaque settings content, or None
         """
         ...
     
@@ -227,6 +241,15 @@ class IPluginLifecycle(Protocol):
         ...
 
 
+@runtime_checkable
+class IPluginResourceCleanup(Protocol):
+    """Backend-registered cleanup for plugin-owned UI resources."""
+
+    def cleanup(self, plugin: Any) -> None:
+        """Release backend-specific resources held by a plugin instance."""
+        ...
+
+
 __all__ = [
     # Protocol interfaces
     'PluginProtocol',
@@ -240,4 +263,5 @@ __all__ = [
     'IServiceContainer',
     'ISettingsService',
     'IPluginLifecycle',
+    'IPluginResourceCleanup',
 ]

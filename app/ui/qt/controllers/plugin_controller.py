@@ -285,7 +285,10 @@ class PluginController(QObject):
         
         # Handle Dynamic Tab Extension Toggle
         # We need to manually handle this because tabs are normally managed by MainWindow via plugin_toggled
-        if hasattr(plugin_class, 'create_widget') and self._main_window:
+        from .....plugin_system.extensions import get_extension_point
+
+        tab_ep = get_extension_point("Tab")
+        if tab_ep and tab_ep.check_implements(plugin_class) and self._main_window:
             should_have_tab = self._is_extension_enabled(plugin_name, "Tab")
             # Check if tab is currently loaded
             tab_exists = self._main_window.has_plugin_tab(plugin_name)

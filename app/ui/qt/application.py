@@ -19,10 +19,12 @@ from ..backend_wiring import (
     wire_notifications,
 )
 from ..notification_bridge import NotificationShellBridge
+from ....plugin_system.interfaces import IPluginResourceCleanup
 from .bindings import QApplication
 from .event_dispatcher import QtEventDispatcher
 from .lifecycle import configure_qt_application
 from .main_window import MainWindow
+from .plugin_cleanup import QtPluginResourceCleanup
 from .presenters import QtDialogPresenter
 from .theme_init import ThemeInitService
 
@@ -58,6 +60,9 @@ class QtApplicationBackend:
 
         dispatcher = QtEventDispatcher.get_instance()
         register_event_loop(self._container, dispatcher)
+        self._container.register_singleton(
+            IPluginResourceCleanup, QtPluginResourceCleanup()
+        )
 
         configure_qt_application(self._app, self._version_name, GUI_API_VERSION)
 
