@@ -18,7 +18,11 @@ if TYPE_CHECKING:
 
 
 class IMainWindowShell(Protocol):
-    """Protocol for main window shell operations without toolkit types."""
+    """Protocol for main window shell operations without toolkit types.
+
+    This is the primary host contract for UI backends. Tab-only consumers may
+    use ``IPluginTabHost``, which is a structural subset of these tab methods.
+    """
 
     def add_menu_item(self, spec: MenuItemSpec) -> MenuItemHandle:
         """Add a menu item; return an opaque handle."""
@@ -58,6 +62,22 @@ class IMainWindowShell(Protocol):
 
     def remove_plugin_tab(self, plugin_name: str) -> None:
         """Remove a tab for a plugin."""
+        ...
+
+    def clear_tabs_for_plugins(self, plugin_names: List[str]) -> None:
+        """Remove tabs and clear stale references for unloaded plugins."""
+        ...
+
+    def reload_plugins(self) -> None:
+        """Rediscover plugins and rebuild tabs/extensions from a clean state."""
+        ...
+
+    def show_status(self, message: str, timeout: int = 0) -> None:
+        """Show a message in the shell status area."""
+        ...
+
+    def clear_status(self) -> None:
+        """Clear the shell status area."""
         ...
 
     def show_toast(

@@ -60,9 +60,12 @@ def run(argv: List[str]) -> int:
     set_container(container)
     logger.info("Service container initialized")
 
-    from .ui.registry import get_ui_backend
+    from .ui.registry import get_ui_backend, resolve_ui_backend_name
+    from .ui.active_backend import set_active_ui_backend_id
 
-    backend = get_ui_backend("qt")(container, argv, VERSION_NAME)
+    backend_name = resolve_ui_backend_name(argv)
+    set_active_ui_backend_id(backend_name)
+    backend = get_ui_backend(backend_name)(container, argv, VERSION_NAME)
     return backend.run()
 
 

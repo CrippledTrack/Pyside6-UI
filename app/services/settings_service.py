@@ -20,14 +20,16 @@ from ..utils.imports import get_platforms_constants
 # PERF: Single call to get_platforms_constants() for both values (was 2 separate calls).
 try:
     platform_constants = get_platforms_constants()
-    NEW_UI_ENABLED_BY_DEFAULT = getattr(platform_constants, 'NEW_UI_ENABLED_BY_DEFAULT', None)
+    QT_NEW_UI_ENABLED_BY_DEFAULT = getattr(
+        platform_constants, 'QT_NEW_UI_ENABLED_BY_DEFAULT', None
+    )
     HIDE_ADMIN_MENU_BY_DEFAULT = getattr(platform_constants, 'HIDE_ADMIN_MENU_BY_DEFAULT', None)
-    if NEW_UI_ENABLED_BY_DEFAULT is None:
-        from ..constants import NEW_UI_ENABLED_BY_DEFAULT
+    if QT_NEW_UI_ENABLED_BY_DEFAULT is None:
+        from ..constants import QT_NEW_UI_ENABLED_BY_DEFAULT
     if HIDE_ADMIN_MENU_BY_DEFAULT is None:
         from ..constants import HIDE_ADMIN_MENU_BY_DEFAULT
 except (ImportError, AttributeError):
-    from ..constants import NEW_UI_ENABLED_BY_DEFAULT, HIDE_ADMIN_MENU_BY_DEFAULT
+    from ..constants import QT_NEW_UI_ENABLED_BY_DEFAULT, HIDE_ADMIN_MENU_BY_DEFAULT
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +65,8 @@ class AppSettings:
     toast_notifications_enabled: bool = True
     toast_duration: int = 3000
     # UI overhaul flag (enable new UI features)
-    # Default value comes from constants.py (NEW_UI_ENABLED_BY_DEFAULT)
-    new_ui_enabled: bool = NEW_UI_ENABLED_BY_DEFAULT
+    # Default value comes from constants.py (QT_NEW_UI_ENABLED_BY_DEFAULT)
+    new_ui_enabled: bool = QT_NEW_UI_ENABLED_BY_DEFAULT
     # GUI version (for future migration detection)
     gui_version: str = ""
     # Settings schema version (for migration detection)

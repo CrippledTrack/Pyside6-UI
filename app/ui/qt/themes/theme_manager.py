@@ -17,19 +17,21 @@ from types import MappingProxyType
 from typing import Callable, Dict, List, Optional, Any, TYPE_CHECKING
 from ..bindings import QApplication, QPalette, QColor, Qt
 
-# Try to get NEW_UI_ENABLED_BY_DEFAULT from platform constants first, fallback to GUI constants
+# Try to get QT_NEW_UI_ENABLED_BY_DEFAULT from platform constants first, fallback to GUI constants
 try:
     from ....utils.imports import get_platforms_constants
     platform_constants = get_platforms_constants()
-    NEW_UI_ENABLED_BY_DEFAULT = getattr(platform_constants, 'NEW_UI_ENABLED_BY_DEFAULT', None)
-    if NEW_UI_ENABLED_BY_DEFAULT is None:
-        from ....constants import NEW_UI_ENABLED_BY_DEFAULT
+    QT_NEW_UI_ENABLED_BY_DEFAULT = getattr(
+        platform_constants, 'QT_NEW_UI_ENABLED_BY_DEFAULT', None
+    )
+    if QT_NEW_UI_ENABLED_BY_DEFAULT is None:
+        from ....constants import QT_NEW_UI_ENABLED_BY_DEFAULT
 except (ImportError, AttributeError):
     try:
-        from ....constants import NEW_UI_ENABLED_BY_DEFAULT
+        from ....constants import QT_NEW_UI_ENABLED_BY_DEFAULT
     except ImportError:
         # Fallback if constants not available
-        NEW_UI_ENABLED_BY_DEFAULT = True
+        QT_NEW_UI_ENABLED_BY_DEFAULT = True
 
 # PERF: Builtin theme getter functions are imported lazily via their module path
 # to avoid generating all 13 stylesheet strings at import time.
@@ -325,9 +327,9 @@ class ThemeManager:
                 new_ui_enabled = self.settings_service.get_new_ui_enabled()
             except Exception:
                 # If method doesn't exist or fails, use constant default
-                new_ui_enabled = NEW_UI_ENABLED_BY_DEFAULT
+                new_ui_enabled = QT_NEW_UI_ENABLED_BY_DEFAULT
         elif new_ui_enabled is None:
-            new_ui_enabled = NEW_UI_ENABLED_BY_DEFAULT
+            new_ui_enabled = QT_NEW_UI_ENABLED_BY_DEFAULT
         
         # Use classic stylesheet if old UI is enabled
         if not new_ui_enabled:

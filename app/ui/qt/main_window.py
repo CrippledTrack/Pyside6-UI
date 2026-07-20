@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import platform
 import uuid
-from typing import Any, Dict, Optional, TYPE_CHECKING, Callable, Set
+from typing import Any, Dict, List, Optional, TYPE_CHECKING, Callable, Set
 
 # PERF: We use TYPE_CHECKING to hide these imports from the runtime. This provides full
 # IDE autocompletion and static analysis support without paying the 100ms+ startup
@@ -636,7 +636,7 @@ class MainWindow(QMainWindow):
         other_text = get_other_platforms_text()
         
         # Reload plugins with the new cross-platform setting applied.
-        self._reload_all_plugins()
+        self.reload_plugins()
         
         if enabled:
             self.toast_manager.show_info(
@@ -645,7 +645,7 @@ class MainWindow(QMainWindow):
         else:
             self.toast_manager.show_info(f"Removed tabs from {other_text}")
     
-    def _reload_all_plugins(self) -> None:
+    def reload_plugins(self) -> None:
         """Reload all plugins and tabs.
         
         This clears the plugin registry and re-discovers all plugins,
@@ -670,6 +670,7 @@ class MainWindow(QMainWindow):
         
         # Re-run tab loader
         self._start_tab_loader()
+
     def setup_toast_manager(self) -> None:
         """Setup the toast notification manager."""
         from .controllers.toast_manager import ToastManager
@@ -914,6 +915,9 @@ class MainWindow(QMainWindow):
 
     def remove_plugin_tab(self, plugin_name: str) -> None:
         self.tab_controller.remove_tab(plugin_name)
+
+    def clear_tabs_for_plugins(self, plugin_names: List[str]) -> None:
+        self.tab_controller.clear_tabs_for_plugins(plugin_names)
 
     # IMainWindowShell — toast, notifications, handle-based chrome
 

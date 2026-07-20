@@ -19,6 +19,7 @@ from ....services.plugin_registry_facade import PluginRegistryFacade
 from ....services.interfaces import IAdminService, IDaemonService
 from ....services.plugin_service import PluginService
 from .....plugin_system.tab_content import resolve_tab_content
+from ...active_backend import get_active_ui_backend_id
 
 from ..widgets.admin_required_placeholder import AdminRequiredPlaceholder
 from ..widgets.error_placeholder import ErrorPlaceholder
@@ -230,7 +231,7 @@ class TabController(QObject):
                     tab_info["instance"] = resolve_tab_content(
                         plugin_instance,
                         parent=self.tab_widget,
-                        backend_id="qt",
+                        backend_id=get_active_ui_backend_id(),
                     )
                     # Store reference on plugin so cleanup can find it
                     plugin_instance._widget = tab_info["instance"]
@@ -316,7 +317,7 @@ class TabController(QObject):
             widget = resolve_tab_content(
                 plugin_instance,
                 parent=self.tab_widget,
-                backend_id="qt",
+                backend_id=get_active_ui_backend_id(),
             )
             tab_info["instance"] = widget
             # Store reference on plugin so cleanup can find it

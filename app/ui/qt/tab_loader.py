@@ -19,6 +19,9 @@ if TYPE_CHECKING:
     from ...services.plugin_service import PluginService
     from ...services.settings_service import SettingsService
 
+from ..active_backend import get_active_ui_backend_id
+from ....plugin_system.base import BaseTabPlugin
+
 logger = logging.getLogger(__name__)
 
 
@@ -100,6 +103,7 @@ class TabLoaderThread(QThread):
         """Emit add_tab signals for all enabled plugins, respecting saved order."""
         enabled_plugins = dict(self._plugin_service.get_enabled_plugins())
         has_settings = self._settings_service is not None
+        backend_id = get_active_ui_backend_id()
 
         # Get saved tab order if available
         saved_order = self._settings_service.get_tab_order() if has_settings else []
@@ -115,6 +119,8 @@ class TabLoaderThread(QThread):
                 # PERF: Inline the extension enabled check to avoid function call overhead in loop
                 if has_settings and not self._settings_service.is_extension_enabled(tab_name, "Tab"):
                     continue
+                if not self._supports_active_backend(plugin_class, backend_id):
+                    continue
                 self.add_tab.emit(tab_name, plugin_class)
         
         # 2. Add remaining (new/unsaved) tabs alphabetically
@@ -123,7 +129,22 @@ class TabLoaderThread(QThread):
                 return
             if has_settings and not self._settings_service.is_extension_enabled(tab_name, "Tab"):
                 continue
-            self.add_tab.emit(tab_name, enabled_plugins[tab_name])
+            plugin_class = enabled_plugins[tab_name]
+            if not self._supports_active_backend(plugin_class, backend_id):
+                continue
+            self.add_tab.emit(tab_name, plugin_class)
+
+    @staticmethod
+    def _supports_active_backend(plugin_class: type, backend_id: str) -> bool:
+        if issubclass(plugin_class, BaseTabPlugin):
+            if not plugin_class.is_supported_ui_backend(backend_id):
+                logger.debug(
+                    "Skipping tab %s: not supported on UI backend %s",
+                    getattr(plugin_class, "plugin_name", plugin_class.__name__),
+                    backend_id,
+                )
+                return False
+        return True
 
     def _should_cancel(self) -> bool:
         """Check if cancellation has been requested."""

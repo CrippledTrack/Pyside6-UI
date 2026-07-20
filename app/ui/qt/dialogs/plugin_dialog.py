@@ -310,8 +310,9 @@ class PluginManagementDialog(QDialog):
             return
 
         # Safely delegate reload to MainWindow if possible to ensure proper UI teardown
-        if self.parent() and hasattr(self.parent(), '_reload_all_plugins'):
-            self.parent()._reload_all_plugins()
+        parent = self.parent()
+        if parent is not None and hasattr(parent, "reload_plugins"):
+            parent.reload_plugins()
             self.accept()
         else:
             QMessageBox.warning(
