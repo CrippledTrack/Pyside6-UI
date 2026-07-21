@@ -115,11 +115,19 @@ def generate_stylesheet(
         pressed_overlay = "rgba(255, 255, 255, 0.12)"
         disabled_bg = "rgba(255, 255, 255, 0.08)"
         shadow_color = "rgba(0, 0, 0, 0.4)"
+        danger_bg = "#c62828"
+        danger_hover = "#e53935"
+        danger_pressed = "#b71c1c"
+        danger_text = "#ffffff"
     else:
         hover_overlay = "rgba(0, 0, 0, 0.05)"
         pressed_overlay = "rgba(0, 0, 0, 0.08)"
         disabled_bg = "rgba(0, 0, 0, 0.05)"
         shadow_color = "rgba(0, 0, 0, 0.15)"
+        danger_bg = "#d32f2f"
+        danger_hover = "#e53935"
+        danger_pressed = "#b71c1c"
+        danger_text = "#ffffff"
 
     # Resolve tab colour defaults now that hover_overlay is available
     _tab_selected_bg        = tab_selected_bg        or base_bg
@@ -229,13 +237,49 @@ def generate_stylesheet(
             border: 1px solid {border_color};
         }}
         /* Flat/Text Button style variants if needed via property */
-        QPushButton[flat="true"] {{
+        QPushButton[flat="true"], QPushButton[cp_role="flat"] {{
             background-color: transparent;
             color: {accent_color};
             border: none;
         }}
-        QPushButton[flat="true"]:hover {{
+        QPushButton[flat="true"]:hover, QPushButton[cp_role="flat"]:hover {{
             background-color: {hover_overlay};
+        }}
+        /* Shared UI definition roles (cp_role) */
+        QPushButton[cp_role="primary"] {{
+            background-color: {button_bg};
+            color: {button_text};
+            border: 1px solid transparent;
+        }}
+        QPushButton[cp_role="primary"]:hover {{
+            background-color: {button_hover};
+            border-color: {accent_color};
+        }}
+        QPushButton[cp_role="primary"]:pressed {{
+            background-color: {button_pressed};
+        }}
+        QPushButton[cp_role="default"] {{
+            background-color: {button_bg};
+            color: {button_text};
+            border: 1px solid transparent;
+        }}
+        QPushButton[cp_role="default"]:hover {{
+            background-color: {button_hover};
+            border-color: {accent_color};
+        }}
+        QPushButton[cp_role="default"]:pressed {{
+            background-color: {button_pressed};
+        }}
+        QPushButton[cp_role="danger"] {{
+            background-color: {danger_bg};
+            color: {danger_text};
+            border: 1px solid transparent;
+        }}
+        QPushButton[cp_role="danger"]:hover {{
+            background-color: {danger_hover};
+        }}
+        QPushButton[cp_role="danger"]:pressed {{
+            background-color: {danger_pressed};
         }}
         
         /* ===== Input Fields ===== */
@@ -260,6 +304,13 @@ def generate_stylesheet(
             background-color: {alt_bg};
             color: {text_secondary};
             border-color: {border_color};
+        }}
+        QLineEdit[cp_role="default"] {{
+            border: {border_width} solid {border_color};
+            border-radius: {border_radius};
+            padding: 6px 8px;
+            background-color: {base_bg};
+            color: {text_color};
         }}
         
         /* ===== SpinBox ===== */
@@ -382,10 +433,29 @@ def generate_stylesheet(
             padding: 0;
             border-radius: 0;
         }}
+        QLabel#heading, QLabel[cp_role="heading"] {{
+            font-size: 18px;
+            font-weight: 700;
+            color: {text_color};
+            margin: 4px 0px;
+        }}
+        QLabel[cp_role="body"] {{
+            color: {text_color};
+            font-weight: 400;
+        }}
+        QLabel[cp_role="field_label"] {{
+            color: {text_secondary};
+            font-weight: 600;
+        }}
+        QLabel[cp_role="success"] {{
+            color: #4CAF50;
+            font-weight: 700;
+            padding: 2px 8px;
+        }}
         
         /* ===== Scoped Form Labels Quirk (winforms_label_quirk) ===== */
         /* Apply bordered style only to widgets with setProperty("variant", "field_label") */
-        QLabel[variant="field_label"] {{
+        QLabel[variant="field_label"], QLabel[cp_role="field_label"] {{
             border: {label_quirk_border};
             background-color: {label_quirk_bg};
             padding: {label_quirk_padding};
