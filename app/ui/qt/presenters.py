@@ -21,6 +21,9 @@ class QtDialogPresenter:
     def warning(self, title: str, message: str) -> None:
         QMessageBox.warning(self._parent, title, message)
 
+    def info(self, title: str, message: str) -> None:
+        QMessageBox.information(self._parent, title, message)
+
     def confirm(self, title: str, message: str) -> bool:
         reply = QMessageBox.question(
             self._parent,

@@ -20,5 +20,9 @@ class IDialogPresenter(Protocol):
         """Show an error dialog."""
         ...
 
+    def info(self, title: str, message: str) -> None:
+        """Show an informational dialog."""
+        ...
+
 
 __all__ = ['IDialogPresenter']

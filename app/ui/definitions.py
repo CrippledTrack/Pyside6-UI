@@ -75,21 +75,9 @@ def _load_style_map() -> Any:
 
         return style_map
     if backend_id == "tui":
-        try:
-            from .tui import style_map  # type: ignore[attr-defined]
+        from .tui import style_map
 
-            return style_map
-        except ImportError:
-            pass
-        try:
-            import tui_wip.style_map as style_map  # type: ignore[no-redef]
-
-            return style_map
-        except ImportError as exc:
-            raise RuntimeError(
-                "TUI style map is not available. Reintegrate tui_wip into "
-                "GUI.app.ui.tui or ensure tui_wip is importable."
-            ) from exc
+        return style_map
     raise RuntimeError(f"No UI definitions style map for backend '{backend_id}'")
 
 
@@ -126,13 +114,19 @@ def create_text_area(
     *,
     read_only: bool = True,
     min_height: Optional[int] = None,
+    expand: bool = False,
 ) -> Any:
-    """Create a multiline text area (e.g. logs) for the active backend."""
+    """Create a multiline text area (e.g. logs) for the active backend.
+
+    When ``expand`` is True, the widget grows to fill leftover space in its
+    parent column (TUI ``1fr`` / Qt expanding size policy).
+    """
     return _load_style_map().create_text_area(
         _role_str(role),
         parent,
         read_only=read_only,
         min_height=min_height,
+        expand=expand,
     )
 
 
@@ -156,14 +150,23 @@ def spacing(name: str = SPACING_MEDIUM) -> int:
     return int(_load_style_map().spacing(name))
 
 
-def create_column(parent: Any = None) -> Any:
-    """Create a vertical container for the active backend."""
-    return _load_style_map().create_column(parent)
+def create_column(parent: Any = None, *, expand: bool = False) -> Any:
+    """Create a vertical container for the active backend.
+
+    Use ``expand=True`` for tab roots so the column fills the host pane.
+    """
+    return _load_style_map().create_column(parent, expand=expand)
 
 
-def create_row(parent: Any = None) -> Any:
+def create_row(parent: Any = None, *, expand: bool = False) -> Any:
     """Create a horizontal container for the active backend."""
-    return _load_style_map().create_row(parent)
+    return _load_style_map().create_row(parent, expand=expand)
+
+
+def set_expand(widget: Any, expand: bool = True, stretch: int = 1) -> Any:
+    """Mark ``widget`` to fill leftover space in its parent layout."""
+    _load_style_map().set_expand(widget, expand, stretch)
+    return widget
 
 
 def add(container: Any, child: Any) -> None:
@@ -219,6 +222,7 @@ __all__ = [
     "spacing",
     "create_column",
     "create_row",
+    "set_expand",
     "add",
     "add_stretch",
     "on_click",

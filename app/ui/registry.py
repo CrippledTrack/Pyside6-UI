@@ -8,7 +8,7 @@ from typing import Any, Callable, List, Optional, Type
 
 def list_ui_backends() -> List[str]:
     """Return UI backend ids registered for this release."""
-    return ["qt"]
+    return ["qt", "tui"]
 
 
 def resolve_ui_backend_name(argv: Optional[List[str]] = None) -> str:
@@ -25,12 +25,14 @@ def resolve_ui_backend_name(argv: Optional[List[str]] = None) -> str:
         return env_backend.lower()
 
     if argv:
-        for arg in argv:
+        for i, arg in enumerate(argv):
             if arg.startswith("--ui-backend="):
                 return arg.split("=", 1)[1].strip().lower()
+            if arg == "--ui-backend" and i + 1 < len(argv):
+                return argv[i + 1].strip().lower()
 
     try:
-        from ...utils.imports import get_platforms_constants
+        from ..utils.imports import get_platforms_constants
 
         constants = get_platforms_constants()
         default = getattr(constants, "DEFAULT_UI_BACKEND", None)
@@ -50,6 +52,7 @@ def get_ui_backend(name: str) -> Type[Any]:
     key = (name or "qt").strip().lower()
     loaders: dict[str, Callable[[], Type[Any]]] = {
         "qt": _load_qt,
+        "tui": _load_tui,
     }
     if key not in loaders:
         raise ValueError(
@@ -61,6 +64,11 @@ def get_ui_backend(name: str) -> Type[Any]:
 def _load_qt() -> Type[Any]:
     from .qt.application import QtApplicationBackend
     return QtApplicationBackend
+
+
+def _load_tui() -> Type[Any]:
+    from .tui.application import TextualApplicationBackend
+    return TextualApplicationBackend
 
 
 __all__ = ["get_ui_backend", "resolve_ui_backend_name", "list_ui_backends"]

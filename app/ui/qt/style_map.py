@@ -14,6 +14,7 @@ from .bindings import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QSizePolicy,
     QTextEdit,
     QTimer,
     QVBoxLayout,
@@ -107,6 +108,7 @@ def create_text_area(
     *,
     read_only: bool = True,
     min_height: int | None = None,
+    expand: bool = False,
 ) -> QTextEdit:
     """Create a multiline text area (e.g. event log)."""
     edit = QTextEdit(parent)
@@ -114,6 +116,8 @@ def create_text_area(
     if min_height is not None:
         edit.setMinimumHeight(int(min_height))
     apply_input_role(edit, role)
+    if expand:
+        set_expand(edit, True)
     return edit
 
 
@@ -125,7 +129,23 @@ def spacing(name: str = "medium") -> int:
     return SPACING_PX[key]
 
 
-def create_column(parent: Any = None) -> QWidget:
+def set_expand(widget: Any, expand: bool = True, stretch: int = 1) -> None:
+    """Mark a widget to fill leftover space in its parent layout."""
+    widget.setProperty("_cp_expand", bool(expand))
+    widget.setProperty("_cp_expand_stretch", max(1, int(stretch)) if expand else 0)
+    if expand:
+        widget.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+    else:
+        widget.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Preferred,
+        )
+
+
+def create_column(parent: Any = None, *, expand: bool = False) -> QWidget:
     """Create a vertical box container widget."""
     container = QWidget(parent)
     layout = QVBoxLayout(container)
@@ -133,10 +153,12 @@ def create_column(parent: Any = None) -> QWidget:
     layout.setContentsMargins(gap, gap, gap, gap)
     layout.setSpacing(gap)
     container.setProperty("_cp_layout_kind", "column")
+    if expand:
+        set_expand(container, True)
     return container
 
 
-def create_row(parent: Any = None) -> QWidget:
+def create_row(parent: Any = None, *, expand: bool = False) -> QWidget:
     """Create a horizontal box container widget."""
     container = QWidget(parent)
     layout = QHBoxLayout(container)
@@ -144,6 +166,8 @@ def create_row(parent: Any = None) -> QWidget:
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(gap)
     container.setProperty("_cp_layout_kind", "row")
+    if expand:
+        set_expand(container, True)
     return container
 
 
@@ -152,7 +176,13 @@ def add(container: Any, child: Any) -> None:
     layout = container.layout()
     if layout is None:
         raise ValueError("Container has no layout; use create_column/create_row")
-    layout.addWidget(child)
+    stretch = 0
+    try:
+        if bool(child.property("_cp_expand")):
+            stretch = int(child.property("_cp_expand_stretch") or 1)
+    except Exception:
+        stretch = 1 if getattr(child, "_cp_expand", False) else 0
+    layout.addWidget(child, stretch)
 
 
 def add_stretch(container: Any, stretch: int = 1) -> None:
@@ -207,6 +237,7 @@ __all__ = [
     "create_input",
     "create_text_area",
     "spacing",
+    "set_expand",
     "create_column",
     "create_row",
     "add",
