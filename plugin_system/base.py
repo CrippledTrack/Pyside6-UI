@@ -13,14 +13,6 @@ if TYPE_CHECKING:
     from .registry import PluginRegistry
 
 from .interfaces import (
-    PluginProtocol,
-    TabExtension,
-    MenuExtension,
-    StatusExtension,
-    ToolbarExtension,
-    ServiceExtension,
-    EventSubscriberExtension,
-    SettingsExtension,
     IServiceContainer,
     ISettingsService,
     IPluginResourceCleanup,
@@ -301,27 +293,9 @@ class CoreTabPlugin(BaseTabPlugin):
             cls.plugin_author = cls._default_core_author()
 
 
-
-# Re-exports
-from .types import MenuItemDefinition, ToolbarAction, PluginEvent
-
 __all__ = [
-    # Base classes
     'BaseTabPlugin',
     'CoreTabPlugin',
-    # Interfaces
-    'PluginProtocol',
-    'TabExtension',
-    'MenuExtension',
-    'StatusExtension',
-    'ToolbarExtension',
-    'ServiceExtension',
-    'EventSubscriberExtension',
-    'SettingsExtension',
-    # Types
-    'MenuItemDefinition',
-    'ToolbarAction',
-    'PluginEvent',
     'TabContent',
     'TabCreateContext',
 ]

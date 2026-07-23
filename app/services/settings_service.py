@@ -317,21 +317,7 @@ class SettingsService:
             fullscreen
         )
     
-    def get_logging_enabled(self) -> bool:
-        """Get logging enabled setting"""
-        return self._settings.logging_enabled
-    
-    def get_log_to_file(self) -> bool:
-        """Get log to file setting"""
-        return self._settings.log_to_file
-    
     # UI/UX settings methods
-    def save_ui_preferences(self, show_tooltips: bool) -> None:
-        """Save UI preferences"""
-        self._settings.show_tooltips = show_tooltips
-        self._save_settings()
-        logger.debug(f"UI preferences saved: tooltips={show_tooltips}")
-    
     def get_show_tooltips(self) -> bool:
         """Get show tooltips setting"""
         return self._settings.show_tooltips
@@ -541,14 +527,8 @@ class SettingsService:
         return self._settings.favorite_themes.copy()
 
 
-def load_settings() -> SettingsService:
-    """Load and return a settings service instance"""
-    return SettingsService()
-
-
 __all__ = [
     'WindowGeometry',
     'AppSettings',
     'SettingsService',
-    'load_settings',
 ]

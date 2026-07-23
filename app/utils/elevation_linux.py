@@ -104,56 +104,6 @@ def is_admin():
             return False
 
 
-def prompt_for_admin_immediately():
-    if is_admin():
-        return True
-
-    print("This application requires root privileges to function properly.")
-
-    if check_pkexec_available():
-        print("Using pkexec for authentication...")
-        try:
-            result = subprocess.run(['pkexec', 'true'], capture_output=True, text=True)
-            if result.returncode == 0:
-                print("Admin privileges obtained successfully via pkexec.")
-                return True
-            else:
-                print("pkexec authentication failed or was cancelled.")
-                return False
-        except Exception as e:
-            print(f"Error with pkexec: {e}")
-
-    if check_sudo_available():
-        print("Falling back to sudo for authentication...")
-        try:
-            result = subprocess.run(['sudo', '-n', 'true'], capture_output=True, text=True)
-            if result.returncode == 0:
-                print("Admin privileges available via sudo.")
-                return True
-            else:
-                print("Please enter your password when prompted...")
-                result = subprocess.run(['sudo', '-v'], capture_output=True, text=True)
-                if result.returncode == 0:
-                    print("Admin privileges obtained successfully via sudo.")
-                    return True
-                else:
-                    print("Failed to obtain admin privileges via sudo.")
-                    return False
-        except Exception as e:
-            print(f"Error obtaining admin privileges via sudo: {e}")
-            return False
-    else:
-        print("Error: Neither pkexec nor sudo is available on this system.")
-        print("Please run the application as root manually.")
-        return False
-
-
-def ensure_root_privileges():
-    if is_admin():
-        return True
-    return prompt_for_admin_immediately()
-
-
 def run_command_as_admin(command, description="This operation", interactive=False):
     """Run a command with admin privileges using direct elevation.
     
@@ -221,29 +171,6 @@ def run_command_as_admin(command, description="This operation", interactive=Fals
         raise Exception(error_msg)
 
 
-def run_command_as_admin_interactive(command, description="This operation"):
-    """Run a command with admin privileges interactively using direct elevation.
-    
-    Note: This should only be used before the daemon is available (e.g., Qt dependency installation).
-    For normal operations, use the daemon via GUI.app.utils.privileged.run_privileged_command instead.
-    """
-    if is_admin():
-        return subprocess.run(command, text=True)
-
-    if check_pkexec_available():
-        try:
-            pkexec_command = ['pkexec'] + command
-            return subprocess.run(pkexec_command, text=True)
-        except Exception as e:
-            print(f"pkexec failed, falling back to sudo: {e}")
-
-    if check_sudo_available():
-        sudo_command = ['sudo'] + command
-        return subprocess.run(sudo_command, text=True)
-    else:
-        raise Exception("Neither pkexec nor sudo is available for privilege escalation")
-
-
 def check_sudo_available():
     try:
         result = subprocess.run(['which', 'sudo'], capture_output=True, text=True)
@@ -286,12 +213,6 @@ def can_elevate():
         return True
 
 
-def prompt_for_elevation(operation_description="this operation"):
-    print(f"\n{operation_description} requires root privileges.")
-    print("The application will prompt for your password when needed.")
-    return True
-
-
 def get_sudo_status():
     return {
         'is_admin': is_admin(),
@@ -301,112 +222,6 @@ def get_sudo_status():
         'pkexec_available': check_pkexec_available(),
         'can_elevate': can_elevate() if (check_sudo_available() or check_pkexec_available()) else False,
     }
-
-
-def _wait_for_auth(process: subprocess.Popen, name: str) -> None:
-    """Wait for pkexec or sudo authentication to succeed or fail.
-    
-    If the process exits quickly, assume failure. If it keeps running,
-    assume success and exit the current process.
-    """
-    max_wait = 120  # 2 minutes max wait for authentication
-    check_interval = 0.5
-    waited = 0
-    
-    while waited < max_wait:
-        time.sleep(check_interval)
-        waited += check_interval
-        
-        poll_result = process.poll()
-        if poll_result is None:
-            # Process is still running - either waiting for auth or app has started
-            # If we've waited at least 2 seconds, assume auth succeeded and app is starting
-            if waited >= 2.0:
-                # Give it a bit more time to actually start the app, then exit
-                time.sleep(1.0)
-                sys.exit(0)
-        else:
-            # Process exited
-            # If it exited very quickly (< 1 second), it's likely an immediate failure
-            if waited < 1.0:
-                returncode = poll_result
-                raise RuntimeError(f"{name} authentication failed or was cancelled (return code: {returncode})")
-            # If it ran for a while then exited, might have started but crashed
-            # Or user cancelled after some time - treat as failure
-            returncode = poll_result
-            raise RuntimeError(f"{name} process exited (return code: {returncode})")
-            
-    # Timeout - process still running but we've waited too long
-    # This shouldn't happen, but if it does, assume it's working and exit
-    logger.warning(f"{name} authentication wait timed out, assuming success and exiting")
-    sys.exit(0)
-
-
-def run_as_admin() -> bool:
-    """Attempt to re-launch the current application with root privileges.
-    
-    Behavior:
-    - If already running as root: returns False immediately (no relaunch).
-    - If elevation request succeeds: starts elevated instance and exits current process.
-    - If elevation request fails (e.g., password denied): raises RuntimeError.
-    
-    Returns:
-        False if already running as root, otherwise exits current process
-        
-    Raises:
-        RuntimeError: If elevation request fails or no elevation method is available
-    """
-    if is_admin():
-        return False
-    
-    # Get the script/executable path
-    script = os.path.abspath(sys.argv[0])
-    python_exe = sys.executable
-    
-    # Build command arguments - preserve all original arguments
-    cmd_args = [python_exe, script] + sys.argv[1:]
-    
-    # Try pkexec first (preferred for GUI applications)
-    if check_pkexec_available():
-        try:
-            # pkexec expects: pkexec <command> [args...]
-            # We use Popen and don't wait, so the new process starts and we exit
-            process = subprocess.Popen(
-                ['pkexec'] + cmd_args,
-                start_new_session=True
-            )
-            _wait_for_auth(process, 'pkexec')
-            
-        except FileNotFoundError:
-            # pkexec not found, fall through to sudo
-            pass
-        except Exception as e:
-            # If it's already a RuntimeError, re-raise it
-            if isinstance(e, RuntimeError):
-                raise
-            raise RuntimeError(f"pkexec failed: {e}") from e
-    
-    # Fall back to sudo
-    if check_sudo_available():
-        try:
-            # sudo expects: sudo <command> [args...]
-            # We use Popen and don't wait, so the new process starts and we exit
-            process = subprocess.Popen(
-                ['sudo'] + cmd_args,
-                start_new_session=True
-            )
-            _wait_for_auth(process, 'sudo')
-            
-        except FileNotFoundError:
-            pass
-        except Exception as e:
-            # If it's already a RuntimeError, re-raise it
-            if isinstance(e, RuntimeError):
-                raise
-            raise RuntimeError(f"sudo failed: {e}") from e
-    
-    # No elevation method available
-    raise RuntimeError("Neither pkexec nor sudo is available. Cannot restart with elevated privileges.")
 
 
 def is_daemon_running() -> bool:

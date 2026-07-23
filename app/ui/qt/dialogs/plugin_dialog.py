@@ -8,10 +8,7 @@ plugin settings.
 
 from __future__ import annotations
 
-import inspect
 import logging
-import os
-import sys
 from typing import Optional, List, Tuple, Any, Type, Dict
 
 from ..bindings import (
@@ -42,13 +39,13 @@ class PluginManagementDialog(QDialog):
         self._rejected_plugins = {}  # Dict of name -> (plugin_class, reason)
         self.settings_service = settings_service
         self.plugin_controller = plugin_controller
-        # Get plugin service cleanly from controller
+        # Get plugin service from controller (required)
         if plugin_controller and hasattr(plugin_controller, 'plugin_service'):
             self.plugin_service = plugin_controller.plugin_service
         else:
-            # Fallback: create a standalone service (should not happen in practice)
-            from ....services.plugin_service import PluginService
-            self.plugin_service = PluginService(settings_service=settings_service)
+            raise ValueError(
+                "PluginManagementDialog requires a plugin_controller with plugin_service"
+            )
         self.setup_ui()
         self.load_plugins()
 
@@ -797,27 +794,6 @@ class PluginManagementDialog(QDialog):
             QMessageBox.information(self, "No Configuration", f"Plugin '{name}' has no configurable settings.")
         except Exception as e:
             QMessageBox.critical(self, "Configuration Error", f"Failed to open configuration for '{name}':\n{e}")
-
-    def open_module_location(self, plugin_class: Type[BaseTabPlugin]) -> None:
-        try:
-            path = inspect.getsourcefile(plugin_class)
-            if not path:
-                module = sys.modules.get(plugin_class.__module__)
-                path = getattr(module, '__file__', None)
-            if not path:
-                QMessageBox.warning(self, "Open Location", "Could not determine module file path.")
-                return
-            folder = os.path.dirname(os.path.abspath(path))
-            if sys.platform.startswith('win'):
-                os.startfile(folder)  # type: ignore
-            elif sys.platform.startswith('darwin'):
-                import subprocess
-                subprocess.Popen(['open', folder])
-            else:
-                import subprocess
-                subprocess.Popen(['xdg-open', folder])
-        except Exception as e:
-            QMessageBox.critical(self, "Open Location", f"Failed to open location: {e}")
 
 
 __all__ = ['PluginManagementDialog']

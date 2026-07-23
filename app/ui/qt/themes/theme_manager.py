@@ -43,33 +43,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _parse_version_tuple(v: str) -> Optional[tuple]:
-    """Parse a semantic version string like '3.1.2' -> (3, 1, 2). Returns None on failure."""
-    try:
-        parts = v.strip().split(".")
-        if len(parts) < 2:
-            return None
-        major = int(parts[0])
-        minor = int(parts[1])
-        patch = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
-        return (major, minor, patch)
-    except Exception:
-        return None
-
-
-def _is_version_lte(version_str: str, major: int, minor: int) -> bool:
-    """Return True if version_str <= major.minor.x (any patch)."""
-    t = _parse_version_tuple(version_str)
-    if t is None:
-        return False
-    v_major, v_minor, _ = t
-    if v_major < major:
-        return True
-    if v_major > major:
-        return False
-    return v_minor <= minor
-
-
 def create_palette_from_data(palette_data: Dict[str, Any]) -> QPalette:
     """Create and return a QPalette object from palette data dictionary."""
     palette = QPalette()
@@ -237,13 +210,6 @@ class ThemeManager:
                 self._themes[name] = self._theme_factories.pop(name)()
         return MappingProxyType(self._themes)
     
-    @themes.setter
-    def themes(self, value: Dict[str, Any]) -> None:
-        """Set themes dictionary"""
-        self._themes = value
-        self._theme_factories.clear()
-        self._sorted_names_cache = None
-    
     def save_custom_theme(self, theme_name: str, theme_data: Dict[str, Any]) -> bool:
         """Save a custom theme to file.
         """
@@ -354,8 +320,8 @@ class ThemeManager:
                     self._apply_palette({})
                 else:
                     # Generate classic stylesheet from theme data
-                    from .classic_theme_manager import get_classic_stylesheet
-                    classic_stylesheet = get_classic_stylesheet(theme_data)
+                    from .ui_mode import classic_stylesheet_for
+                    classic_stylesheet = classic_stylesheet_for(self, theme_data)
                     self._apply_stylesheet(classic_stylesheet)
                     self._apply_palette(theme_data.get('palette', {}))
                 
@@ -469,10 +435,6 @@ class ThemeManager:
         # apply_theme will automatically check settings_service for new_ui_enabled
         self.apply_theme(theme_name)
         return theme_name
-    
-    def set_settings_service(self, settings_service: Optional["SettingsService"]) -> None:
-        """Set the settings service for theme persistence"""
-        self.settings_service = settings_service
     
     def _apply_stylesheet(self, stylesheet: str):
         """Apply stylesheet to the application.

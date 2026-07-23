@@ -15,7 +15,6 @@ from ..bindings import Signal, QObject, QTabWidget, QWidget, QMenu, QAction, QKe
 if TYPE_CHECKING:
     from ....services.container import ServiceContainer
 
-from ....services.plugin_registry_facade import PluginRegistryFacade
 from ....services.interfaces import IAdminService, IDaemonService
 from ....services.plugin_service import PluginService
 from .....plugin_system.tab_content import resolve_tab_content
@@ -43,7 +42,6 @@ class TabController(QObject):
         tab_widget: QTabWidget,
         admin_service: IAdminService,
         daemon_service: Optional[IDaemonService],
-        registry: PluginRegistryFacade,
         plugin_service: PluginService,
         parent: Optional[QObject] = None
     ) -> None:
@@ -53,7 +51,6 @@ class TabController(QObject):
             tab_widget: The tab widget to manage
             admin_service: The admin service
             daemon_service: The daemon service
-            registry: The plugin registry facade
             plugin_service: The plugin service
             parent: Optional parent object
         """
@@ -61,7 +58,6 @@ class TabController(QObject):
         self.tab_widget = tab_widget
         self.admin_service = admin_service
         self.daemon_service = daemon_service
-        self.registry = registry
         self.plugin_service = plugin_service
         
         self.loaded_tabs: Dict[str, Dict[str, Any]] = {}
@@ -126,7 +122,7 @@ class TabController(QObject):
             if tab_info.get("instance"):
                 # Call deactivation hook
                 try:
-                    plugin_instance = self.registry.get_plugin_instance(tab_name)
+                    plugin_instance = self.plugin_service.get_plugin_instance(tab_name)
                     if hasattr(plugin_instance, 'on_tab_deactivated'):
                         plugin_instance.on_tab_deactivated()
                 except Exception as e:
@@ -138,7 +134,7 @@ class TabController(QObject):
             # the entire plugin object graph (timers, threads, sub-widgets).
             # The instance will be re-created on demand if the tab is re-added.
             try:
-                self.registry.unload_plugin_instance(tab_name)
+                self.plugin_service.unload_plugin_instance(tab_name)
             except Exception as e:
                 logger.debug(f"Error unloading plugin instance '{tab_name}': {e}")
             
@@ -181,7 +177,7 @@ class TabController(QObject):
                         prev_instance, (LoadingPlaceholder, ErrorPlaceholder, AdminRequiredPlaceholder)
                     ):
                         try:
-                            plugin_instance = self.registry.get_plugin_instance(prev_tab_name)
+                            plugin_instance = self.plugin_service.get_plugin_instance(prev_tab_name)
                             if hasattr(plugin_instance, 'on_tab_deactivated'):
                                 plugin_instance.on_tab_deactivated()
                         except Exception as e:
@@ -227,7 +223,7 @@ class TabController(QObject):
                     tab_info["instance"] = admin_widget
                 else:
                     # Create the actual plugin content (create_tab_content or create_widget)
-                    plugin_instance = self.registry.get_plugin_instance(tab_name)
+                    plugin_instance = self.plugin_service.get_plugin_instance(tab_name)
                     tab_info["instance"] = resolve_tab_content(
                         plugin_instance,
                         parent=self.tab_widget,
@@ -255,7 +251,7 @@ class TabController(QObject):
             # Call activation hook for newly active tab
             if tab_info["instance"] and not isinstance(tab_info["instance"], (LoadingPlaceholder, ErrorPlaceholder, AdminRequiredPlaceholder)):
                 try:
-                    plugin_instance = self.registry.get_plugin_instance(tab_name)
+                    plugin_instance = self.plugin_service.get_plugin_instance(tab_name)
                     if hasattr(plugin_instance, 'on_tab_activated'):
                         plugin_instance.on_tab_activated()
                 except Exception as e:
@@ -313,7 +309,7 @@ class TabController(QObject):
             
             logger.info(f"Creating widget for tab '{tab_name}' (daemon/privilege available)")
             # Create the actual content using dual-path resolver
-            plugin_instance = self.registry.get_plugin_instance(tab_name)
+            plugin_instance = self.plugin_service.get_plugin_instance(tab_name)
             widget = resolve_tab_content(
                 plugin_instance,
                 parent=self.tab_widget,
@@ -437,7 +433,7 @@ class TabController(QObject):
                         break
 
                 try:
-                    self.registry.unload_plugin_instance(tab_name)
+                    self.plugin_service.unload_plugin_instance(tab_name)
                 except Exception as e:
                     logger.debug(f"Error unloading plugin instance '{tab_name}': {e}")
 

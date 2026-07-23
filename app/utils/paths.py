@@ -74,20 +74,14 @@ def get_plugins_dir() -> Path:
     return base / "plugins"
 
 
-def app_root() -> Path:
-    """Legacy function for backward compatibility."""
-    return get_base_path()
-
-
 def logs_dir() -> Path:
     """Get the logs directory path."""
-    return app_root() / "logs"
+    return get_base_path() / "logs"
 
 
 __all__ = [
     'get_base_path',
     'get_plugins_dir',
-    'app_root',
     'logs_dir',
     'parent_has_gui_plugin_dirs',
 ]

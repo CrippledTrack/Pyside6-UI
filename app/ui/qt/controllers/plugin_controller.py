@@ -14,7 +14,6 @@ from ..bindings import QObject, Signal
 
 from ....services.plugin_service import PluginService
 from ....services.interfaces import ISettingsService
-from ....services.plugin_registry_facade import PluginRegistryFacade
 from ...abstractions.shell import IMainWindowShell
 from ...plugin_extension_host import PluginExtensionHost
 
@@ -41,7 +40,6 @@ class PluginController(QObject):
 
         self.settings_service = container.get(ISettingsService)
         self.plugin_service = container.get(PluginService)
-        self.registry = container.get(PluginRegistryFacade)
 
     @property
     def _main_window(self) -> Optional[IMainWindowShell]:
@@ -63,14 +61,14 @@ class PluginController(QObject):
                 self.plugin_service.enable_plugin(plugin_name)
                 logger.info("Enabled plugin: %s", plugin_name)
                 try:
-                    instance = self.registry.get_plugin_instance(plugin_name)
+                    instance = self.plugin_service.get_plugin_instance(plugin_name)
                     if hasattr(instance, "on_plugin_enabled"):
                         instance.on_plugin_enabled()
                 except Exception as e:
                     logger.error(
                         "Error calling on_plugin_enabled for '%s': %s", plugin_name, e
                     )
-                self.registry.publish_event(
+                self.plugin_service.publish_event(
                     "plugin_enabled", {"plugin_name": plugin_name}
                 )
 
@@ -89,8 +87,8 @@ class PluginController(QObject):
         else:
             if self.plugin_service.is_enabled(plugin_name):
                 try:
-                    if self.registry.has_plugin_instance(plugin_name):
-                        instance = self.registry.get_plugin_instance(plugin_name)
+                    if self.plugin_service.has_plugin_instance(plugin_name):
+                        instance = self.plugin_service.get_plugin_instance(plugin_name)
                         if hasattr(instance, "on_plugin_disabled"):
                             instance.on_plugin_disabled()
                 except Exception as e:
@@ -99,7 +97,7 @@ class PluginController(QObject):
                     )
                 self.plugin_service.disable_plugin(plugin_name)
                 logger.info("Disabled plugin: %s", plugin_name)
-                self.registry.publish_event(
+                self.plugin_service.publish_event(
                     "plugin_disabled", {"plugin_name": plugin_name}
                 )
 
@@ -112,7 +110,7 @@ class PluginController(QObject):
 
         if not enabled:
             try:
-                self.registry.unload_plugin_instance(plugin_name)
+                self.plugin_service.unload_plugin_instance(plugin_name)
             except Exception as e:
                 logger.error("Error unloading plugin instance '%s': %s", plugin_name, e)
 

@@ -14,12 +14,10 @@ from .settings_service import SettingsService
 from .daemon_service import DaemonService
 from .admin_service import AdminService
 from .plugin_service import PluginService
-from .plugin_registry_facade import PluginRegistryFacade
 from .notification_service import NotificationService
 from .dev_mode_service import DevModeService
-from ...plugin_system.registry import PluginRegistry
 from ...plugin_system.interfaces import IServiceContainer, ISettingsService
-from .interfaces import IAdminService, IDaemonService, INotificationService, ISettingsService as IAppSettingsService
+from .interfaces import IAdminService, IDaemonService, INotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -109,11 +107,10 @@ class ServiceContainer:
             except Exception as e:
                 logger.debug(f"Failed to wire DevModeService into admin shim: {e}")
 
-        # 1. Settings service (no dependencies) — interface registrations only
-        if IAppSettingsService not in self._services:
+        # 1. Settings service (no dependencies) — single ISettingsService registration
+        if ISettingsService not in self._services:
             settings_service = SettingsService()
             self.register_singleton(ISettingsService, settings_service)
-            self.register_singleton(IAppSettingsService, settings_service)
             try:
                 dev_svc = self.get(DevModeService)
                 dev_svc.configure_settings_service(settings_service)
@@ -131,26 +128,14 @@ class ServiceContainer:
             admin_service = AdminService(daemon_service)
             self.register_singleton(IAdminService, admin_service)
         
-        # 4. Plugin registry (no dependencies initially, container set below)
-        if PluginRegistry not in self._services:
-            registry = PluginRegistry()
-            self.register_singleton(PluginRegistry, registry)
-
-        # 4a. Plugin service (depends on settings service + registry)
+        # 4. Plugin service (owns registry; container bound for plugin DI)
         if PluginService not in self._services:
-            settings_service = self.get(IAppSettingsService)
-            registry = self.get(PluginRegistry)
+            settings_service = self.get(ISettingsService)
             plugin_service = PluginService(
                 settings_service=settings_service,
-                registry=registry,
+                container=self,
             )
             self.register_singleton(PluginService, plugin_service)
-
-        # 4b. Plugin registry facade (depends on registry + container)
-        if PluginRegistryFacade not in self._services:
-            registry = self.get(PluginRegistry)
-            registry_facade = PluginRegistryFacade(self, registry=registry)
-            self.register_singleton(PluginRegistryFacade, registry_facade)
 
         # 5. Notification service (no dependencies)
         if INotificationService not in self._services:
@@ -168,47 +153,7 @@ class ServiceContainer:
         logger.debug("Service container reset")
 
 
-# Global application container (set by app bootstrap)
-_global_container: Optional[ServiceContainer] = None
-
-
-def get_container() -> ServiceContainer:
-    """Get the global service container instance.
-    
-    Returns:
-        Service container instance
-    """
-    global _global_container
-    if _global_container is None:
-        _global_container = ServiceContainer()
-        _global_container.initialize_services()
-    return _global_container
-
-
-def set_container(container: ServiceContainer) -> None:
-    """Set the global service container instance.
-    
-    Call this from the application bootstrap (app.py) after creating
-    the primary ServiceContainer so that get_container() returns the
-    same instance instead of creating a second one.
-    
-    Args:
-        container: The service container to register globally
-    """
-    global _global_container
-    _global_container = container
-
-
-def reset_container() -> None:
-    """Reset the global container (mainly for testing)."""
-    global _global_container
-    _global_container = None
-
-
 __all__ = [
     'ServiceContainer',
-    'get_container',
-    'set_container',
-    'reset_container',
 ]
 

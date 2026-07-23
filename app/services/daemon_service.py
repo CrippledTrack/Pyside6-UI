@@ -39,10 +39,6 @@ class DaemonService:
             logger.debug(f"Error checking daemon availability: {e}")
             return False
 
-    def is_running(self) -> bool:
-        """Check if the daemon process is running and connected."""
-        return self.is_available()
-
     def start(self) -> tuple[bool, Optional[str]]:
         """Start the privileged pipe daemon.
 
@@ -84,15 +80,6 @@ class DaemonService:
                 f"{callback.__name__ if hasattr(callback, '__name__') else 'anonymous'}"
             )
 
-    def unregister_refresh_callback(self, callback: Callable[[], None]) -> None:
-        """Unregister a refresh callback."""
-        if callback in self._refresh_callbacks:
-            self._refresh_callbacks.remove(callback)
-            logger.debug(
-                f"Unregistered refresh callback: "
-                f"{callback.__name__ if hasattr(callback, '__name__') else 'anonymous'}"
-            )
-
     def _notify_refresh_callbacks(self) -> None:
         """Notify all registered refresh callbacks."""
         logger.info(f"Notifying {len(self._refresh_callbacks)} refresh callbacks")
@@ -101,14 +88,6 @@ class DaemonService:
                 callback()
             except Exception as e:
                 logger.error(f"Error in refresh callback: {e}", exc_info=True)
-
-    def get_status_message(self) -> str:
-        """Get a human-readable status message about the daemon."""
-        if not self._is_linux:
-            return "Daemon is only available on Linux"
-        if self.is_available():
-            return "The privileged daemon is currently running"
-        return "The privileged daemon is not running"
 
 
 __all__ = ['DaemonService']

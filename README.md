@@ -105,3 +105,15 @@ When you run standalone (`cd GUI && python run.py`), if the **parent** of `GUI/`
 - If you see `ModuleNotFoundError: No module named 'GUI'`:
   - When using `main.py` or `python -m GUI`: run from the directory that contains the `GUI/` folder (and `main.py` if using that).
   - When using standalone: run `python run.py` from inside the `GUI/` directory.
+
+### Classic vs modern Qt UI
+
+Themes live under `GUI/app/ui/qt/themes/` (not the removed top-level `GUI/themes/`).
+
+- **Modern UI** (default when `new_ui` is enabled in settings): per-theme stylesheets from `builtin_themes/`.
+- **Classic UI** (fully supported): `classic_theme_manager.py` generates stylesheets from theme palettes. Toggle via the theme dialog’s new-UI setting (`SettingsService.get_new_ui_enabled()` / `save_new_ui_enabled()`).
+- Prefer helpers in `GUI.app.ui.qt.themes.ui_mode` (`is_classic_ui`, `classic_stylesheet_for`) instead of importing classic stylesheet code at every call site.
+
+### Plugin widget toolkit
+
+Import Qt widgets from leaf modules under `GUI/app/ui/qt/widgets/` (the package `__init__` does not re-export them). Optional toolkit helpers for plugin authors include `ProgressIndicator`, `StreamOutputPanel`, `LoadingOverlay`, `CardSection`, `HorizontalCard`, and `InfoCard`. Shell code already uses `CardContainer`, placeholders, toast, and notification center via leaf imports.

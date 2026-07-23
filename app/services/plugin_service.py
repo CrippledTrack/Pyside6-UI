@@ -7,8 +7,8 @@ instance, enabling dependency injection and easier testing. It handles:
 - Plugin registration and state management
 - Access to plugin registry methods
 
-The PluginRegistry instance is injected by the ServiceContainer.
-All access should go through this service when using dependency injection.
+The PluginRegistry is an internal detail of this service. UI code should
+use PluginService only.
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ from ..utils.paths import parent_has_gui_plugin_dirs
 
 if TYPE_CHECKING:
     from .settings_service import SettingsService
+    from ...plugin_system.interfaces import IServiceContainer
 
 logger = logging.getLogger(__name__)
 
@@ -55,90 +56,137 @@ def _ensure_parent_project_on_path() -> None:
 
 class PluginService:
     """Service for plugin discovery and registry management.
-    
-    Wraps an injected PluginRegistry instance to enable dependency injection
-    and easier testing. All plugin registry operations should go through
-    this service when using the ServiceContainer.
+
+    Owns a PluginRegistry instance. All UI and controller access should go
+    through this service when using the ServiceContainer.
     """
-    
-    def __init__(self, settings_service: Optional["SettingsService"] = None, registry: Optional[PluginRegistry] = None) -> None:
+
+    def __init__(
+        self,
+        settings_service: Optional["SettingsService"] = None,
+        registry: Optional[PluginRegistry] = None,
+        container: Optional[Any] = None,
+    ) -> None:
         """Initialize the plugin service.
-        
+
         Args:
             settings_service: Optional settings service for plugin state persistence
-            registry: Optional PluginRegistry instance (injected by ServiceContainer)
+            registry: Optional PluginRegistry (tests); normally created internally
+            container: Optional service container for plugin DI
         """
         self.settings_service = settings_service
         self._registry = registry or PluginRegistry()
         self._discovery_complete = False
-    
+        if container is not None:
+            self.bind_container(container)
+
+    def bind_container(self, container: "IServiceContainer | Any") -> None:
+        """Attach the service container to the underlying registry."""
+        self._registry.set_container(container)
+
     # =========================================================================
-    # Registry Access Methods (delegating to injected registry)
+    # Registry Access Methods (delegating to owned registry)
     # =========================================================================
-    
+
     def get_all_plugins(self) -> Dict[str, Type[BaseTabPlugin]]:
         """Get all registered plugins."""
         return self._registry.get_all_plugins()
-    
+
     def get_core_plugins(self) -> Dict[str, Type[BaseTabPlugin]]:
         """Get core plugins only."""
         return self._registry.get_core_plugins()
-    
+
     def get_external_plugins(self) -> Dict[str, Type[BaseTabPlugin]]:
         """Get external plugins only."""
         return self._registry.get_external_plugins()
-    
+
     def get_plugin(self, name: str) -> Optional[Type[BaseTabPlugin]]:
         """Get a specific plugin by name."""
         return self._registry.get_plugin(name)
-    
+
     def get_plugin_instance(self, name: str) -> Any:
         """Get or create a plugin instance by name."""
         return self._registry.get_plugin_instance(name)
-    
+
+    def unload_plugin_instance(self, name: str) -> None:
+        """Remove a plugin instance from the cache."""
+        self._registry.unload_plugin_instance(name)
+
+    def has_plugin_instance(self, name: str) -> bool:
+        """Check if a plugin instance is cached."""
+        return self._registry.has_plugin_instance(name)
+
     def list_plugin_names(self) -> List[str]:
         """Get list of all plugin names."""
         return self._registry.list_plugin_names()
-    
+
     def register_plugin(self, plugin_class: Type[BaseTabPlugin], is_core: bool = False) -> None:
         """Register a plugin in the registry."""
         self._registry.register_plugin(plugin_class, is_core=is_core)
-    
+
     def clear(self) -> None:
         """Clear all registered plugins."""
         self._registry.clear()
         self._discovery_complete = False
-        
+
         self._invalidate_core_plugin_modules()
-    
+
     def disable_plugin(self, name: str) -> None:
         """Disable a plugin by name."""
         self._registry.disable_plugin(name)
-    
+
     def enable_plugin(self, name: str) -> None:
         """Enable a plugin by name."""
         self._registry.enable_plugin(name)
-    
+
     def is_enabled(self, name: str) -> bool:
         """Check if a plugin is enabled."""
         return self._registry.is_enabled(name)
-    
+
     def get_enabled_plugins(self) -> Dict[str, Type[BaseTabPlugin]]:
         """Get all enabled plugins."""
         return self._registry.get_enabled_plugins()
-    
+
     def get_version_incompatibility(self, name: str) -> Optional[str]:
         """Get the version incompatibility reason for a plugin, if any."""
         return self._registry.get_version_incompatibility(name)
-    
+
     def get_rejected_plugins(self) -> Dict[str, Tuple[Type[Any], str]]:
         """Get rejected plugins and reasons."""
         return self._registry.get_rejected_plugins()
-    
+
     def register_plugin_force(self, name: str, plugin_class: Type[Any]) -> None:
         """Force register a version-incompatible plugin."""
         self._registry.register_plugin_force(name, plugin_class)
-    
+
+    def publish_event(self, event_name: str, event_data: Dict[str, Any] | None = None) -> None:
+        """Publish a plugin event to subscribers."""
+        self._registry.publish_event(event_name, event_data)
+
+    def get_menu_extensions(self, enabled_only: bool = True) -> Dict[str, Type[Any]]:
+        """Get MenuExtension plugin classes."""
+        return self._registry.get_menu_extensions(enabled_only=enabled_only)
+
+    def get_status_extensions(self, enabled_only: bool = True) -> Dict[str, Type[Any]]:
+        """Get StatusExtension plugin classes."""
+        return self._registry.get_status_extensions(enabled_only=enabled_only)
+
+    def get_toolbar_extensions(self, enabled_only: bool = True) -> Dict[str, Type[Any]]:
+        """Get ToolbarExtension plugin classes."""
+        return self._registry.get_toolbar_extensions(enabled_only=enabled_only)
+
+    def get_service_extensions(self, enabled_only: bool = True) -> Dict[str, Type[Any]]:
+        """Get ServiceExtension plugin classes."""
+        return self._registry.get_service_extensions(enabled_only=enabled_only)
+
+    def subscribe_lifecycle(self, subscriber: Any) -> None:
+        """Register a plugin lifecycle subscriber."""
+        self._registry.subscribe_lifecycle(subscriber)
+
+    def shutdown_event_executor(self) -> None:
+        """Shut down the registry background event executor."""
+        self._registry._shutdown_event_executor()
+
     # =========================================================================
     # Discovery Methods
     # =========================================================================
@@ -204,7 +252,7 @@ class PluginService:
         Non-core plugins are discovered from (in priority order) as *packages*:
         1. app_plugins.{platform}.plugins and app_plugins.common.plugins
         2. platforms.{platform}.plugins and platforms.common.plugins
-        3. GUI.plugins (built-in examples)
+        3. GUI.plugins (sample plugins; source trees only, not frozen builds)
         
         Returns (registered_core_plugins, summary) where summary may contain counts/metadata.
         """
@@ -269,17 +317,25 @@ class PluginService:
                     package="platforms.common.plugins",
                     priority=190,
                 ))
-                sources.append(PluginSource(
-                    source_id=f"{__package__.split('.')[0]}.plugins",
-                    package=f"{__package__.split('.')[0]}.plugins",
-                    priority=100,
-                ))
+                # Sample plugins under GUI.plugins are for authors in source trees only;
+                # skip them in frozen/production bundles.
+                gui_pkg = __package__.split('.')[0]
+                load_samples = not getattr(sys, "frozen", False) and (
+                    os.environ.get("GUI_LOAD_SAMPLE_PLUGINS", "1") != "0"
+                )
+                if load_samples:
+                    sources.append(PluginSource(
+                        source_id=f"{gui_pkg}.plugins",
+                        package=f"{gui_pkg}.plugins",
+                        priority=100,
+                    ))
 
                 from ..utils.paths import get_plugins_dir
                 plugins_dir = get_plugins_dir()
                 discovery = PluginDiscovery(plugins_dir=str(plugins_dir))
                 total_registered = 0
                 builtin_registered = 0
+                sample_pkg = f"{gui_pkg}.plugins"
 
                 # Sort by priority DESC to ensure earlier sources win.
                 for source in sorted(sources, key=lambda s: s.priority, reverse=True):
@@ -297,13 +353,17 @@ class PluginService:
                         try:
                             self._registry.register_plugin(plugin_class, is_core=False)
                             total_registered += 1
-                            if source.package == f"{__package__.split('.')[0]}.plugins":
+                            if source.package == sample_pkg:
                                 builtin_registered += 1
                         except Exception as e:
                             logger.warning(f"Failed to register plugin '{plugin_name}' from {source.source_id}: {e}")
 
-                # Discover and register external plugins from the plugins directory.
-                local_discovered = discovery.discover_local_plugins()
+                # Discover external plugins from the plugins directory.
+                # Skip the in-tree GUI/plugins sample folder when samples are disabled.
+                local_discovered: List[Tuple[str, Type[Any], str]] = []
+                plugins_path = Path(plugins_dir)
+                if load_samples or not discovery._is_gui_plugins_directory(plugins_path):
+                    local_discovered = discovery.discover_local_plugins()
                 local_registered = 0
                 for plugin_name, plugin_class, _src in local_discovered:
                     registered_name = self._registry.get_registered_name(plugin_class)

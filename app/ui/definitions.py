@@ -75,8 +75,14 @@ def _load_style_map() -> Any:
 
         return style_map
     if backend_id == "tui":
-        from .tui import style_map
-
+        try:
+            from .tui import style_map
+        except ImportError as exc:
+            raise RuntimeError(
+                "The TUI backend style map is not available yet (WIP). "
+                "It will live at GUI/app/ui/tui/ when ready. "
+                "Use the Qt backend (default), or see tui_wip/README.md."
+            ) from exc
         return style_map
     raise RuntimeError(f"No UI definitions style map for backend '{backend_id}'")
 

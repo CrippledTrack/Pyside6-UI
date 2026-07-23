@@ -1,7 +1,7 @@
 """
 Plugin discovery system for Basic GUI Application.
 
-Supports both entry points (for installed plugins) and local plugins folder.
+Discovers plugins from local directories and importable packages.
 """
 from __future__ import annotations
 
@@ -10,34 +10,16 @@ import importlib
 import importlib.util
 import hashlib
 import logging
-import os
 import pkgutil
 import sys
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, List, Optional, Tuple, Type
 
 from .base import BaseTabPlugin
-from .registry import PluginRegistry
 from .sources import PluginSource
 
-# Try to import entry_points (Python 3.8+)
-try:
-    from importlib.metadata import entry_points
-    HAS_ENTRY_POINTS = True
-except ImportError:
-    try:
-        # importlib_metadata is a backport for older Python versions
-        from importlib_metadata import entry_points  # type: ignore
-        HAS_ENTRY_POINTS = True
-    except ImportError:
-        HAS_ENTRY_POINTS = False
-        entry_points = None
-
 logger = logging.getLogger(__name__)
-
-# Entry point group name for tab plugins
-ENTRY_POINT_GROUP = "gui_app_tabs"
 
 # Default plugins directory relative to the main script
 DEFAULT_PLUGINS_DIR = "plugins"
@@ -54,68 +36,6 @@ class PluginDiscovery:
         """
         self.plugins_dir = plugins_dir or DEFAULT_PLUGINS_DIR
         self.discovered_plugins: List[Tuple[str, Type[Any], str]] = []  # (name, class, source)
-        
-    def discover_all_plugins(self, *, enable_entry_points: bool = False) -> List[Tuple[str, Type[Any], str]]:
-        """
-        Discover all plugins from both entry points and local directory.
-        
-        Returns:
-            List of tuples containing (plugin_name, plugin_class, source)
-        """
-        self.discovered_plugins.clear()
-        
-        # Discover entry point plugins
-        if enable_entry_points and HAS_ENTRY_POINTS:
-            entry_point_plugins = self.discover_entry_point_plugins()
-            self.discovered_plugins.extend(entry_point_plugins)
-            logger.info(f"Discovered {len(entry_point_plugins)} entry point plugins")
-        elif enable_entry_points and not HAS_ENTRY_POINTS:
-            logger.warning("Entry points not available, skipping entry point plugin discovery")
-        
-        # Discover local plugins
-        local_plugins = self.discover_local_plugins()
-        self.discovered_plugins.extend(local_plugins)
-        logger.info(f"Discovered {len(local_plugins)} local plugins")
-        
-        logger.info(f"Total plugins discovered: {len(self.discovered_plugins)}")
-        return self.discovered_plugins.copy()
-    
-    def discover_entry_point_plugins(self) -> List[Tuple[str, Type[Any], str]]:
-        """
-        Discover plugins via entry points.
-        
-        Returns:
-            List of tuples containing (plugin_name, plugin_class, "entry_point")
-        """
-        if not HAS_ENTRY_POINTS:
-            return []
-        
-        plugins: List[Tuple[str, Type[Any], str]] = []
-        
-        try:
-            # Get all entry points for our group
-            eps = entry_points(group=ENTRY_POINT_GROUP)
-            
-            for ep in eps:
-                try:
-                    logger.debug(f"Loading entry point plugin: {ep.name}")
-                    plugin_class = ep.load()
-                    
-                    # Validate that it's a valid plugin class
-                    if not self._is_valid_plugin_class(plugin_class):
-                        logger.warning(f"Entry point {ep.name} does not provide a valid plugin class")
-                        continue
-                    
-                    plugins.append((ep.name, plugin_class, "entry_point"))
-                    logger.info(f"Successfully loaded entry point plugin: {ep.name}")
-                    
-                except Exception as e:
-                    logger.error(f"Failed to load entry point plugin {ep.name}: {e}")
-                    
-        except Exception as e:
-            logger.error(f"Error discovering entry point plugins: {e}")
-        
-        return plugins
     
     def discover_local_plugins(self) -> List[Tuple[str, Type[Any], str]]:
         """
@@ -330,32 +250,6 @@ class PluginDiscovery:
 
         self.discovered_plugins.extend(discovered)
         return discovered.copy()
-
-    def get_plugin_info_summary(self) -> Dict[str, any]:
-        """
-        Get a summary of all discovered plugins.
-        
-        Returns:
-            Dictionary with plugin discovery summary
-        """
-        total_plugins = len(self.discovered_plugins)
-        entry_point_count = len([p for p in self.discovered_plugins if p[2] == "entry_point"])
-        local_count = len([p for p in self.discovered_plugins if p[2].startswith("local:")])
-        
-        return {
-            'total_discovered': total_plugins,
-            'entry_point_plugins': entry_point_count,
-            'local_plugins': local_count,
-            'plugins': [
-                {
-                    'name': name,
-                    'source': source,
-                    'class': cls.__name__,
-                    'module': cls.__module__
-                }
-                for name, cls, source in self.discovered_plugins
-            ]
-        }
 
 
 __all__ = ['PluginDiscovery']

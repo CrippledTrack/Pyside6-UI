@@ -67,7 +67,14 @@ def _load_qt() -> Type[Any]:
 
 
 def _load_tui() -> Type[Any]:
-    from .tui.application import TextualApplicationBackend
+    try:
+        from .tui.application import TextualApplicationBackend
+    except ImportError as exc:
+        raise RuntimeError(
+            "The TUI backend is registered but not available yet (WIP). "
+            "It will live at GUI/app/ui/tui/ when ready. "
+            "Use the Qt backend (default), or see tui_wip/README.md."
+        ) from exc
     return TextualApplicationBackend
 
 

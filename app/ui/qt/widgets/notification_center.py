@@ -142,7 +142,8 @@ class NotificationCenterWidget(QWidget):
         self.notification_service = notification_service
         self.theme_manager = theme_manager
         
-        self._use_new_ui = not theme_manager.is_legacy_ui()
+        from ..themes.ui_mode import is_classic_ui
+        self._use_new_ui = not is_classic_ui(theme_manager)
         
         if self._use_new_ui:
             # New UI: Modern styling with rounded corners
@@ -371,7 +372,8 @@ class NotificationCenterWidget(QWidget):
 
     def apply_theme(self) -> None:
         """Reapply theme colors when theme changes."""
-        new_ui_mode = not self.theme_manager.is_legacy_ui()
+        from ..themes.ui_mode import is_classic_ui
+        new_ui_mode = not is_classic_ui(self.theme_manager)
         ui_mode_changed = new_ui_mode != self._use_new_ui
         self._use_new_ui = new_ui_mode
         

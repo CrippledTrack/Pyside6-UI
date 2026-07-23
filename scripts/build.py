@@ -339,13 +339,11 @@ def _collect_hidden_imports() -> List[str]:
         "app._build_info_generated" if IS_STANDALONE else f"{GUI_ROOT.name}.app._build_info_generated",
     ]
 
-    if IS_STANDALONE:
-        # Dynamically loaded via import_aliases and plugin discovery; not
-        # reachable by static analysis from run.py.
-        imports.extend([f"{GUI_ROOT.name}.plugins", f"{GUI_ROOT.name}.themes"])
-    else:
+    if not IS_STANDALONE:
         # app_plugins.core_plugins is imported at runtime by the plugin
         # service; ensure PyInstaller can see the top-level package.
+        # Sample plugins under GUI.plugins are author examples only and are
+        # not discovered in frozen builds — do not force-bundle them.
         imports.append("app_plugins")
 
     # If app_plugins exists next to GUI (even in standalone build), scan and add all its submodules

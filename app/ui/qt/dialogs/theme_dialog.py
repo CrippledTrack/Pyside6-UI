@@ -100,9 +100,10 @@ class ThemePreviewWidget(QFrame):
             
             # Use classic stylesheet when the app is in legacy/classic UI mode,
             # matching what ThemeManager.apply_theme() does for the full application.
-            if self._theme_manager is not None and self._theme_manager.is_legacy_ui():
-                from ..themes.classic_theme_manager import get_classic_stylesheet
-                stylesheet = get_classic_stylesheet(preview_data)
+            from ..themes.ui_mode import classic_stylesheet_for, is_classic_ui
+
+            if is_classic_ui(self._theme_manager):
+                stylesheet = classic_stylesheet_for(self._theme_manager, preview_data)
             else:
                 stylesheet = preview_data.get('stylesheet', '')
 

@@ -11,15 +11,12 @@ import logging
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from ..services.interfaces import ISettingsService
-from ..services.plugin_registry_facade import PluginRegistryFacade
 from ..services.plugin_service import PluginService
 from .abstractions.shell import IMainWindowShell
 from .abstractions.types import (
     MenuItemHandle,
-    MenuItemSpec,
     StatusWidgetHandle,
     ToolbarActionHandle,
-    ToolbarActionSpec,
 )
 
 if TYPE_CHECKING:
@@ -35,7 +32,6 @@ class PluginExtensionHost:
         self.container = container
         self.settings_service = container.get(ISettingsService)
         self.plugin_service = container.get(PluginService)
-        self.registry = container.get(PluginRegistryFacade)
 
         self._main_window: Optional[IMainWindowShell] = None
         self._plugin_menu_actions: Dict[str, List[MenuItemHandle]] = {}
@@ -71,9 +67,9 @@ class PluginExtensionHost:
 
         try:
             registry_queries = {
-                "Menu": self.registry.get_menu_extensions,
-                "Status": self.registry.get_status_extensions,
-                "Toolbar": self.registry.get_toolbar_extensions,
+                "Menu": self.plugin_service.get_menu_extensions,
+                "Status": self.plugin_service.get_status_extensions,
+                "Toolbar": self.plugin_service.get_toolbar_extensions,
             }
 
             for ext_name, query_func in registry_queries.items():
@@ -222,8 +218,8 @@ class PluginExtensionHost:
 
             if hasattr(plugin_class, "on_application_shutdown"):
                 try:
-                    if self.registry.has_plugin_instance(plugin_name):
-                        instance = self.registry.get_plugin_instance(plugin_name)
+                    if self.plugin_service.has_plugin_instance(plugin_name):
+                        instance = self.plugin_service.get_plugin_instance(plugin_name)
                         instance.on_application_shutdown()
                         logger.info("Shutdown service extension for '%s'", plugin_name)
                     else:
@@ -285,7 +281,7 @@ class PluginExtensionHost:
     def start_service_extensions(self) -> None:
         """Start all enabled ServiceExtension plugins."""
         try:
-            service_plugins = self.registry.get_service_extensions(enabled_only=True)
+            service_plugins = self.plugin_service.get_service_extensions(enabled_only=True)
             for name, plugin_class in service_plugins.items():
                 try:
                     if self.is_extension_enabled(name, "Service"):
@@ -301,11 +297,11 @@ class PluginExtensionHost:
     def shutdown_service_extensions(self) -> None:
         """Shutdown all ServiceExtension plugins that have instances."""
         try:
-            service_plugins = self.registry.get_service_extensions(enabled_only=True)
+            service_plugins = self.plugin_service.get_service_extensions(enabled_only=True)
             for name, _plugin_class in service_plugins.items():
                 try:
-                    if self.registry.has_plugin_instance(name):
-                        instance = self.registry.get_plugin_instance(name)
+                    if self.plugin_service.has_plugin_instance(name):
+                        instance = self.plugin_service.get_plugin_instance(name)
                         logger.info("Shutting down service extension: %s", name)
                         instance.on_application_shutdown()
                 except Exception as exc:
@@ -321,7 +317,7 @@ class PluginExtensionHost:
         if not self._main_window:
             return
 
-        instance = self.registry.get_plugin_instance(name)
+        instance = self.plugin_service.get_plugin_instance(name)
         menu_items = instance.get_menu_items()
 
         if name not in self._plugin_menu_actions:
@@ -330,20 +326,10 @@ class PluginExtensionHost:
             self._plugin_created_menus[name] = []
 
         for item in menu_items:
-            spec = MenuItemSpec(
-                menu_title=item.menu,
-                label=item.label,
-                callback=item.callback,
-                shortcut=item.shortcut,
-                icon=item.icon,
-                enabled=item.enabled,
-                separator_before=item.separator_before,
-                separator_after=item.separator_after,
-            )
-            handle = self._main_window.add_menu_item(spec)
+            handle = self._main_window.add_menu_item(item)
             self._plugin_menu_actions[name].append(handle)
-            if spec.menu_title not in self._plugin_created_menus.get(name, []):
-                self._plugin_created_menus.setdefault(name, []).append(spec.menu_title)
+            if item.menu not in self._plugin_created_menus.get(name, []):
+                self._plugin_created_menus.setdefault(name, []).append(item.menu)
             logger.debug(
                 "Added menu item '%s' to '%s' from plugin '%s'",
                 item.label,
@@ -356,7 +342,7 @@ class PluginExtensionHost:
         if not self._main_window:
             return
 
-        instance = self.registry.get_plugin_instance(name)
+        instance = self.plugin_service.get_plugin_instance(name)
         handle = self._main_window.add_status_widget_for_plugin(name, instance)
         if handle:
             if name not in self._plugin_status_widgets:
@@ -369,22 +355,14 @@ class PluginExtensionHost:
         if not self._main_window:
             return
 
-        instance = self.registry.get_plugin_instance(name)
+        instance = self.plugin_service.get_plugin_instance(name)
         actions = instance.get_toolbar_actions()
 
         if name not in self._plugin_toolbar_actions:
             self._plugin_toolbar_actions[name] = []
 
         for action_def in actions:
-            spec = ToolbarActionSpec(
-                label=action_def.label,
-                callback=action_def.callback,
-                icon=action_def.icon,
-                tooltip=action_def.tooltip,
-                checkable=action_def.checkable,
-                checked=action_def.checked,
-            )
-            handle = self._main_window.add_toolbar_action(spec)
+            handle = self._main_window.add_toolbar_action(action_def)
             self._plugin_toolbar_actions[name].append(handle)
             logger.debug(
                 "Added toolbar action '%s' from plugin '%s'", action_def.label, name
@@ -392,7 +370,7 @@ class PluginExtensionHost:
 
     def _integrate_service_extension(self, name: str, plugin_class: type) -> None:
         del plugin_class
-        instance = self.registry.get_plugin_instance(name)
+        instance = self.plugin_service.get_plugin_instance(name)
         logger.info("Starting service extension: %s", name)
         instance.on_application_start(self.container)
 

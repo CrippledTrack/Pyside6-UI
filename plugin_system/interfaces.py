@@ -217,7 +217,87 @@ class IServiceContainer(Protocol):
 
 @runtime_checkable
 class ISettingsService(Protocol):
-    """Protocol for settings service to decouple plugin system from app settings."""
+    """Canonical settings service Protocol (app + plugin_system).
+
+    Defined here so ``plugin_system`` does not import ``app.services``.
+    The concrete implementation lives in ``app.services.settings_service``.
+    """
+
+    def get_settings(self) -> Any:
+        """Get current settings object."""
+        ...
+
+    def save_theme_preference(self, theme_name: str) -> None:
+        """Save theme preference."""
+        ...
+
+    def get_theme_preference(self) -> str:
+        """Get saved theme preference."""
+        ...
+
+    def save_disabled_plugins(self, plugin_names: List[str]) -> None:
+        """Save user-disabled plugin names."""
+        ...
+
+    def get_disabled_plugins(self) -> List[str]:
+        """Get saved user-disabled plugin names."""
+        ...
+
+    def save_window_geometry(self, x: int, y: int, width: int, height: int) -> None:
+        """Save window geometry."""
+        ...
+
+    def get_window_geometry(self) -> Any:
+        """Get saved window geometry."""
+        ...
+
+    def get_show_tooltips(self) -> bool:
+        """Get show tooltips setting."""
+        ...
+
+    def save_shortcuts_enabled(self, enabled: bool) -> None:
+        """Save shortcuts enabled setting."""
+        ...
+
+    def get_shortcuts_enabled(self) -> bool:
+        """Get shortcuts enabled setting."""
+        ...
+
+    def save_toast_settings(self, enabled: bool, duration: int) -> None:
+        """Save toast notification settings."""
+        ...
+
+    def get_toast_notifications_enabled(self) -> bool:
+        """Get toast notifications enabled setting."""
+        ...
+
+    def get_toast_duration(self) -> int:
+        """Get toast duration setting."""
+        ...
+
+    def save_new_ui_enabled(self, enabled: bool) -> None:
+        """Save whether the modern (non-classic) UI is enabled."""
+        ...
+
+    def get_new_ui_enabled(self) -> bool:
+        """Return whether the modern (non-classic) UI is enabled."""
+        ...
+
+    def save_gui_version(self, version: str) -> None:
+        """Save GUI version to settings."""
+        ...
+
+    def get_gui_version(self) -> str:
+        """Get saved GUI version."""
+        ...
+
+    def save_plugin_settings(self, plugin_name: str, settings: Dict[str, Any]) -> None:
+        """Save settings for a specific plugin."""
+        ...
+
+    def get_plugin_settings(self, plugin_name: str) -> Dict[str, Any]:
+        """Get settings for a specific plugin."""
+        ...
 
     def is_extension_enabled(self, plugin_name: str, extension_type: str) -> bool:
         """Check if a specific extension type is enabled for a plugin."""

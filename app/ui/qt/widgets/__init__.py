@@ -1,27 +1,18 @@
-"""Custom widgets for the GUI application."""
+"""Qt widgets package.
 
-from .admin_required_placeholder import AdminRequiredPlaceholder
-from .card_container import CardContainer, CardSection, HorizontalCard, InfoCard
-from .error_placeholder import ErrorPlaceholder
-from .loading_placeholder import LoadingDots, LoadingOverlay, LoadingPlaceholder
-from .notification_center import NotificationCenterWidget, NotificationItemWidget
-from .progress_indicator import ProgressIndicator
-from .stream_output_panel import StreamOutputPanel
-from .toast_notification import ToastNotification
+Prefer leaf imports so plugins do not pull the whole widget set:
 
-__all__ = [
-    'AdminRequiredPlaceholder',
-    'CardContainer',
-    'CardSection',
-    'ErrorPlaceholder',
-    'HorizontalCard',
-    'InfoCard',
-    'LoadingDots',
-    'LoadingOverlay',
-    'LoadingPlaceholder',
-    'NotificationCenterWidget',
-    'NotificationItemWidget',
-    'ProgressIndicator',
-    'StreamOutputPanel',
-    'ToastNotification',
-]
+    from GUI.app.ui.qt.widgets.card_container import CardContainer
+    from GUI.app.ui.qt.widgets.progress_indicator import ProgressIndicator
+
+Shell widgets (used by the main window / controllers):
+    AdminRequiredPlaceholder, CardContainer, ErrorPlaceholder,
+    LoadingPlaceholder / LoadingDots, NotificationCenterWidget,
+    ToastNotification
+
+Plugin toolkit (optional helpers for plugin authors; not required by the shell):
+    ProgressIndicator, StreamOutputPanel, LoadingOverlay,
+    CardSection, HorizontalCard, InfoCard
+"""
+
+__all__: list[str] = []

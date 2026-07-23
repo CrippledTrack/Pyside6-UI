@@ -1,15 +1,24 @@
-"""Toolkit-neutral UI types and specs."""
+"""Toolkit-neutral UI types and specs.
+
+Menu/toolbar contribution types are defined once in ``plugin_system.types``
+and re-exported here so shell and plugin APIs share a single shape.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, Optional, NewType
+from typing import NewType
+
+from ....plugin_system.types import MenuItemDefinition, ToolbarAction
 
 # Opaque handles returned by shell operations; Qt backend maps to QAction/QMenu/etc.
 MenuItemHandle = NewType('MenuItemHandle', str)
 ToolbarActionHandle = NewType('ToolbarActionHandle', str)
 StatusWidgetHandle = NewType('StatusWidgetHandle', str)
+
+# Canonical aliases used by IMainWindowShell
+MenuItemSpec = MenuItemDefinition
+ToolbarActionSpec = ToolbarAction
 
 
 class ToastType(str, Enum):
@@ -20,38 +29,6 @@ class ToastType(str, Enum):
     ERROR = "error"
 
 
-@dataclass(frozen=True)
-class MenuItemSpec:
-    """Specification for a menu item."""
-    menu_title: str
-    label: str
-    callback: Callable[[], None]
-    shortcut: Optional[str] = None
-    icon: Optional[str] = None
-    enabled: bool = True
-    separator_before: bool = False
-    separator_after: bool = False
-
-
-@dataclass(frozen=True)
-class ToolbarActionSpec:
-    """Specification for a toolbar action."""
-    label: str
-    callback: Callable[[], None]
-    icon: Optional[str] = None
-    tooltip: Optional[str] = None
-    checkable: bool = False
-    checked: bool = False
-
-
-@dataclass
-class MenuItemRegistration:
-    """Result of registering a menu item."""
-    handle: MenuItemHandle
-    menu_title: str
-    created_menu: bool = False
-
-
 __all__ = [
     'MenuItemHandle',
     'ToolbarActionHandle',
@@ -59,5 +36,4 @@ __all__ = [
     'ToastType',
     'MenuItemSpec',
     'ToolbarActionSpec',
-    'MenuItemRegistration',
 ]

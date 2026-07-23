@@ -54,10 +54,9 @@ def run(argv: List[str]) -> int:
     if is_dev:
         logger.warning("DEV MODE ENABLED - admin requirements bypassed, Dev menu available")
 
-    from .services.container import ServiceContainer, set_container
+    from .services.container import ServiceContainer
     container = ServiceContainer()
     container.initialize_services()
-    set_container(container)
     logger.info("Service container initialized")
 
     from .ui.registry import get_ui_backend, resolve_ui_backend_name

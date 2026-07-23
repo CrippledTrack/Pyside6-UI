@@ -222,7 +222,8 @@ class StatusBarManager(QObject):
         # Always destroy notification widget on theme refresh so it gets recreated
         # with correct UI mode (new UI vs classic) on next open
         if self._notification_widget:
-            is_legacy = self.theme_manager.is_legacy_ui()
+            from ..themes.ui_mode import is_classic_ui
+            is_legacy = is_classic_ui(self.theme_manager)
             widget_uses_new_ui = getattr(self._notification_widget, '_use_new_ui', False)
             
             logger.debug(f"refresh_theme: is_legacy={is_legacy}, widget_uses_new_ui={widget_uses_new_ui}")
