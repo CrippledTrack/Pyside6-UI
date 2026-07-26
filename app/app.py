@@ -28,11 +28,16 @@ def run(argv: List[str]) -> int:
     VERSION = constants.VERSION
     VERSION_NAME = constants.VERSION_NAME
 
-    qt_binding = getattr(constants, "DEFAULT_QT_BINDING", "")
+    qt_binding = getattr(constants, "DEFAULT_QT_BINDING", "") or ""
     for arg in argv:
         if arg.startswith("--qt-binding="):
             qt_binding = arg.split("=", 1)[1].strip()
             break
+
+    if not qt_binding:
+        # Host constants often leave this blank; GUI default avoids dual binding probes.
+        from .constants import DEFAULT_QT_BINDING as _gui_qt_binding
+        qt_binding = _gui_qt_binding or "pyside6"
 
     if qt_binding:
         os.environ.setdefault("QT_BINDING", qt_binding)

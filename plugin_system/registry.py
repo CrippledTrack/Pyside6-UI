@@ -37,16 +37,38 @@ logger = logging.getLogger(__name__)
 
 
 def _is_show_all_platforms() -> bool:
-    """Check if show all platforms mode is enabled."""
+    """Check if show all platforms mode is enabled (cached per discovery pass)."""
+    cached = getattr(_is_show_all_platforms, "_cache", None)
+    if cached is not None:
+        return cached
     try:
         from ..app.utils.admin import is_show_all_platforms
         result = is_show_all_platforms()
         if result:
             logger.info("Show all platforms mode is ENABLED - bypassing platform filtering")
-        return result
     except Exception as e:
         logger.debug(f"Could not check show_all_platforms flag: {e}")
-        return False
+        result = False
+    _is_show_all_platforms._cache = result  # type: ignore[attr-defined]
+    return result
+
+
+def clear_registration_caches() -> None:
+    """Clear per-discovery-pass caches used during plugin registration."""
+    for fn in (_is_show_all_platforms, _get_platforms_constants_cached):
+        if hasattr(fn, "_cache"):
+            delattr(fn, "_cache")
+
+
+def _get_platforms_constants_cached() -> Any:
+    """Load platform/GUI constants once per discovery pass."""
+    cached = getattr(_get_platforms_constants_cached, "_cache", None)
+    if cached is not None:
+        return cached
+    from ..app.utils.imports import get_platforms_constants
+    constants = get_platforms_constants()
+    _get_platforms_constants_cached._cache = constants  # type: ignore[attr-defined]
+    return constants
 
 
 def _create_prefixed_plugin(original_class: Type[Any], platform_prefix: str) -> Type[Any]:
@@ -231,8 +253,7 @@ class PluginRegistry:
                 plugin_name = plugin_class.__name__
 
             # Check if in single plugin mode and filter
-            from ..app.utils.imports import get_platforms_constants
-            constants = get_platforms_constants()
+            constants = _get_platforms_constants_cached()
             if getattr(constants, "SINGLE_PLUGIN_MODE", False):
                 single_name = getattr(constants, "SINGLE_PLUGIN_NAME", "")
                 if single_name:
@@ -466,7 +487,6 @@ class PluginRegistry:
             self._external_plugins[plugin_name] = plugin_class
         
         self._categorize_plugin_by_interface(plugin_name, plugin_class)
-        self._notify_plugins_discovered([plugin_name])
         self._notify_plugins_discovered([plugin_name])
     
     def _categorize_plugin_by_interface(self, plugin_name: str, plugin_class: Type[Any]) -> None:
@@ -782,4 +802,4 @@ class PluginRegistry:
             return None
 
 
-__all__ = ['PluginRegistry']
+__all__ = ['PluginRegistry', 'clear_registration_caches']

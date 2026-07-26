@@ -1,114 +1,100 @@
 """
 Built-in theme definitions for the application.
 
-This package contains all built-in theme definitions that are available
-by default in the application. Each theme is defined in its own module.
+Theme modules are imported on first use so startup only pays for the
+theme that is actually applied (plus shared ``_base`` when needed).
 """
 
 from __future__ import annotations
 
-from typing import Dict, Any
+import importlib
+from typing import Any, Dict
 
-# Import theme modules
-from . import (
-    default,
-    dark,
-    light,
-    legacy,
-    purple_dark,
-    blue,
-    green,
-    purple,
-    orange,
-    red,
-    cyberpunk,
-    minimal,
-    oled,
-)
-
-# Import base utilities for external use
+# Base utilities — lightweight; theme modules depend on these when loaded.
 from ._base import (
     BORDER_RADIUS_DEFAULT,
     BORDER_RADIUS_SHARP,
     generate_stylesheet,
 )
 
+_PACKAGE = __name__
 
-# =============================================================================
-# Theme getter functions (backward compatible API)
-# =============================================================================
+
+def _load_theme(module_name: str) -> Dict[str, Any]:
+    """Import a single theme module and return its theme data."""
+    module = importlib.import_module(f".{module_name}", _PACKAGE)
+    return module.get_theme()
+
 
 def get_default_theme() -> Dict[str, Any]:
     """Get default theme data."""
-    return default.get_theme()
+    return _load_theme("default")
 
 
 def get_dark_theme() -> Dict[str, Any]:
     """Get Dark theme data."""
-    return dark.get_theme()
+    return _load_theme("dark")
 
 
 def get_light_theme() -> Dict[str, Any]:
     """Get Light theme data."""
-    return light.get_theme()
+    return _load_theme("light")
 
 
 def get_legacy_theme() -> Dict[str, Any]:
     """Get Legacy theme data."""
-    return legacy.get_theme()
+    return _load_theme("legacy")
 
 
 def get_purple_dark_theme() -> Dict[str, Any]:
     """Get Purple Dark theme data."""
-    return purple_dark.get_theme()
+    return _load_theme("purple_dark")
 
 
 def get_blue_theme() -> Dict[str, Any]:
     """Get Blue theme data."""
-    return blue.get_theme()
+    return _load_theme("blue")
 
 
 def get_green_theme() -> Dict[str, Any]:
     """Get Green theme data."""
-    return green.get_theme()
+    return _load_theme("green")
 
 
 def get_purple_theme() -> Dict[str, Any]:
     """Get Purple theme data."""
-    return purple.get_theme()
+    return _load_theme("purple")
 
 
 def get_orange_theme() -> Dict[str, Any]:
     """Get Orange theme data."""
-    return orange.get_theme()
+    return _load_theme("orange")
 
 
 def get_red_theme() -> Dict[str, Any]:
     """Get Red theme data."""
-    return red.get_theme()
+    return _load_theme("red")
 
 
 def get_cyberpunk_theme() -> Dict[str, Any]:
     """Get Cyberpunk theme data."""
-    return cyberpunk.get_theme()
+    return _load_theme("cyberpunk")
 
 
 def get_minimal_theme() -> Dict[str, Any]:
     """Get Minimal theme data."""
-    return minimal.get_theme()
+    return _load_theme("minimal")
 
 
 def get_oled_theme() -> Dict[str, Any]:
     """Get OLED Dark theme data."""
-    return oled.get_theme()
+    return _load_theme("oled")
 
 
 __all__ = [
-    # Base utilities
     'BORDER_RADIUS_DEFAULT',
     'BORDER_RADIUS_SHARP',
     'generate_stylesheet',
-    # Theme getters
     'get_default_theme',
     'get_dark_theme',
     'get_light_theme',
@@ -123,4 +109,3 @@ __all__ = [
     'get_minimal_theme',
     'get_oled_theme',
 ]
-

@@ -371,7 +371,10 @@ class SettingsService:
         return self._settings.new_ui_enabled
     
     def save_gui_version(self, version: str) -> None:
-        """Save GUI version to settings"""
+        """Save GUI version to settings when it actually changed."""
+        if self._settings.gui_version == version:
+            logger.debug(f"GUI version unchanged: {version}")
+            return
         self._settings.gui_version = version
         self._save_settings()
         logger.debug(f"GUI version saved: {version}")

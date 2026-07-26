@@ -12,7 +12,7 @@ import platform
 # =============================================================================
 # GUI Internal Variables (app_plugins will NOT override these)
 # =============================================================================
-GUI_API_VERSION = "6.0.0-dev-6"
+GUI_API_VERSION = "6.0.0-dev-7"
 
 # =============================================================================
 # Version Information (can be overridden by app_plugins/constants.py)
@@ -44,7 +44,7 @@ SHOW_CONSOLE = False
 DEFAULT_UI_BACKEND = "qt"  # "qt" 
 
 # UI configuration — Qt backend only (ignored when DEFAULT_UI_BACKEND is not "qt")
-DEFAULT_QT_BINDING = ""  # e.g. "pyside6" or "pyqt6"; empty = auto-detect
+DEFAULT_QT_BINDING = "pyside6"  # Prefer a single binding; avoids probing PySide6 then PyQt6
 QT_NEW_UI_ENABLED_BY_DEFAULT = True  # theme manager "new UI" stylesheet toggle default
 
 # Hide the Admin menu/button by default (can be overridden by app_plugins/constants.py)

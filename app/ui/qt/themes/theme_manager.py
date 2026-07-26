@@ -8,6 +8,7 @@ detection based on system preferences.
 
 from __future__ import annotations
 
+import importlib
 import os
 import json
 import logging
@@ -35,7 +36,7 @@ except (ImportError, AttributeError):
 
 # PERF: Builtin theme getter functions are imported lazily via their module path
 # to avoid generating all 13 stylesheet strings at import time.
-# See _BUILTIN_THEME_FACTORIES below.
+# See _BUILTIN_THEME_MODULES below.
 
 if TYPE_CHECKING:
     from ....services.settings_service import SettingsService
@@ -83,22 +84,22 @@ def create_palette_from_data(palette_data: Dict[str, Any]) -> QPalette:
     return palette
 
 
-# Mapping of builtin theme name -> factory function import path.
-# Each factory is only called the first time its theme is accessed.
-_BUILTIN_THEME_FACTORIES: Dict[str, str] = {
-    "default":     "get_default_theme",
-    "dark":        "get_dark_theme",
-    "light":       "get_light_theme",
-    "blue":        "get_blue_theme",
-    "green":       "get_green_theme",
-    "purple":      "get_purple_theme",
-    "purple_dark": "get_purple_dark_theme",
-    "orange":      "get_orange_theme",
-    "red":         "get_red_theme",
-    "cyberpunk":   "get_cyberpunk_theme",
-    "minimal":     "get_minimal_theme",
-    "oled":        "get_oled_theme",
-    "legacy":      "get_legacy_theme",
+# Mapping of builtin theme name -> submodule name under builtin_themes.
+# Each module is imported only the first time its theme is accessed.
+_BUILTIN_THEME_MODULES: Dict[str, str] = {
+    "default":     "default",
+    "dark":        "dark",
+    "light":       "light",
+    "blue":        "blue",
+    "green":       "green",
+    "purple":      "purple",
+    "purple_dark": "purple_dark",
+    "orange":      "orange",
+    "red":         "red",
+    "cyberpunk":   "cyberpunk",
+    "minimal":     "minimal",
+    "oled":        "oled",
+    "legacy":      "legacy",
 }
 
 
@@ -137,15 +138,21 @@ class ThemeManager:
     def load_builtin_themes(self) -> None:
         """Register built-in themes as lazy factories.
         
-        Theme data is not generated until the theme is first accessed
-        (applied or previewed), saving ~200KB+ of stylesheet strings
-        for themes that are never used.
+        Theme modules and stylesheet data are loaded only when a theme is
+        first accessed (applied or previewed), so startup pays for the
+        active theme only.
         """
-        from . import builtin_themes as _bt_mod
-        for name, func_name in _BUILTIN_THEME_FACTORIES.items():
-            factory = getattr(_bt_mod, func_name)
-            self._theme_factories[name] = factory
-        self.builtin_theme_names = set(_BUILTIN_THEME_FACTORIES.keys())
+        package = f"{__name__.rsplit('.', 1)[0]}.builtin_themes"
+
+        def _make_factory(module_name: str) -> Callable[[], Dict[str, Any]]:
+            def _factory() -> Dict[str, Any]:
+                module = importlib.import_module(f"{package}.{module_name}")
+                return module.get_theme()
+            return _factory
+
+        for name, module_name in _BUILTIN_THEME_MODULES.items():
+            self._theme_factories[name] = _make_factory(module_name)
+        self.builtin_theme_names = set(_BUILTIN_THEME_MODULES.keys())
         self._sorted_names_cache = None  # Invalidate name cache
     
     def is_builtin_theme(self, theme_name: str) -> bool:

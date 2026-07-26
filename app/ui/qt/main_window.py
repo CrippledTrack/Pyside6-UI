@@ -37,6 +37,7 @@ from .bindings import (
     QDialog,
     QStatusBar,
     QTabWidget,
+    QTimer,
     QVBoxLayout,
     QWidget,
     QToolBar,
@@ -320,37 +321,6 @@ class MainWindow(QMainWindow):
         # Hide tab bar if single plugin mode is active
         if getattr(constants, "SINGLE_PLUGIN_MODE", False):
             self.tab_widget.tabBar().hide()
-        
-        # Fix for table header resizing issues (only in new UI)
-        if self.settings_service and self.settings_service.get_new_ui_enabled():
-            from .bindings import QTableView, QHeaderView, QTreeWidget
-            for i in range(self.tab_widget.count()):
-                widget = self.tab_widget.widget(i)
-                # Recursively find all QTableViews and QTreeWidgets
-                for table in widget.findChildren(QTableView):
-                    try:
-                        header = table.horizontalHeader()
-                        # Check if sections are visible before resizing
-                        if header.count() > 0:
-                            # Set resize mode to Interactive but resize to contents initially
-                            # This allows users to resize but starts with good width
-                            for col in range(header.count()):
-                                # Don't override if specifically set to something else by the plugin
-                                # Only apply if using default behavior
-                                if header.sectionResizeMode(col) == QHeaderView.ResizeMode.Interactive:
-                                    header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
-                    except Exception:
-                        pass
-                
-                for tree in widget.findChildren(QTreeWidget):
-                    try:
-                        header = tree.header()
-                        if header.count() > 0:
-                            for col in range(header.count()):
-                                if header.sectionResizeMode(col) == QHeaderView.ResizeMode.Interactive:
-                                    header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
-                    except Exception:
-                        pass
 
         # Disable batch loading so tab activation/loading can proceed
         self.tab_controller.set_batch_loading(False)
@@ -358,7 +328,8 @@ class MainWindow(QMainWindow):
         logger.info("All tabs loaded successfully")
         self._update_window_title()
         
-        # Restore last active tab or activate first tab
+        # Restore last active tab or activate first tab before extension chrome
+        # so create_widget wins the UI thread; extensions still always run.
         desired_index = 0 if self.tab_widget.count() > 0 else -1
         if self.settings_service:
             last_active = self.settings_service.get_last_active_tab()
@@ -376,9 +347,11 @@ class MainWindow(QMainWindow):
                 self.tab_controller.on_tab_changed(desired_index)
             else:
                 self.tab_widget.setCurrentIndex(desired_index)
-        
-        # Integrate extension plugins (Menu, Status, Toolbar, Service)
-        self.plugin_controller.integrate_extensions(self)
+            # Defer extension integration so it does not compete with first-tab create_widget
+            QTimer.singleShot(0, lambda: self.plugin_controller.integrate_extensions(self))
+        else:
+            # No tabs (extension-only setups) — integrate immediately
+            self.plugin_controller.integrate_extensions(self)
     
     def on_tab_load_error(self, error_msg: str) -> None:
         """Handle tab loading error."""

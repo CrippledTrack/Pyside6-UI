@@ -12,18 +12,14 @@ from __future__ import annotations
 import os
 
 def _resolve_binding() -> str:
-    """Determine which Qt binding to use."""
+    """Determine which Qt binding to use.
+
+    Prefer an explicit QT_BINDING. When unset, default to pyside6 without
+    probing both packages (importing both is costly on constrained hardware).
+    """
     explicit = os.getenv("QT_BINDING", "").strip().lower()
     if explicit:
         return explicit
-
-    for binding in ("pyside6", "pyqt6"):
-        try:
-            __import__("PySide6" if binding == "pyside6" else "PyQt6")
-            return binding
-        except ImportError:
-            continue
-
     return "pyside6"
 
 _binding = _resolve_binding()

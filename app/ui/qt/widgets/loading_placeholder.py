@@ -1,8 +1,9 @@
 """
 Loading placeholder widget for tabs that are being loaded.
 
-This widget displays an animated loading indicator while a tab's content
-is being initialized, providing visual feedback to the user.
+Default placeholders are static (no animations) so batch tab creation stays
+cheap on low-power machines. Animated dots remain available for overlays
+and optional current-tab indicators.
 """
 
 from __future__ import annotations
@@ -13,7 +14,6 @@ from ..bindings import (
     Property,
     QEasingCurve,
     QPropertyAnimation,
-    QSequentialAnimationGroup,
     Qt,
     QTimer,
     QFont,
@@ -112,10 +112,10 @@ class LoadingDots(QWidget):
 
 
 class LoadingPlaceholder(QWidget):
-    """Widget that displays an animated loading indicator for a tab.
+    """Static loading placeholder for a tab pending lazy content creation.
     
     Features:
-    - Animated pulsing dots
+    - Static (non-animated) by default for cheap batch tab creation
     - Centered layout with loading message
     - Theme-aware styling
     - Optional subtitle text
@@ -125,7 +125,9 @@ class LoadingPlaceholder(QWidget):
         self,
         tab_name: str,
         parent: Optional[QWidget] = None,
-        subtitle: Optional[str] = None
+        subtitle: Optional[str] = None,
+        *,
+        animated: bool = False,
     ) -> None:
         """Initialize the loading placeholder.
         
@@ -133,9 +135,11 @@ class LoadingPlaceholder(QWidget):
             tab_name: Name of the tab being loaded
             parent: Parent widget
             subtitle: Optional subtitle text to display below the main message
+            animated: If True, show pulsing dots (costly when many tabs); default False
         """
         super().__init__(parent)
         self._tab_name = tab_name
+        self._loading_dots: Optional[LoadingDots] = None
         
         # Main layout
         main_layout = QVBoxLayout(self)
@@ -151,9 +155,9 @@ class LoadingPlaceholder(QWidget):
         center_layout.setSpacing(20)
         center_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        # Loading dots
-        self._loading_dots = LoadingDots(self)
-        center_layout.addWidget(self._loading_dots, alignment=Qt.AlignmentFlag.AlignCenter)
+        if animated:
+            self._loading_dots = LoadingDots(self)
+            center_layout.addWidget(self._loading_dots, alignment=Qt.AlignmentFlag.AlignCenter)
         
         # Main loading text
         self._title_label = QLabel(f"Loading {tab_name}...")
@@ -210,7 +214,8 @@ class LoadingPlaceholder(QWidget):
     
     def hideEvent(self, event) -> None:
         """Stop animations when widget is hidden."""
-        self._loading_dots.stop()
+        if self._loading_dots is not None:
+            self._loading_dots.stop()
         super().hideEvent(event)
 
 
@@ -270,7 +275,7 @@ class LoadingOverlay(QFrame):
         container_layout.setSpacing(16)
         container_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        # Loading dots
+        # Loading dots (overlay is singular — animation is fine)
         self._loading_dots = LoadingDots(self)
         container_layout.addWidget(
             self._loading_dots,

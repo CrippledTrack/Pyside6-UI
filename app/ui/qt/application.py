@@ -70,8 +70,8 @@ class QtApplicationBackend:
         settings_service = self._container.get(ISettingsService)
         theme_manager = theme_init.initialize(self._container, settings_service)
 
-        self._daemon_lifecycle, self._daemon_client = start_daemon_if_required(self._container)
-
+        # Show the shell before optional auto-daemon elevation so hosts with
+        # REQUIRE_ADMIN_BY_DEFAULT=True are not stuck on a blank process during pkexec.
         window = MainWindow(
             theme_manager=theme_manager,
             settings_service=settings_service,
@@ -82,6 +82,11 @@ class QtApplicationBackend:
         self._notification_bridge = wire_notifications(self._container, window)
 
         window.show()
+        # Process one event loop tick so the window paints before a blocking daemon start
+        self._app.processEvents()
+
+        self._daemon_lifecycle, self._daemon_client = start_daemon_if_required(self._container)
+
         exit_code = self._app.exec()
 
         shutdown_daemon(self._daemon_lifecycle, self._daemon_client)

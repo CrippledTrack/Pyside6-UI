@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import importlib.util
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Type, TYPE_CHECKING
 
@@ -130,6 +131,11 @@ class PluginService:
         self._discovery_complete = False
 
         self._invalidate_core_plugin_modules()
+        try:
+            from ...plugin_system.registry import clear_registration_caches
+            clear_registration_caches()
+        except Exception:
+            pass
 
     def disable_plugin(self, name: str) -> None:
         """Disable a plugin by name."""
@@ -261,12 +267,21 @@ class PluginService:
 
         try:
             self._install_cross_platform_mocks()
-            self._invalidate_core_plugin_modules()
+            # Do not invalidate modules on normal startup — Reload Plugins uses clear().
+            from ...plugin_system.registry import clear_registration_caches
+            clear_registration_caches()
 
             # Load core plugins from all three sources in priority order
             logger.info("Attempting to load core plugins from all sources...")
             app_plugins = self._load_core_plugins_from_source("app_plugins")
-            platforms_plugins = self._load_core_plugins_from_source("platforms")
+            platforms_available = importlib.util.find_spec("platforms") is not None
+            platforms_plugins = (
+                self._load_core_plugins_from_source("platforms")
+                if platforms_available
+                else []
+            )
+            if not platforms_available:
+                logger.debug("Skipping platforms core plugins: package not found")
             gui_plugins = self._load_core_plugins_from_source("gui")
             
             all_core_plugins = self._merge_plugins_with_priority(
@@ -300,11 +315,12 @@ class PluginService:
                         package=f"app_plugins.{plat}.plugins",
                         priority=300 if is_current else 250,
                     ))
-                    sources.append(PluginSource(
-                        source_id=f"platforms.{plat}.plugins",
-                        package=f"platforms.{plat}.plugins",
-                        priority=200 if is_current else 150,
-                    ))
+                    if platforms_available:
+                        sources.append(PluginSource(
+                            source_id=f"platforms.{plat}.plugins",
+                            package=f"platforms.{plat}.plugins",
+                            priority=200 if is_current else 150,
+                        ))
                 
                 # Add common plugin sources
                 sources.append(PluginSource(
@@ -312,17 +328,23 @@ class PluginService:
                     package="app_plugins.common.plugins",
                     priority=290,
                 ))
-                sources.append(PluginSource(
-                    source_id="platforms.common.plugins",
-                    package="platforms.common.plugins",
-                    priority=190,
-                ))
-                # Sample plugins under GUI.plugins are for authors in source trees only;
-                # skip them in frozen/production bundles.
+                if platforms_available:
+                    sources.append(PluginSource(
+                        source_id="platforms.common.plugins",
+                        package="platforms.common.plugins",
+                        priority=190,
+                    ))
+                # Sample plugins under GUI.plugins: CLI --dev/-dev, or GUI_LOAD_SAMPLE_PLUGINS=1
+                # (do not use version-string -dev — that would load samples on every -dev release build)
                 gui_pkg = __package__.split('.')[0]
-                load_samples = not getattr(sys, "frozen", False) and (
-                    os.environ.get("GUI_LOAD_SAMPLE_PLUGINS", "1") != "0"
-                )
+                env_samples = os.environ.get("GUI_LOAD_SAMPLE_PLUGINS")
+                cli_dev = ("--dev" in sys.argv) or ("-dev" in sys.argv)
+                if env_samples is not None:
+                    load_samples = env_samples != "0" and not getattr(sys, "frozen", False)
+                else:
+                    load_samples = (
+                        not getattr(sys, "frozen", False) and cli_dev
+                    )
                 if load_samples:
                     sources.append(PluginSource(
                         source_id=f"{gui_pkg}.plugins",
@@ -359,10 +381,17 @@ class PluginService:
                             logger.warning(f"Failed to register plugin '{plugin_name}' from {source.source_id}: {e}")
 
                 # Discover external plugins from the plugins directory.
-                # Skip the in-tree GUI/plugins sample folder when samples are disabled.
+                # Skip in-tree GUI/plugins when samples were already loaded as a package,
+                # or when samples are disabled for that directory.
                 local_discovered: List[Tuple[str, Type[Any], str]] = []
                 plugins_path = Path(plugins_dir)
-                if load_samples or not discovery._is_gui_plugins_directory(plugins_path):
+                is_gui_plugins_dir = discovery._is_gui_plugins_directory(plugins_path)
+                if is_gui_plugins_dir:
+                    # Package discovery already covered GUI.plugins when load_samples.
+                    if load_samples:
+                        logger.debug("Skipping local GUI/plugins scan; package discovery already ran")
+                    # else: samples disabled — skip in-tree samples entirely
+                else:
                     local_discovered = discovery.discover_local_plugins()
                 local_registered = 0
                 for plugin_name, plugin_class, _src in local_discovered:
