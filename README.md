@@ -1,49 +1,45 @@
-## GUI Submodule — How to Run and Build
+# Basic UI Application (Pyside6-UI)
 
-### How to run
+Reusable multi-UI application framework. This package is the `GUI/` git submodule ([Pyside6-UI](https://github.com/CrippledTrack/Pyside6-UI)).
 
-You can run the GUI in three ways:
+
+Host apps may supply branding and plugins via an optional `app_plugins/` or `platforms/` tree next to `GUI/`. Those directories are **host integration**, not part of this framework.
+
+For architecture, plugins, and generated API reference, use the [MkDocs site](#documentation) under `docs/`. This README is run/build only.
+
+---
+
+## How to run
 
 **1. From the project root (with a `main.py` next to `GUI/`)**
 
-- Windows (PowerShell):
-  ```bash
-  py main.py
-  ```
-- Linux/macOS:
-  ```bash
-  python3 main.py
-  ```
-  Run from the directory that contains `main.py` and the `GUI/` folder.
+- Windows (PowerShell): `py main.py`
+- Linux/macOS: `python3 main.py`
 
-**2. From the project root using the module (no `main.py` required)**
+Run from the directory that contains `main.py` and `GUI/`.
 
-- From the directory that contains the `GUI/` folder:
-  ```bash
-  python3 -m GUI
-  ```
-  (Windows: `py -m GUI`.) Behavior is the same as running `main.py`.
+**2. As a module (no `main.py` required)**
+
+```bash
+python3 -m GUI    # Windows: py -m GUI
+```
 
 **3. Standalone (only the `GUI/` folder)**
 
-- From inside the `GUI/` directory:
-  ```bash
-  cd GUI
-  python3 run.py
-  ```
-  (Windows: `py run.py`.) Run adds the parent of the GUI directory to the path so the GUI package is found. Use this when the parent project does not provide a `main.py` or when you only have the GUI submodule. Optional flags: `run.py --dev`.
+```bash
+cd GUI
+python3 run.py    # Windows: py run.py
+```
 
-### Minimal `main.py` (when using option 1)
+`run.py` adds the parent of `GUI/` to the path so the package imports. Optional: `run.py --dev` (loads sample plugins under `GUI/plugins/`).
 
-If you use option 1, create `main.py` at the same level as `GUI/`:
+### Minimal `main.py` (option 1)
 
 ```
 your-project/
-  main.py              <-- same level as GUI/
-  GUI/                 <-- the GUI submodule
+  main.py
+  GUI/
 ```
-
-Contents of `main.py`:
 
 ```python
 import sys
@@ -53,11 +49,10 @@ if __name__ == "__main__":
     raise SystemExit(run(sys.argv))
 ```
 
-### Set up a virtual environment and install PySide6
-
-It’s recommended to run the GUI inside a virtual environment.
+## Virtual environment and PySide6
 
 - Windows (PowerShell):
+
   ```bash
   py -m venv .venv
   .\.venv\Scripts\Activate.ps1
@@ -66,6 +61,7 @@ It’s recommended to run the GUI inside a virtual environment.
   ```
 
 - Linux/macOS:
+
   ```bash
   python3 -m venv .venv
   source .venv/bin/activate
@@ -73,47 +69,49 @@ It’s recommended to run the GUI inside a virtual environment.
   pip install PySide6
   ```
 
-To leave the environment later, run:
+## Build a standalone binary (PyInstaller)
+
 ```bash
-deactivate
+cd GUI && python3 scripts/build.py
+# or from the parent project:
+python3 GUI/scripts/build.py
 ```
 
-### Building a standalone binary (PyInstaller)
+Uses `run.py` as the entry. Options: `python3 scripts/build.py --help`.
 
-You can build a single executable so that no external start script is needed.
+## Host plugin directories
 
-- From inside the `GUI/` directory (standalone layout):
-  ```bash
-  cd GUI
-  python3 scripts/build.py
-  ```
-- From the project root (same build):
-  ```bash
-  python3 GUI/scripts/build.py
-  ```
+When the **parent** of `GUI/` contains an `app_plugins` or `platforms` tree that looks like this framework’s plugin layout (`constants.py`, `core_plugins.py`, and/or `linux/` / `windows/`), the app loads constants and plugins from there. That supports test-bed or product hosts without forking the submodule.
 
-The resulting binary is self-contained; you do **not** need to ship or run `main.py` or any other launcher. Build options (e.g. `--onedir`, `--name`, `--icon`) are documented in the script help: `python3 scripts/build.py --help`.
+If the parent has an unrelated folder with those names, do not run standalone from that location.
 
-- The build script uses `run.py` as the entry; it adds the parent of the GUI directory (or the bundle root when frozen) to the path so PyInstaller sees the GUI package and the bundle is correct.
+Sample plugins in `GUI/plugins/` are framework examples (dev / non-frozen; disable with `GUI_LOAD_SAMPLE_PLUGINS=0`).
 
-### Standalone and external plugin directories
+## Troubleshooting
 
-When you run standalone (`cd GUI && python run.py`), if the **parent** of `GUI/` contains an `app_plugins` or `platforms` folder that looks like this GUI’s plugin tree (e.g. has `constants.py`, `core_plugins.py`, or `linux/` / `windows/` subdirs), the app will load constants and plugins from those directories. That lets you use the full repo layout without running from the repo root. If the parent has a folder named `app_plugins` or `platforms` that is **not** for this app (e.g. another project’s), avoid running standalone from that location so the app doesn’t use the wrong constants or plugins.
+`ModuleNotFoundError: No module named 'GUI'`:
 
-### Troubleshooting
+- With `main.py` or `python -m GUI`: run from the directory that contains `GUI/`.
+- Standalone: run `python run.py` from inside `GUI/`.
 
-- If you see `ModuleNotFoundError: No module named 'GUI'`:
-  - When using `main.py` or `python -m GUI`: run from the directory that contains the `GUI/` folder (and `main.py` if using that).
-  - When using standalone: run `python run.py` from inside the `GUI/` directory.
+## Classic vs modern Qt UI
 
-### Classic vs modern Qt UI
+Themes live under `app/ui/qt/themes/` (not a top-level `themes/` package).
 
-Themes live under `GUI/app/ui/qt/themes/` (not the removed top-level `GUI/themes/`).
+- **Modern UI** — per-theme stylesheets in `builtin_themes/` (`new_ui` in settings).
+- **Classic UI** — still supported; prefer `GUI.app.ui.qt.themes.ui_mode` (`is_classic_ui`, `classic_stylesheet_for`).
 
-- **Modern UI** (default when `new_ui` is enabled in settings): per-theme stylesheets from `builtin_themes/`.
-- **Classic UI** (fully supported): `classic_theme_manager.py` generates stylesheets from theme palettes. Toggle via the theme dialog’s new-UI setting (`SettingsService.get_new_ui_enabled()` / `save_new_ui_enabled()`).
-- Prefer helpers in `GUI.app.ui.qt.themes.ui_mode` (`is_classic_ui`, `classic_stylesheet_for`) instead of importing classic stylesheet code at every call site.
+## Plugin widget toolkit
 
-### Plugin widget toolkit
+Import Qt widgets from leaf modules under `app/ui/qt/widgets/` (the package `__init__` does not re-export). Optional helpers: `ProgressIndicator`, `StreamOutputPanel`, `LoadingOverlay`, `CardSection`, `HorizontalCard`, `InfoCard`. Prefer `GUI.app.ui.definitions` for backend-neutral chrome when writing plugins.
 
-Import Qt widgets from leaf modules under `GUI/app/ui/qt/widgets/` (the package `__init__` does not re-export them). Optional toolkit helpers for plugin authors include `ProgressIndicator`, `StreamOutputPanel`, `LoadingOverlay`, `CardSection`, `HorizontalCard`, and `InfoCard`. Shell code already uses `CardContainer`, placeholders, toast, and notification center via leaf imports.
+## Documentation
+
+Generated with MkDocs + mkdocstrings (`docs/`, `mkdocs.yml`). Update **docstrings** and those pages when the API changes—do not maintain a parallel hand-written API reference here.
+
+```bash
+cd GUI
+python -m pip install -r requirements-docs.txt
+python -m mkdocs serve    # local preview
+python -m mkdocs build    # writes site/ (gitignored)
+```
