@@ -59,7 +59,6 @@ class ExampleTabPlugin(BaseTabPlugin):
     min_gui_version = "6.0.0"
     required_gui_version = ">=6.0.0"
     disabled_by_default = True
-    ui_backends = ["qt", "tui"]
 
     # Dependencies on other plugins
     dependencies: List[str] = []
@@ -117,7 +116,7 @@ class ExampleTabPlugin(BaseTabPlugin):
                 role=LabelRole.FIELD,
             ),
         )
-        self._tab_log = create_text_area(read_only=True, min_height=250)
+        self._tab_log = create_text_area(read_only=True, expand=True)
         add(root, self._tab_log)
 
         row = create_row()

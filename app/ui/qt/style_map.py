@@ -10,15 +10,23 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from .bindings import (
+    QAbstractItemView,
+    QComboBox,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
     QSizePolicy,
+    QSpinBox,
+    QSplitter,
+    QTableWidget,
+    QTableWidgetItem,
     QTextEdit,
     QTimer,
     QVBoxLayout,
     QWidget,
+    Qt,
 )
 
 # Keep in sync with theme _base spacing constants / definitions token names.
@@ -29,6 +37,14 @@ SPACING_PX = {
 }
 
 ROLE_PROPERTY = "cp_role"
+
+# Capabilities advertised to ``GUI.app.ui.definitions.supports``.
+CAPABILITIES = frozenset({"split", "stretch", "expand", "pixel_sizing"})
+
+
+def supports(capability: str) -> bool:
+    """Return whether this Qt style map implements ``capability``."""
+    return str(capability).strip().lower() in CAPABILITIES
 
 
 def _refresh_style(widget: Any) -> None:
@@ -107,18 +123,56 @@ def create_text_area(
     parent: Any = None,
     *,
     read_only: bool = True,
-    min_height: int | None = None,
     expand: bool = False,
 ) -> QTextEdit:
     """Create a multiline text area (e.g. event log)."""
     edit = QTextEdit(parent)
     edit.setReadOnly(read_only)
-    if min_height is not None:
-        edit.setMinimumHeight(int(min_height))
     apply_input_role(edit, role)
     if expand:
         set_expand(edit, True)
     return edit
+
+
+def create_combo(items: list[str], parent: Any = None) -> QComboBox:
+    """Create a QComboBox populated with string items."""
+    combo = QComboBox(parent)
+    combo.addItems(items)
+    apply_input_role(combo, "default")
+    return combo
+
+
+def create_spin(
+    minimum: int,
+    maximum: int,
+    value: int = 0,
+    parent: Any = None,
+) -> QSpinBox:
+    """Create a bounded QSpinBox."""
+    spin = QSpinBox(parent)
+    spin.setRange(int(minimum), int(maximum))
+    spin.setValue(int(value))
+    apply_input_role(spin, "default")
+    return spin
+
+
+def create_table(columns: list[str], parent: Any = None) -> QTableWidget:
+    """Create a read-only table with stretchable final column."""
+    table = QTableWidget(parent)
+    table.setColumnCount(len(columns))
+    table.setHorizontalHeaderLabels(columns)
+    table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+    table.horizontalHeader().setStretchLastSection(True)
+    return table
+
+
+def set_table_rows(table: QTableWidget, rows: list[list[str]]) -> None:
+    """Replace all rows in a QTableWidget."""
+    table.setRowCount(len(rows))
+    for row_index, row in enumerate(rows):
+        for column_index in range(table.columnCount()):
+            value = row[column_index] if column_index < len(row) else ""
+            table.setItem(row_index, column_index, QTableWidgetItem(value))
 
 
 def spacing(name: str = "medium") -> int:
@@ -129,10 +183,11 @@ def spacing(name: str = "medium") -> int:
     return SPACING_PX[key]
 
 
-def set_expand(widget: Any, expand: bool = True, stretch: int = 1) -> None:
+def set_expand(widget: Any, expand: bool = True) -> None:
     """Mark a widget to fill leftover space in its parent layout."""
     widget.setProperty("_cp_expand", bool(expand))
-    widget.setProperty("_cp_expand_stretch", max(1, int(stretch)) if expand else 0)
+    # Stretch weight stays backend-internal (definitions no longer exposes it).
+    widget.setProperty("_cp_expand_stretch", 1 if expand else 0)
     if expand:
         widget.setSizePolicy(
             QSizePolicy.Policy.Expanding,
@@ -171,11 +226,39 @@ def create_row(parent: Any = None, *, expand: bool = False) -> QWidget:
     return container
 
 
+def create_group(title: str, parent: Any = None) -> QGroupBox:
+    """Create a titled group with vertical child layout."""
+    group = QGroupBox(title, parent)
+    layout = QVBoxLayout(group)
+    gap = spacing("medium")
+    layout.setContentsMargins(gap, gap, gap, gap)
+    layout.setSpacing(gap)
+    group.setProperty("_cp_layout_kind", "group")
+    return group
+
+
+def create_split(orientation: str = "horizontal", parent: Any = None) -> QSplitter:
+    """Create a horizontal or vertical QSplitter."""
+    qt_orientation = (
+        Qt.Orientation.Horizontal
+        if orientation == "horizontal"
+        else Qt.Orientation.Vertical
+    )
+    split = QSplitter(qt_orientation, parent)
+    split.setProperty("_cp_layout_kind", "split")
+    set_expand(split, True)
+    return split
+
+
 def add(container: Any, child: Any) -> None:
-    """Add a child widget to a column/row container."""
+    """Add a child widget to a definitions container."""
+    if container.property("_cp_layout_kind") == "split":
+        container.addWidget(child)
+        return
+
     layout = container.layout()
     if layout is None:
-        raise ValueError("Container has no layout; use create_column/create_row")
+        raise ValueError("Container has no supported definitions layout")
     stretch = 0
     try:
         if bool(child.property("_cp_expand")):
@@ -185,12 +268,14 @@ def add(container: Any, child: Any) -> None:
     layout.addWidget(child, stretch)
 
 
-def add_stretch(container: Any, stretch: int = 1) -> None:
+def add_stretch(container: Any) -> None:
     """Add a stretch spacer to a column/row container."""
+    if container.property("_cp_layout_kind") == "split":
+        raise ValueError("Split containers do not support stretch spacers")
     layout = container.layout()
     if layout is None:
         raise ValueError("Container has no layout; use create_column/create_row")
-    layout.addStretch(stretch)
+    layout.addStretch(1)
 
 
 def on_click(widget: Any, callback: Callable[[], None]) -> None:
@@ -226,9 +311,60 @@ def set_text(widget: Any, text: str) -> None:
         raise TypeError(f"Cannot set text on {type(widget)!r}")
 
 
+def get_text(widget: Any) -> str:
+    """Read text from a supported Qt control."""
+    if hasattr(widget, "currentText"):
+        return str(widget.currentText())
+    if hasattr(widget, "toPlainText"):
+        return str(widget.toPlainText())
+    if hasattr(widget, "text"):
+        return str(widget.text())
+    raise TypeError(f"Cannot get text from {type(widget)!r}")
+
+
+def get_value(widget: Any) -> Any:
+    """Read the semantic value of a supported Qt control."""
+    if isinstance(widget, QSpinBox):
+        return widget.value()
+    if isinstance(widget, QComboBox):
+        return widget.currentText()
+    return get_text(widget)
+
+
+def set_value(widget: Any, value: Any) -> None:
+    """Set the semantic value of a supported Qt control."""
+    if isinstance(widget, QSpinBox):
+        widget.setValue(int(value))
+    elif isinstance(widget, QComboBox):
+        index = widget.findText(str(value))
+        if index >= 0:
+            widget.setCurrentIndex(index)
+        else:
+            raise ValueError(f"Unknown combo value {value!r}")
+    elif hasattr(widget, "setText"):
+        widget.setText(str(value))
+    else:
+        raise TypeError(f"Cannot set value on {type(widget)!r}")
+
+
+def set_items(widget: Any, items: list[str]) -> None:
+    """Replace the choices in a QComboBox."""
+    if not isinstance(widget, QComboBox):
+        raise TypeError(f"Cannot set items on {type(widget)!r}")
+    widget.clear()
+    widget.addItems(items)
+
+
+def set_enabled(widget: Any, enabled: bool = True) -> None:
+    """Set the enabled state of a Qt widget."""
+    widget.setEnabled(bool(enabled))
+
+
 __all__ = [
     "SPACING_PX",
     "ROLE_PROPERTY",
+    "CAPABILITIES",
+    "supports",
     "apply_button_role",
     "apply_label_role",
     "apply_input_role",
@@ -236,14 +372,25 @@ __all__ = [
     "create_label",
     "create_input",
     "create_text_area",
+    "create_combo",
+    "create_spin",
+    "create_table",
+    "set_table_rows",
     "spacing",
     "set_expand",
     "create_column",
     "create_row",
+    "create_group",
+    "create_split",
     "add",
     "add_stretch",
     "on_click",
     "on_interval",
     "stop_interval",
     "set_text",
+    "get_text",
+    "get_value",
+    "set_value",
+    "set_items",
+    "set_enabled",
 ]

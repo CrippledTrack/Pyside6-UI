@@ -60,6 +60,10 @@ def generate_stylesheet(
     tab_hover_text: str = None,
     # v5.1.0 scrollbar handle radius (e.g. 0px for cyberpunk sharp style)
     scrollbar_handle_radius: str = "6px",
+    # Semantic status colors (default to existing theme tokens)
+    success_color: str = None,
+    warning_color: str = None,
+    error_color: str = None,
 ) -> str:
     """Generate an enhanced stylesheet with consistent styling patterns.
     
@@ -96,6 +100,9 @@ def generate_stylesheet(
         tab_hover_bg: Background of hovered unselected tab (defaults to hover_overlay)
         tab_hover_text: Text colour of hovered unselected tab (defaults to text_color)
         scrollbar_handle_radius: Border-radius of scrollbar handles (default "6px")
+        success_color: Success status color (defaults to accent_color)
+        warning_color: Warning status color (defaults to accent_hover)
+        error_color: Error status color (defaults to the theme danger color)
     
     Returns:
         Complete Qt stylesheet string
@@ -128,6 +135,10 @@ def generate_stylesheet(
         danger_hover = "#e53935"
         danger_pressed = "#b71c1c"
         danger_text = "#ffffff"
+
+    success_color = success_color or accent_color
+    warning_color = warning_color or accent_hover
+    error_color = error_color or danger_hover
 
     # Resolve tab colour defaults now that hover_overlay is available
     _tab_selected_bg        = tab_selected_bg        or base_bg
@@ -163,6 +174,11 @@ def generate_stylesheet(
             color: {text_color};
             selection-background-color: {accent_color};
             selection-color: {button_text};
+        }}
+        QWidget[_cp_layout_kind="row"],
+        QWidget[_cp_layout_kind="column"] {{
+            background-color: transparent;
+            border: none;
         }}
         
         /* ===== Loading Widget ===== */
@@ -448,9 +464,23 @@ def generate_stylesheet(
             font-weight: 600;
         }}
         QLabel[cp_role="success"] {{
-            color: #4CAF50;
+            color: {success_color};
             font-weight: 700;
             padding: 2px 8px;
+        }}
+        QLabel[cp_role="warning"] {{
+            color: {warning_color};
+            font-weight: 700;
+            padding: 2px 8px;
+        }}
+        QLabel[cp_role="error"] {{
+            color: {error_color};
+            font-weight: 700;
+            padding: 2px 8px;
+        }}
+        QLabel[cp_role="muted"] {{
+            color: {text_secondary};
+            font-weight: 400;
         }}
         
         /* ===== Scoped Form Labels Quirk (winforms_label_quirk) ===== */

@@ -72,8 +72,9 @@ class BaseTabPlugin:
     # Platform support (empty list = all platforms supported)
     supported_platforms: List[str] = []
 
-    # UI backends that can host this plugin's tab content (default: Qt only)
-    ui_backends: List[str] = ["qt"]
+    # UI backends that can host this plugin's tab content
+    # (empty list = all backends supported)
+    ui_backends: List[str] = []
     
     # Plugin dependencies (optional)
     dependencies: List[str] = []
@@ -180,8 +181,13 @@ class BaseTabPlugin:
     
     @classmethod
     def is_supported_ui_backend(cls, backend_id: str) -> bool:
-        """Check if this plugin supports the given UI backend."""
-        backends = getattr(cls, "ui_backends", None) or ["qt"]
+        """Check if this plugin supports the given UI backend.
+
+        If ``ui_backends`` is empty, all backends are supported.
+        """
+        backends = getattr(cls, "ui_backends", None) or []
+        if not backends:
+            return True
         return backend_id in backends
     
     @classmethod
@@ -229,7 +235,7 @@ class BaseTabPlugin:
             'min_gui_version': getattr(cls, 'min_gui_version', None),
             'required_gui_version': getattr(cls, 'required_gui_version', None),
             'dependencies': getattr(cls, 'dependencies', []),
-            'ui_backends': list(getattr(cls, 'ui_backends', ["qt"]) or ["qt"]),
+            'ui_backends': list(getattr(cls, 'ui_backends', []) or []),
         }
     
     @classmethod

@@ -334,16 +334,22 @@ class PluginService:
                         package="platforms.common.plugins",
                         priority=190,
                     ))
-                # Sample plugins under GUI.plugins: CLI --dev/-dev, or GUI_LOAD_SAMPLE_PLUGINS=1
-                # (do not use version-string -dev — that would load samples on every -dev release build)
+                # Sample plugins under GUI.plugins when runtime is_dev_mode() is on
+                # (CLI --dev/-dev, persisted settings, or host VERSION containing -dev),
+                # or when GUI_LOAD_SAMPLE_PLUGINS=1. Never load in frozen builds;
+                # force off with GUI_LOAD_SAMPLE_PLUGINS=0.
                 gui_pkg = __package__.split('.')[0]
                 env_samples = os.environ.get("GUI_LOAD_SAMPLE_PLUGINS")
-                cli_dev = ("--dev" in sys.argv) or ("-dev" in sys.argv)
+                try:
+                    from ..utils.admin import is_dev_mode
+                    runtime_dev = bool(is_dev_mode())
+                except Exception:
+                    runtime_dev = ("--dev" in sys.argv) or ("-dev" in sys.argv)
                 if env_samples is not None:
                     load_samples = env_samples != "0" and not getattr(sys, "frozen", False)
                 else:
                     load_samples = (
-                        not getattr(sys, "frozen", False) and cli_dev
+                        not getattr(sys, "frozen", False) and runtime_dev
                     )
                 if load_samples:
                     sources.append(PluginSource(

@@ -31,7 +31,7 @@ cd GUI
 python3 run.py    # Windows: py run.py
 ```
 
-`run.py` adds the parent of `GUI/` to the path so the package imports. Optional: `run.py --dev` (loads sample plugins under `GUI/plugins/`).
+`run.py` adds the parent of `GUI/` to the path so the package imports. Optional: `run.py --dev` (enables runtime dev mode, which loads sample plugins under `GUI/plugins/`).
 
 ### Minimal `main.py` (option 1)
 
@@ -85,7 +85,7 @@ When the **parent** of `GUI/` contains an `app_plugins` or `platforms` tree that
 
 If the parent has an unrelated folder with those names, do not run standalone from that location.
 
-Sample plugins in `GUI/plugins/` are framework examples (dev / non-frozen; disable with `GUI_LOAD_SAMPLE_PLUGINS=0`).
+Sample plugins in `GUI/plugins/` are framework examples (loaded when runtime `is_dev_mode()` is on and the build is not frozen; force off with `GUI_LOAD_SAMPLE_PLUGINS=0`).
 
 ## Troubleshooting
 
