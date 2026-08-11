@@ -29,6 +29,13 @@ LEVEL_COLOR_MAP = {
     logging.ERROR: "\033[31m",     # Red
     logging.CRITICAL: "\033[35m",  # Magenta
 }
+LOG_LEVEL_DISPLAY_ROLES = {
+    logging.DEBUG: "log_debug",
+    logging.INFO: "log_info",
+    logging.WARNING: "log_warning",
+    logging.ERROR: "log_error",
+    logging.CRITICAL: "log_critical",
+}
 THREAD_COLOR = "\033[94m"  # Bright blue
 DAEMON_THREAD_COLOR = "\033[95m"  # Bright magenta
 LOGGER_COLOR_MAP = [
@@ -81,6 +88,19 @@ class CustomFormatter(logging.Formatter):
             return super().format(record)
         finally:
             record.exc_info = orig_exc_info
+
+
+def log_display_role(level: int) -> str:
+    """Map a ``logging`` level to the shared toolkit-neutral display role."""
+    if level >= logging.CRITICAL:
+        return LOG_LEVEL_DISPLAY_ROLES[logging.CRITICAL]
+    if level >= logging.ERROR:
+        return LOG_LEVEL_DISPLAY_ROLES[logging.ERROR]
+    if level >= logging.WARNING:
+        return LOG_LEVEL_DISPLAY_ROLES[logging.WARNING]
+    if level >= logging.INFO:
+        return LOG_LEVEL_DISPLAY_ROLES[logging.INFO]
+    return LOG_LEVEL_DISPLAY_ROLES[logging.DEBUG]
 
 
 def _prune_old_logs(log_dir: Path, keep: int) -> None:
@@ -276,4 +296,9 @@ def setup_logging() -> logging.Logger:
         return logger
 
 
-__all__ = ['setup_logging']
+__all__ = [
+    "setup_logging",
+    "log_display_role",
+    "LOG_LEVEL_DISPLAY_ROLES",
+    "LEVEL_COLOR_MAP",
+]

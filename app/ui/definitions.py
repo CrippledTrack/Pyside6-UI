@@ -1,8 +1,8 @@
 """
 Shared UI definitions and backend-auto-dispatch helpers.
 
-Plugins should import from this module for styled controls, forms, tables, and
-layouts. The active UI backend — set at launch via
+Plugins should import from this module for styled controls, forms, tables,
+layouts, and content-bearing dialog windows. The active UI backend — set via
 ``get_active_ui_backend_id()`` — selects the correct toolkit implementation.
 
 Desktop-only layout ideas (resizable splits, pixel heights, stretch weights,
@@ -27,8 +27,11 @@ to attach semantic roles to them.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import Enum
+from functools import lru_cache
+from importlib import import_module
 from typing import Any, Callable, Optional, Sequence, Union
 
 from .active_backend import get_active_ui_backend_id
@@ -48,6 +51,7 @@ class ButtonRole(str, Enum):
 
     DEFAULT = "default"
     PRIMARY = "primary"
+    SECONDARY = "secondary"
     FLAT = "flat"
     DANGER = "danger"
 
@@ -95,6 +99,9 @@ class UICapability(str, Enum):
 
 
 RoleValue = Union[str, Enum]
+ComboItem = Union[str, tuple[str, Any]]
+_BACKEND_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+_BACKEND_COMPONENTS = frozenset({"style_map", "dialog_map"})
 
 
 @dataclass(frozen=True)
@@ -126,23 +133,41 @@ def _capability_str(capability: RoleValue) -> str:
     return capability.value if isinstance(capability, Enum) else str(capability)
 
 
-def _load_style_map() -> Any:
-    """Lazily import the style_map for the active UI backend."""
-    backend_id = get_active_ui_backend_id()
-    if backend_id == "qt":
-        from .qt import style_map
+@lru_cache(maxsize=None)
+def _load_backend_component(backend_id: str, component: str) -> Any:
+    """Import a definitions component from a backend package by convention."""
+    if not _BACKEND_ID_PATTERN.fullmatch(backend_id):
+        raise RuntimeError(f"Invalid UI backend id {backend_id!r}")
+    if component not in _BACKEND_COMPONENTS:
+        raise RuntimeError(f"Unknown UI backend component {component!r}")
 
-        return style_map
-    if backend_id == "tui":
-        try:
-            from .tui import style_map
-        except ImportError as exc:
-            raise RuntimeError(
-                "The TUI backend style map is not available yet (WIP). "
-                "Use the Qt backend (default)"
-            ) from exc
-        return style_map
-    raise RuntimeError(f"No UI definitions style map for backend '{backend_id}'")
+    module_name = f"{__package__}.{backend_id}.{component}"
+    try:
+        return import_module(module_name)
+    except ModuleNotFoundError as exc:
+        # Only translate a missing component module. Missing toolkit
+        # dependencies inside a real component should retain their traceback.
+        missing_name = exc.name or ""
+        if not (
+            missing_name == module_name
+            or module_name.startswith(f"{missing_name}.")
+        ):
+            raise
+        raise RuntimeError(
+            f"UI backend '{backend_id}' does not provide {component!r}"
+        ) from exc
+
+
+def _load_style_map() -> Any:
+    """Lazily import the style map for the active UI backend."""
+    backend_id = get_active_ui_backend_id()
+    return _load_backend_component(backend_id, "style_map")
+
+
+def _load_dialog_map() -> Any:
+    """Lazily import the dialog map for the active UI backend."""
+    backend_id = get_active_ui_backend_id()
+    return _load_backend_component(backend_id, "dialog_map")
 
 
 def supports(capability: RoleValue) -> bool:
@@ -164,6 +189,118 @@ def tab_root(context: Any = None, *, parent: Any = None, expand: bool = True) ->
     if context is not None and parent is None:
         parent = getattr(context, "parent", None)
     return create_column(parent=parent, expand=expand)
+
+
+def create_dialog(
+    title: str,
+    *,
+    parent: Any = None,
+    modal: bool = True,
+    default_size: Optional[tuple[int, int]] = None,
+) -> Any:
+    """Create a toolkit-neutral content dialog handle.
+
+    ``parent`` is an optional attachment hint. Dialog completion is delivered
+    through :func:`open_dialog`; this API does not expose a blocking result.
+    ``default_size`` is a best-effort pixel-oriented initial window hint that
+    backends without window sizing semantics may ignore.
+    """
+    if default_size is not None:
+        width, height = (int(default_size[0]), int(default_size[1]))
+        if width <= 0 or height <= 0:
+            raise ValueError("default_size dimensions must be positive")
+        default_size = (width, height)
+    return _load_dialog_map().create_dialog(
+        title,
+        parent=parent,
+        modal=modal,
+        default_size=default_size,
+    )
+
+
+def set_dialog_content(dialog: Any, content: Any) -> None:
+    """Attach definitions-built ``content`` to a dialog handle."""
+    _load_dialog_map().set_dialog_content(dialog, content)
+
+
+def open_dialog(
+    dialog: Any,
+    *,
+    on_closed: Optional[Callable[[bool], None]] = None,
+) -> None:
+    """Open a dialog and report acceptance through ``on_closed``.
+
+    Modal dialogs remain callback-driven; callers never receive a blocking
+    return value from this facade.
+    """
+    _load_dialog_map().open_dialog(dialog, on_closed=on_closed)
+
+
+def close_dialog(dialog: Any, *, accepted: bool = False) -> None:
+    """Close a dialog with an accepted or rejected result."""
+    _load_dialog_map().close_dialog(dialog, accepted=accepted)
+
+
+def accept_dialog(dialog: Any) -> None:
+    """Accept and close a content dialog."""
+    _load_dialog_map().accept_dialog(dialog)
+
+
+def reject_dialog(dialog: Any) -> None:
+    """Reject and close a content dialog."""
+    _load_dialog_map().reject_dialog(dialog)
+
+
+def dialog_button_row(dialog: Any, *, save_cancel: bool = True) -> Any:
+    """Create a standard Save/Cancel or Close row for ``dialog``."""
+    row = create_row()
+    add_stretch(row)
+    if save_cancel:
+        add(
+            row,
+            create_button(
+                "Cancel",
+                on_click=lambda: reject_dialog(dialog),
+            ),
+        )
+        add(
+            row,
+            create_button(
+                "Save",
+                on_click=lambda: accept_dialog(dialog),
+            ),
+        )
+    else:
+        add(
+            row,
+            create_button(
+                "Close",
+                on_click=lambda: accept_dialog(dialog),
+            ),
+        )
+    return row
+
+
+def pick_save_file(
+    title: str,
+    *,
+    parent: Any = None,
+    name_filter: str = "",
+    default_name: str = "",
+) -> Optional[str]:
+    """Ask for a destination path using the active backend.
+
+    Returns ``None`` when the picker is cancelled or unavailable.
+    """
+    picker = getattr(_load_dialog_map(), "pick_save_file", None)
+    if picker is None:
+        return None
+    return picker(
+        title,
+        parent=parent,
+        name_filter=name_filter,
+        default_name=default_name,
+    )
 
 
 def create_button(
@@ -193,17 +330,20 @@ def create_label(
     parent: Any = None,
     *,
     wrap: bool = True,
+    align: str = "start",
 ) -> Any:
     """Create a label with the given semantic role for the active backend.
 
     ``parent`` is an optional attachment hint; backends may ignore it.
     Set ``wrap=False`` for compact single-line status text.
+    ``align`` is one of ``start``, ``center``, or ``end``.
     """
     return _load_style_map().create_label(
         text,
         _role_str(role),
         parent,
         wrap=wrap,
+        align=align,
     )
 
 
@@ -225,6 +365,8 @@ def create_text_area(
     *,
     read_only: bool = True,
     expand: bool = False,
+    wrap: bool = True,
+    monospace: bool = False,
 ) -> Any:
     """Create a multiline text area (e.g. logs) for the active backend.
 
@@ -236,12 +378,17 @@ def create_text_area(
         parent,
         read_only=read_only,
         expand=expand,
+        wrap=wrap,
+        monospace=monospace,
     )
 
 
-def create_combo(items: Sequence[str] = (), parent: Any = None) -> Any:
-    """Create a single-selection control populated with ``items``."""
-    return _load_style_map().create_combo(list(items), parent)
+def create_combo(items: Sequence[ComboItem] = (), parent: Any = None) -> Any:
+    """Create a single-selection control.
+
+    Items may be display strings or ``(label, opaque_value)`` tuples.
+    """
+    return _load_style_map().create_combo(_normalize_combo_items(items), parent)
 
 
 def create_spin(
@@ -363,6 +510,11 @@ def create_row(parent: Any = None, *, expand: bool = False) -> Any:
 def create_group(title: str, parent: Any = None) -> Any:
     """Create a titled vertical content group."""
     return _load_style_map().create_group(title, parent)
+
+
+def create_card(parent: Any = None) -> Any:
+    """Create an untitled themed card container for grouped content."""
+    return _load_style_map().create_card(parent)
 
 
 def create_tabs(parent: Any = None) -> Any:
@@ -516,6 +668,37 @@ def stop_interval(handle: Any) -> None:
     _load_style_map().stop_interval(handle)
 
 
+def append_text(
+    widget: Any,
+    text: str,
+    *,
+    role: Optional[RoleValue] = None,
+) -> None:
+    """Append one themed line to a text-area-like control."""
+    _load_style_map().append_text(
+        widget,
+        str(text),
+        role=_role_str(role) if role is not None else None,
+    )
+
+
+def append_log_text(widget: Any, text: str, *, level: int) -> None:
+    """Append one log line using the same level colors as console logging."""
+    from ..services.logging_service import log_display_role
+
+    append_text(widget, str(text), role=log_display_role(level))
+
+
+def clear_text(widget: Any) -> None:
+    """Clear a text-area-like control."""
+    _load_style_map().clear_text(widget)
+
+
+def scroll_to_end(widget: Any) -> None:
+    """Scroll a text-area-like control to its final line."""
+    _load_style_map().scroll_to_end(widget)
+
+
 def set_text(widget: Any, text: str) -> None:
     """Set display text on a label, text area, or compatible widget."""
     _load_style_map().set_text(widget, text)
@@ -536,9 +719,24 @@ def set_value(widget: Any, value: Any) -> None:
     _load_style_map().set_value(widget, value)
 
 
-def set_items(widget: Any, items: Sequence[str]) -> None:
+def _normalize_combo_items(
+    items: Sequence[ComboItem],
+) -> list[tuple[str, Any]]:
+    """Normalize combo labels and opaque values for backend maps."""
+    normalized: list[tuple[str, Any]] = []
+    for item in items:
+        if isinstance(item, tuple):
+            if len(item) != 2:
+                raise ValueError("combo item tuples must contain (label, value)")
+            normalized.append((str(item[0]), item[1]))
+        else:
+            normalized.append((str(item), None))
+    return normalized
+
+
+def set_items(widget: Any, items: Sequence[ComboItem]) -> None:
     """Replace the choices in a combo-like control."""
-    _load_style_map().set_items(widget, [str(item) for item in items])
+    _load_style_map().set_items(widget, _normalize_combo_items(items))
 
 
 def set_enabled(widget: Any, enabled: bool = True) -> None:
@@ -587,8 +785,17 @@ __all__ = [
     "UICapability",
     "TableRow",
     "MenuAction",
+    "ComboItem",
     "supports",
     "tab_root",
+    "create_dialog",
+    "set_dialog_content",
+    "open_dialog",
+    "close_dialog",
+    "accept_dialog",
+    "reject_dialog",
+    "dialog_button_row",
+    "pick_save_file",
     "create_button",
     "create_label",
     "create_input",
@@ -605,6 +812,7 @@ __all__ = [
     "create_column",
     "create_row",
     "create_group",
+    "create_card",
     "create_tabs",
     "add_tab",
     "create_form",
@@ -623,6 +831,10 @@ __all__ = [
     "on_context_menu",
     "on_interval",
     "stop_interval",
+    "append_text",
+    "append_log_text",
+    "clear_text",
+    "scroll_to_end",
     "set_text",
     "get_text",
     "get_value",

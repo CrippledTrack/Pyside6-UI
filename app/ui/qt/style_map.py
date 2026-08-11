@@ -15,12 +15,15 @@ from .bindings import (
     QCheckBox,
     QComboBox,
     QFormLayout,
+    QFontDatabase,
+    QFrame,
     QGroupBox,
     QHeaderView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMenu,
+    QPalette,
     QPushButton,
     QSizePolicy,
     QSpinBox,
@@ -28,6 +31,8 @@ from .bindings import (
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
+    QTextCharFormat,
+    QTextCursor,
     QTextEdit,
     QTimer,
     QVBoxLayout,
@@ -111,10 +116,23 @@ def create_label(
     parent: Any = None,
     *,
     wrap: bool = True,
+    align: str = "start",
 ) -> QLabel:
     """Create a QLabel with the given role."""
     label = QLabel(text, parent)
     label.setWordWrap(bool(wrap))
+    alignment = str(align or "start").strip().lower()
+    if alignment == "center":
+        label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
+        # Expand horizontally so text centers within the parent column/row.
+        label.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
+    elif alignment == "end":
+        label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+    else:
+        label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
     apply_label_role(label, role)
     return label
 
@@ -138,20 +156,31 @@ def create_text_area(
     *,
     read_only: bool = True,
     expand: bool = False,
+    wrap: bool = True,
+    monospace: bool = False,
 ) -> QTextEdit:
     """Create a multiline text area (e.g. event log)."""
     edit = QTextEdit(parent)
     edit.setReadOnly(read_only)
+    edit.document().setMaximumBlockCount(10000)
+    edit.setLineWrapMode(
+        QTextEdit.LineWrapMode.WidgetWidth
+        if wrap
+        else QTextEdit.LineWrapMode.NoWrap
+    )
+    if monospace:
+        edit.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
     apply_input_role(edit, role)
     if expand:
         set_expand(edit, True)
     return edit
 
 
-def create_combo(items: list[str], parent: Any = None) -> QComboBox:
-    """Create a QComboBox populated with string items."""
+def create_combo(items: list[tuple[str, Any]], parent: Any = None) -> QComboBox:
+    """Create a QComboBox populated with labels and opaque values."""
     combo = QComboBox(parent)
-    combo.addItems(items)
+    for label, value in items:
+        combo.addItem(label, value)
     apply_input_role(combo, "default")
     return combo
 
@@ -314,6 +343,20 @@ def create_group(title: str, parent: Any = None) -> QGroupBox:
     layout.setSpacing(gap)
     group.setProperty("_cp_layout_kind", "group")
     return group
+
+
+def create_card(parent: Any = None) -> QFrame:
+    """Create an untitled themed card with vertical child layout."""
+    card = QFrame(parent)
+    card.setObjectName("card")
+    card.setProperty("card", True)
+    layout = QVBoxLayout(card)
+    gap = spacing("medium")
+    # Match CardContainer padding without importing the Qt widget helper.
+    layout.setContentsMargins(16, 16, 16, 16)
+    layout.setSpacing(gap)
+    card.setProperty("_cp_layout_kind", "card")
+    return card
 
 
 def create_tabs(parent: Any = None) -> QTabWidget:
@@ -511,6 +554,44 @@ def stop_interval(handle: Any) -> None:
         handle.stop()
 
 
+def append_text(
+    widget: Any,
+    text: str,
+    *,
+    role: str | None = None,
+) -> None:
+    """Append a line to QTextEdit using a theme-derived semantic color."""
+    if not isinstance(widget, QTextEdit):
+        raise TypeError(f"Cannot append text to {type(widget)!r}")
+
+    probe = QLabel("", widget)
+    apply_label_role(probe, role or "body")
+    probe.ensurePolished()
+    color = probe.palette().color(QPalette.ColorRole.WindowText)
+    probe.deleteLater()
+
+    text_format = QTextCharFormat()
+    text_format.setForeground(color)
+    cursor = widget.textCursor()
+    cursor.movePosition(QTextCursor.MoveOperation.End)
+    cursor.insertText(f"{text}\n", text_format)
+
+
+def clear_text(widget: Any) -> None:
+    """Clear a supported Qt text control."""
+    if not hasattr(widget, "clear"):
+        raise TypeError(f"Cannot clear text on {type(widget)!r}")
+    widget.clear()
+
+
+def scroll_to_end(widget: Any) -> None:
+    """Scroll a supported Qt text control to its end."""
+    if not hasattr(widget, "verticalScrollBar"):
+        raise TypeError(f"Cannot scroll text on {type(widget)!r}")
+    scrollbar = widget.verticalScrollBar()
+    scrollbar.setValue(scrollbar.maximum())
+
+
 def set_text(widget: Any, text: str) -> None:
     """Set text on a label or similar widget."""
     if hasattr(widget, "setPlainText"):
@@ -539,7 +620,8 @@ def get_value(widget: Any) -> Any:
     if isinstance(widget, QCheckBox):
         return widget.isChecked()
     if isinstance(widget, QComboBox):
-        return widget.currentText()
+        data = widget.currentData()
+        return widget.currentText() if data is None else data
     return get_text(widget)
 
 
@@ -550,7 +632,9 @@ def set_value(widget: Any, value: Any) -> None:
     elif isinstance(widget, QCheckBox):
         widget.setChecked(bool(value))
     elif isinstance(widget, QComboBox):
-        index = widget.findText(str(value))
+        index = widget.findData(value)
+        if index < 0:
+            index = widget.findText(str(value))
         if index >= 0:
             widget.setCurrentIndex(index)
         else:
@@ -561,12 +645,13 @@ def set_value(widget: Any, value: Any) -> None:
         raise TypeError(f"Cannot set value on {type(widget)!r}")
 
 
-def set_items(widget: Any, items: list[str]) -> None:
+def set_items(widget: Any, items: list[tuple[str, Any]]) -> None:
     """Replace the choices in a QComboBox."""
     if not isinstance(widget, QComboBox):
         raise TypeError(f"Cannot set items on {type(widget)!r}")
     widget.clear()
-    widget.addItems(items)
+    for label, value in items:
+        widget.addItem(label, value)
 
 
 def set_enabled(widget: Any, enabled: bool = True) -> None:
@@ -635,6 +720,7 @@ __all__ = [
     "create_column",
     "create_row",
     "create_group",
+    "create_card",
     "create_tabs",
     "add_tab",
     "create_form",
@@ -652,6 +738,9 @@ __all__ = [
     "on_context_menu",
     "on_interval",
     "stop_interval",
+    "append_text",
+    "clear_text",
+    "scroll_to_end",
     "set_text",
     "get_text",
     "get_value",

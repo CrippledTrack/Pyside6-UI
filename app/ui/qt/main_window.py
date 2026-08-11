@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from .dialogs.plugin_dialog import PluginManagementDialog
     from .dialogs.theme_dialog import ThemeDialog
     from .dialogs.log_viewer_dialog import LogViewerDialog
+    from .dialogs.about_dialog import AboutDialog
     from .controllers.menu_bar_controller import MenuBarController
     from .controllers.window_title_manager import WindowTitleManager
     from .controllers.status_bar_manager import StatusBarManager
@@ -34,7 +35,6 @@ from .bindings import (
     QMainWindow,
     QMenuBar,
     QMessageBox,
-    QDialog,
     QStatusBar,
     QTabWidget,
     QTimer,
@@ -108,7 +108,7 @@ class MainWindow(QMainWindow):
         self._theme_dialog: Optional["ThemeDialog"] = None
         self._plugin_dialog: Optional["PluginManagementDialog"] = None
         self._log_viewer_dialog: Optional["LogViewerDialog"] = None
-        self._about_dialog: Optional[QDialog] = None
+        self._about_dialog: Optional["AboutDialog"] = None
         self._plugin_toolbar: Optional[QToolBar] = None
         self._menu_handle_map: Dict[MenuItemHandle, tuple] = {}
         self._toolbar_handle_map: Dict[ToolbarActionHandle, QAction] = {}
@@ -379,34 +379,29 @@ class MainWindow(QMainWindow):
         if getattr(constants, "SINGLE_PLUGIN_MODE", False):
             return
 
-        if self._plugin_dialog and self._plugin_dialog.isVisible():
-            self._plugin_dialog.raise_()
-            self._plugin_dialog.activateWindow()
+        from .. import definitions as ui
+
+        if self._plugin_dialog is not None:
+            ui.open_dialog(self._plugin_dialog.dialog)
             return
 
         from .dialogs.plugin_dialog import PluginManagementDialog
         from ..abstractions.presenters import IDialogPresenter
 
-        try:
-            dialog_presenter = self.container.get(IDialogPresenter)
-        except ValueError:
-            dialog_presenter = None
-        dlg = PluginManagementDialog(
+        controller = PluginManagementDialog(
             self,
             self.settings_service,
             self.plugin_controller,
-            dialog_presenter,
+            self.container.get(IDialogPresenter),
+            on_plugin_toggled=self.plugin_controller.toggle_plugin,
         )
-        dlg.setWindowModality(Qt.WindowModality.NonModal)
-        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dlg.plugin_toggled.connect(self.plugin_controller.toggle_plugin)
-        dlg.destroyed.connect(lambda: setattr(self, "_plugin_dialog", None))
-        dlg.resize(900, 560)
 
-        self._plugin_dialog = dlg
-        dlg.show()
-        dlg.raise_()
-        dlg.activateWindow()
+        def clear_controller(_accepted: bool) -> None:
+            if self._plugin_dialog is controller:
+                self._plugin_dialog = None
+
+        self._plugin_dialog = controller
+        ui.open_dialog(controller.dialog, on_closed=clear_controller)
     
     def _on_plugin_toggled(self, plugin_name: str, enabled: bool) -> None:
         """Handle plugin toggle event.
@@ -468,46 +463,48 @@ class MainWindow(QMainWindow):
     
     def open_log_viewer_dialog(self) -> None:
         """Open the log viewer dialog (non-modal)."""
-        if self._log_viewer_dialog and self._log_viewer_dialog.isVisible():
-            self._log_viewer_dialog.raise_()
-            self._log_viewer_dialog.activateWindow()
+        from .. import definitions as ui
+
+        if self._log_viewer_dialog is not None:
+            ui.open_dialog(self._log_viewer_dialog.dialog)
             return
 
         from .dialogs.log_viewer_dialog import LogViewerDialog
-        dialog = LogViewerDialog(parent=self)
-        dialog.setWindowModality(Qt.WindowModality.NonModal)
-        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dialog.destroyed.connect(lambda: setattr(self, "_log_viewer_dialog", None))
+        controller = LogViewerDialog(parent=self)
 
-        self._log_viewer_dialog = dialog
-        dialog.show()
-        dialog.raise_()
-        dialog.activateWindow()
+        def clear_controller(_accepted: bool) -> None:
+            controller.on_closed()
+            if self._log_viewer_dialog is controller:
+                self._log_viewer_dialog = None
+
+        self._log_viewer_dialog = controller
+        ui.open_dialog(controller.dialog, on_closed=clear_controller)
     
     def show_about_dialog(self) -> None:
         """Show the About dialog without blocking the main window."""
         from ...constants import GUI_API_VERSION as GUI_VERSION, VERSION_NAME as DEFAULT_VERSION_NAME
         from .dialogs import create_about_dialog
+        from .. import definitions as ui
         
-        if self._about_dialog and self._about_dialog.isVisible():
-            self._about_dialog.raise_()
-            self._about_dialog.activateWindow()
+        if self._about_dialog is not None:
+            ui.open_dialog(self._about_dialog.dialog)
             return
 
         has_external_constants = VERSION_NAME != DEFAULT_VERSION_NAME
-        msg = create_about_dialog(
+        controller = create_about_dialog(
             self,
             app_name=VERSION_NAME,
             app_version=VERSION if has_external_constants else None,
             gui_api_version=GUI_VERSION,
             platform_name=CURRENT_PLATFORM,
         )
-        msg.destroyed.connect(lambda: setattr(self, "_about_dialog", None))
 
-        self._about_dialog = msg
-        msg.show()
-        msg.raise_()
-        msg.activateWindow()
+        def clear_controller(_accepted: bool) -> None:
+            if self._about_dialog is controller:
+                self._about_dialog = None
+
+        self._about_dialog = controller
+        ui.open_dialog(controller.dialog, on_closed=clear_controller)
     
     def on_theme_selected(self, theme_name: str) -> None:
         """Handle theme selection.

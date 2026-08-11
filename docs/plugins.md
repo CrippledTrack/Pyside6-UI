@@ -52,12 +52,45 @@ their content, even if it uses stacked sections instead of desktop tab chrome.
 Table `sortable=True` is a preference a backend may ignore. Pointer-oriented
 context menus are optional via `UICapability.CONTEXT_MENU`.
 
-The facade contains no toolkit imports. Each active backend implements the same
-operations in its own `style_map`; plugins must not import a backend style map
-directly. Definitions-built content may be hosted inside a backend-owned custom
-dialog, but dialog window lifecycle remains outside this facade. Message boxes
-and main-thread dispatch remain separate concerns supplied by
-`IDialogPresenter` and `IUIEventLoop`.
+The facade contains no toolkit imports. Each active backend implements controls
+in its own `style_map` and content-bearing windows in its own `dialog_map`;
+plugins must not import either backend map directly. Definitions loads these
+modules by package convention (`GUI.app.ui.<backend>.style_map` and
+`GUI.app.ui.<backend>.dialog_map`), so adding a backend does not require editing
+the facade.
+
+Custom windows use `create_dialog`, `set_dialog_content`, and `open_dialog`.
+Pass `default_size=(width, height)` only when a desktop window needs a
+best-effort initial pixel size; other backends may ignore the hint. Completion
+is callback-driven:
+
+```python
+dialog = create_dialog("Settings", parent=context.parent, modal=True)
+content = create_column(parent=dialog)
+add(content, create_label("Settings content"))
+add(content, dialog_button_row(dialog))
+set_dialog_content(dialog, content)
+open_dialog(dialog, on_closed=lambda accepted: save() if accepted else None)
+```
+
+There is deliberately no blocking public `run_modal()` result. Backends may
+render a dialog as a native window, overlay, or panel while preserving the
+callback contract. Message boxes and main-thread dispatch remain separate
+concerns supplied by `IDialogPresenter` and `IUIEventLoop`.
+
+Use `create_card()` for themed untitled panels, `create_label(..., align="center"|"end")`
+for header/value alignment, and `ButtonRole.SECONDARY` for outlined actions next
+to `ButtonRole.PRIMARY` closes/saves.
+
+Combo items may be plain labels or `(label, opaque_value)` tuples; `get_value`
+returns the opaque value when supplied. Log-like surfaces can use
+`append_log_text(..., level=logging.INFO)` so line colors follow the same
+level mapping as console logging, or `append_text(..., role=...)` for generic
+themed lines. `clear_text` and `scroll_to_end` avoid toolkit cursors.
+`pick_save_file` provides a best-effort backend save picker and returns `None`
+when cancelled or unavailable.
+For log/code output, `create_text_area(wrap=False, monospace=True)` requests
+readable backend-native fixed-width presentation without naming a font.
 
 Prefer `tab_root(context)` for the tab's root column, and
 `create_button(..., on_click=callback)` to wire actions in one step. Role

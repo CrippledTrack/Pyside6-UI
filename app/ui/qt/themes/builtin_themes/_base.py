@@ -64,6 +64,11 @@ def generate_stylesheet(
     success_color: str = None,
     warning_color: str = None,
     error_color: str = None,
+    log_debug_color: str = None,
+    log_info_color: str = None,
+    log_warning_color: str = None,
+    log_error_color: str = None,
+    log_critical_color: str = None,
 ) -> str:
     """Generate an enhanced stylesheet with consistent styling patterns.
     
@@ -103,6 +108,11 @@ def generate_stylesheet(
         success_color: Success status color (defaults to accent_color)
         warning_color: Warning status color (defaults to accent_hover)
         error_color: Error status color (defaults to the theme danger color)
+        log_debug_color: Log-view/console DEBUG color (defaults to ANSI cyan)
+        log_info_color: Log-view/console INFO color (defaults to ANSI green)
+        log_warning_color: Log-view/console WARNING color (defaults to ANSI yellow)
+        log_error_color: Log-view/console ERROR color (defaults to ANSI red)
+        log_critical_color: Log-view/console CRITICAL color (defaults to ANSI magenta)
     
     Returns:
         Complete Qt stylesheet string
@@ -139,6 +149,12 @@ def generate_stylesheet(
     success_color = success_color or accent_color
     warning_color = warning_color or accent_hover
     error_color = error_color or danger_hover
+    # Match console ColorFormatter / LEVEL_COLOR_MAP defaults (ANSI 36/32/33/31/35).
+    log_debug_color = log_debug_color or "#06b6d4"
+    log_info_color = log_info_color or "#22c55e"
+    log_warning_color = log_warning_color or "#eab308"
+    log_error_color = log_error_color or "#ef4444"
+    log_critical_color = log_critical_color or "#d946ef"
 
     # Resolve tab colour defaults now that hover_overlay is available
     _tab_selected_bg        = tab_selected_bg        or base_bg
@@ -152,7 +168,12 @@ def generate_stylesheet(
         card_style = "background-color: transparent; border: none; margin: 0px;"
     else:
         card_bg = alt_bg if is_dark else base_bg
-        card_style = f"background-color: {card_bg}; border: {border_width} solid {border_color}; margin: 4px;"
+        card_style = (
+            f"background-color: {card_bg}; "
+            f"border: {border_width} solid {border_color}; "
+            f"border-radius: {border_radius}; "
+            f"margin: 4px;"
+        )
 
     # Scoped WinForms-style label quirk values
     if winforms_label_quirk:
@@ -181,6 +202,7 @@ def generate_stylesheet(
             background-color: transparent;
             border: none;
         }}
+        /* Cards keep their themed fill; do not force them transparent. */
         
         /* ===== Loading Widget ===== */
         #loadingWidget {{
@@ -274,6 +296,19 @@ def generate_stylesheet(
         }}
         QPushButton[cp_role="primary"]:pressed {{
             background-color: {button_pressed};
+        }}
+        QPushButton[cp_role="secondary"] {{
+            background-color: transparent;
+            color: {text_color};
+            border: 1px solid {border_color};
+        }}
+        QPushButton[cp_role="secondary"]:hover {{
+            background-color: {hover_overlay};
+            border-color: {border_hover};
+        }}
+        QPushButton[cp_role="secondary"]:pressed {{
+            background-color: {button_pressed};
+            color: {button_text};
         }}
         QPushButton[cp_role="default"] {{
             background-color: {button_bg};
@@ -483,6 +518,26 @@ def generate_stylesheet(
             color: {text_secondary};
             font-weight: 400;
         }}
+        QLabel[cp_role="log_debug"] {{
+            color: {log_debug_color};
+            font-weight: 400;
+        }}
+        QLabel[cp_role="log_info"] {{
+            color: {log_info_color};
+            font-weight: 400;
+        }}
+        QLabel[cp_role="log_warning"] {{
+            color: {log_warning_color};
+            font-weight: 400;
+        }}
+        QLabel[cp_role="log_error"] {{
+            color: {log_error_color};
+            font-weight: 400;
+        }}
+        QLabel[cp_role="log_critical"] {{
+            color: {log_critical_color};
+            font-weight: 400;
+        }}
         
         /* ===== Scoped Form Labels Quirk (winforms_label_quirk) ===== */
         /* Apply bordered style only to widgets with setProperty("variant", "field_label") */
@@ -621,6 +676,24 @@ def generate_stylesheet(
         }}
         QCheckBox:disabled {{
             color: {text_secondary};
+        }}
+
+        /* Item-view check indicators (table check columns use these, not QCheckBox) */
+        QTableWidget::indicator, QTableView::indicator {{
+            width: 18px;
+            height: 18px;
+            border: 2px solid {border_color};
+            border-radius: 3px;
+            background-color: {base_bg};
+        }}
+        QTableWidget::indicator:hover, QTableView::indicator:hover {{
+            border-color: {accent_color};
+            background-color: {hover_overlay};
+        }}
+        QTableWidget::indicator:checked, QTableView::indicator:checked {{
+            background-color: {accent_color};
+            border-color: {accent_color};
+            image: url(checkbox_check.png);
         }}
         
         /* ===== Radio Buttons ===== */

@@ -9,17 +9,7 @@ plugin settings.
 from __future__ import annotations
 
 import logging
-from typing import Optional, List, Tuple, Any, Type, Dict
-
-from ..bindings import (
-    Signal,
-    QDialog,
-    QHBoxLayout,
-    QMessageBox,
-    QPushButton,
-    QVBoxLayout,
-    QWidget,
-)
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 from ... import definitions as ui
 from ...abstractions.presenters import IDialogPresenter
@@ -28,26 +18,27 @@ from .....plugin_system.base import BaseTabPlugin
 logger = logging.getLogger(__name__)
 
 
-class PluginManagementDialog(QDialog):
-    """Dialog for managing plugin lifecycle and configuration."""
-    
-    plugin_toggled = Signal(str, bool)  # Emitted when a plugin is toggled (name, enabled)
-    
+class PluginManagementDialog:
+    """Toolkit-neutral plugin-management content and dialog controller."""
+
     def __init__(
         self,
-        parent: Optional[QWidget] = None,
+        parent: Any = None,
         settings_service: Optional[Any] = None,
         plugin_controller: Optional[Any] = None,
         dialog_presenter: Optional[IDialogPresenter] = None,
+        on_plugin_toggled: Optional[Callable[[str, bool], None]] = None,
     ) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Plugin Management")
-        self.resize(900, 560)
         self._all_plugins = []  # List of (name, plugin_class)
         self._rejected_plugins = {}  # Dict of name -> (plugin_class, reason)
         self._shown_plugin_count = 0
+        self._parent = parent
         self.settings_service = settings_service
         self.plugin_controller = plugin_controller
+        if dialog_presenter is None:
+            raise ValueError(
+                "PluginManagementDialog requires an IDialogPresenter"
+            )
         self.dialog_presenter = dialog_presenter
         # Get plugin service from controller (required)
         if plugin_controller and hasattr(plugin_controller, 'plugin_service'):
@@ -56,15 +47,25 @@ class PluginManagementDialog(QDialog):
             raise ValueError(
                 "PluginManagementDialog requires a plugin_controller with plugin_service"
             )
+        self._on_plugin_toggled = (
+            on_plugin_toggled or self.plugin_controller.toggle_plugin
+        )
+        self.dialog = ui.create_dialog(
+            "Plugin Management",
+            parent=parent,
+            modal=False,
+            default_size=(900, 560),
+        )
         self.setup_ui()
         self.load_plugins()
 
+    def close(self) -> None:
+        """Close the definitions-backed management dialog."""
+        ui.reject_dialog(self.dialog)
+
     def setup_ui(self) -> None:
         """Setup the dialog UI."""
-        shell_layout = QVBoxLayout(self)
-        shell_layout.setContentsMargins(0, 0, 0, 0)
-        root = ui.create_column(parent=self, expand=True)
-        shell_layout.addWidget(root)
+        root = ui.create_column(parent=self.dialog, expand=True)
 
         # Filters/Search bar
         filters = ui.create_row()
@@ -214,7 +215,10 @@ class PluginManagementDialog(QDialog):
         self.reload_btn = ui.create_button(
             "Reload Plugins", on_click=self.reload_plugins
         )
-        self.close_btn = ui.create_button("Close", on_click=self.accept)
+        self.close_btn = ui.create_button(
+            "Close",
+            on_click=lambda: ui.reject_dialog(self.dialog),
+        )
         for button in (
             self.enable_all_btn,
             self.disable_all_btn,
@@ -223,6 +227,7 @@ class PluginManagementDialog(QDialog):
         ):
             ui.add(bottom, button)
         ui.add(root, bottom)
+        ui.set_dialog_content(self.dialog, root)
 
     def _get_extension_types(self, plugin_class: type) -> str:
         """Get a string describing which extension interfaces the plugin implements."""
@@ -246,10 +251,7 @@ class PluginManagementDialog(QDialog):
     def toggle_plugin(self, name: str, state: int | bool) -> None:
         """Toggle plugin enabled/disabled state."""
         enabled = bool(state)
-        if self.plugin_controller:
-            self.plugin_controller.toggle_plugin(name, enabled)
-        else:
-            self.plugin_toggled.emit(name, enabled)
+        self._on_plugin_toggled(name, enabled)
         
         # If this is the currently selected plugin, refresh the details panel
         # to update the extension checkboxes (grey out if disabled)
@@ -293,10 +295,10 @@ class PluginManagementDialog(QDialog):
             return
 
         # Safely delegate reload to MainWindow if possible to ensure proper UI teardown
-        parent = self.parent()
+        parent = self._parent
         if parent is not None and hasattr(parent, "reload_plugins"):
             parent.reload_plugins()
-            self.accept()
+            ui.accept_dialog(self.dialog)
         else:
             self._warning(
                 "Reload Unavailable",
@@ -580,8 +582,8 @@ class PluginManagementDialog(QDialog):
     def enable_all(self) -> None:
         """Enable all plugins."""
         tab_controller = None
-        if self.parent() and hasattr(self.parent(), "tab_controller"):
-            tab_controller = self.parent().tab_controller
+        if self._parent and hasattr(self._parent, "tab_controller"):
+            tab_controller = self._parent.tab_controller
             tab_controller.set_batch_loading(True)
             
         try:
@@ -591,8 +593,8 @@ class PluginManagementDialog(QDialog):
             if tab_controller:
                 tab_controller.set_batch_loading(False)
                 # Load the currently active tab since batch loading is now off
-                if hasattr(self.parent(), "tab_widget"):
-                    current_index = self.parent().tab_widget.currentIndex()
+                if hasattr(self._parent, "tab_widget"):
+                    current_index = self._parent.tab_widget.currentIndex()
                     if current_index >= 0:
                         tab_controller.on_tab_changed(current_index)
                         
@@ -602,8 +604,8 @@ class PluginManagementDialog(QDialog):
     def disable_all(self) -> None:
         """Disable all plugins."""
         tab_controller = None
-        if self.parent() and hasattr(self.parent(), "tab_controller"):
-            tab_controller = self.parent().tab_controller
+        if self._parent and hasattr(self._parent, "tab_controller"):
+            tab_controller = self._parent.tab_controller
             tab_controller.set_batch_loading(True)
             
         try:
@@ -612,8 +614,8 @@ class PluginManagementDialog(QDialog):
         finally:
             if tab_controller:
                 tab_controller.set_batch_loading(False)
-                if hasattr(self.parent(), "tab_widget"):
-                    current_index = self.parent().tab_widget.currentIndex()
+                if hasattr(self._parent, "tab_widget"):
+                    current_index = self._parent.tab_widget.currentIndex()
                     if current_index >= 0:
                         tab_controller.on_tab_changed(current_index)
                         
@@ -693,7 +695,7 @@ class PluginManagementDialog(QDialog):
         try:
             # Try new get_settings_widget() method first
             if hasattr(plugin_target, 'get_settings_widget') and callable(getattr(plugin_target, 'get_settings_widget')):
-                settings_widget = plugin_target.get_settings_widget(self)
+                settings_widget = plugin_target.get_settings_widget(self.dialog)
                 if settings_widget:
                     # Load current settings
                     current_settings = {}
@@ -703,65 +705,50 @@ class PluginManagementDialog(QDialog):
                     # If widget has a load_settings method, call it
                     if hasattr(settings_widget, 'load_settings') and callable(getattr(settings_widget, 'load_settings')):
                         settings_widget.load_settings(current_settings)
-                    
-                    # Create and show dialog
-                    dlg = QDialog(self)
-                    dlg.setWindowTitle(f"Configure {name}")
-                    layout = QVBoxLayout(dlg)
-                    layout.addWidget(settings_widget)
-                    
-                    # Add buttons
-                    button_layout = QHBoxLayout()
-                    button_layout.addStretch()
-                    cancel_btn = QPushButton("Cancel")
-                    cancel_btn.clicked.connect(dlg.reject)
-                    save_btn = QPushButton("Save")
-                    save_btn.clicked.connect(dlg.accept)
-                    save_btn.setDefault(True)
-                    button_layout.addWidget(cancel_btn)
-                    button_layout.addWidget(save_btn)
-                    layout.addLayout(button_layout)
-                    
-                    dlg.resize(480, 360)
-                    if dlg.exec() == QDialog.DialogCode.Accepted:
-                        # Extract settings from widget
-                        if hasattr(settings_widget, 'get_settings') and callable(getattr(settings_widget, 'get_settings')):
-                            new_settings = settings_widget.get_settings()
-                            # Save settings
-                            if self.settings_service:
-                                self.settings_service.save_plugin_settings(name, new_settings)
-                            # Call settings changed hook
-                            if hasattr(plugin_target, 'on_settings_changed'):
-                                try:
-                                    plugin_target.on_settings_changed(new_settings)
-                                except Exception as e:
-                                    import logging
-                                    logger = logging.getLogger(__name__)
-                                    logger.debug(f"Error calling on_settings_changed hook for {name}: {e}")
+
+                    dialog = ui.create_dialog(
+                        f"Configure {name}",
+                        parent=self.dialog,
+                        modal=True,
+                    )
+                    content = ui.create_column(parent=dialog, expand=True)
+                    ui.add(content, settings_widget)
+                    ui.add(content, ui.dialog_button_row(dialog))
+                    ui.set_dialog_content(dialog, content)
+                    ui.open_dialog(
+                        dialog,
+                        on_closed=lambda accepted: self._finish_configuration(
+                            accepted,
+                            name,
+                            plugin_target,
+                            settings_widget,
+                        ),
+                    )
                     return
             
             # Fallback to legacy methods for backward compatibility
             if hasattr(plugin_target, 'open_settings_dialog') and callable(getattr(plugin_target, 'open_settings_dialog')):
-                plugin_target.open_settings_dialog(self)
+                plugin_target.open_settings_dialog(self.dialog)
                 return
             if hasattr(plugin_target, 'get_configuration_widget') and callable(getattr(plugin_target, 'get_configuration_widget')):
-                widget = plugin_target.get_configuration_widget(self)
+                widget = plugin_target.get_configuration_widget(self.dialog)
                 if widget:
-                    dlg = QDialog(self)
-                    dlg.setWindowTitle(f"Configure {name}")
-                    v = QVBoxLayout(dlg)
-                    v.addWidget(widget)
-                    buttons = QHBoxLayout()
-                    close_btn = QPushButton("Close")
-                    close_btn.clicked.connect(dlg.accept)
-                    buttons.addStretch()
-                    buttons.addWidget(close_btn)
-                    v.addLayout(buttons)
-                    dlg.resize(480, 360)
-                    dlg.exec()
+                    dialog = ui.create_dialog(
+                        f"Configure {name}",
+                        parent=self.dialog,
+                        modal=True,
+                    )
+                    content = ui.create_column(parent=dialog, expand=True)
+                    ui.add(content, widget)
+                    ui.add(
+                        content,
+                        ui.dialog_button_row(dialog, save_cancel=False),
+                    )
+                    ui.set_dialog_content(dialog, content)
+                    ui.open_dialog(dialog)
                     return
             if hasattr(plugin_target, 'configure') and callable(getattr(plugin_target, 'configure')):
-                plugin_target.configure(self)
+                plugin_target.configure(self.dialog)
                 return
             
             self._info(
@@ -774,39 +761,55 @@ class PluginManagementDialog(QDialog):
                 f"Failed to open configuration for '{name}':\n{e}",
             )
 
-    def _warning(self, title: str, message: str) -> None:
-        """Show a warning through the neutral presenter when available."""
-        if self.dialog_presenter is not None:
-            self.dialog_presenter.warning(title, message)
+    def _finish_configuration(
+        self,
+        accepted: bool,
+        name: str,
+        plugin_target: Any,
+        settings_widget: Any,
+    ) -> None:
+        """Persist settings after an asynchronously accepted content dialog."""
+        if not accepted:
             return
-        QMessageBox.warning(self, title, message)
+        try:
+            if not (
+                hasattr(settings_widget, 'get_settings')
+                and callable(getattr(settings_widget, 'get_settings'))
+            ):
+                return
+            new_settings = settings_widget.get_settings()
+            if self.settings_service:
+                self.settings_service.save_plugin_settings(name, new_settings)
+            if hasattr(plugin_target, 'on_settings_changed'):
+                try:
+                    plugin_target.on_settings_changed(new_settings)
+                except Exception as exc:
+                    logger.debug(
+                        "Error calling on_settings_changed hook for %s: %s",
+                        name,
+                        exc,
+                    )
+        except Exception as exc:
+            self._error(
+                "Configuration Error",
+                f"Failed to save configuration for '{name}':\n{exc}",
+            )
+
+    def _warning(self, title: str, message: str) -> None:
+        """Show a warning through the injected dialog presenter."""
+        self.dialog_presenter.warning(title, message)
 
     def _confirm(self, title: str, message: str) -> bool:
-        """Show a confirmation through the neutral presenter when available."""
-        if self.dialog_presenter is not None:
-            return self.dialog_presenter.confirm(title, message)
-        result = QMessageBox.question(
-            self,
-            title,
-            message,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        return result == QMessageBox.StandardButton.Yes
+        """Show a confirmation through the injected dialog presenter."""
+        return self.dialog_presenter.confirm(title, message)
 
     def _info(self, title: str, message: str) -> None:
-        """Show information through the neutral presenter when available."""
-        if self.dialog_presenter is not None:
-            self.dialog_presenter.info(title, message)
-            return
-        QMessageBox.information(self, title, message)
+        """Show information through the injected dialog presenter."""
+        self.dialog_presenter.info(title, message)
 
     def _error(self, title: str, message: str) -> None:
-        """Show an error through the neutral presenter when available."""
-        if self.dialog_presenter is not None:
-            self.dialog_presenter.error(title, message)
-            return
-        QMessageBox.critical(self, title, message)
+        """Show an error through the injected dialog presenter."""
+        self.dialog_presenter.error(title, message)
 
 
 __all__ = ['PluginManagementDialog']
