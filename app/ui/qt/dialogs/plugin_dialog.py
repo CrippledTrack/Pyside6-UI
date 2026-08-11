@@ -13,14 +13,16 @@ from typing import Optional, List, Tuple, Any, Type, Dict
 
 from ..bindings import (
     Signal,
-    Qt,
-    QPoint,
-    QAbstractItemView, QCheckBox, QComboBox, QDialog, QFormLayout, QGroupBox,
-    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMenu, QMessageBox,
-    QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QTextEdit,
-    QVBoxLayout, QWidget, QTabWidget, QFrame
+    QDialog,
+    QHBoxLayout,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
 
+from ... import definitions as ui
+from ...abstractions.presenters import IDialogPresenter
 from .....plugin_system.base import BaseTabPlugin
 
 logger = logging.getLogger(__name__)
@@ -31,14 +33,22 @@ class PluginManagementDialog(QDialog):
     
     plugin_toggled = Signal(str, bool)  # Emitted when a plugin is toggled (name, enabled)
     
-    def __init__(self, parent: Optional[QWidget] = None, settings_service: Optional[Any] = None, plugin_controller: Optional[Any] = None) -> None:
+    def __init__(
+        self,
+        parent: Optional[QWidget] = None,
+        settings_service: Optional[Any] = None,
+        plugin_controller: Optional[Any] = None,
+        dialog_presenter: Optional[IDialogPresenter] = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Plugin Management")
         self.resize(900, 560)
         self._all_plugins = []  # List of (name, plugin_class)
         self._rejected_plugins = {}  # Dict of name -> (plugin_class, reason)
+        self._shown_plugin_count = 0
         self.settings_service = settings_service
         self.plugin_controller = plugin_controller
+        self.dialog_presenter = dialog_presenter
         # Get plugin service from controller (required)
         if plugin_controller and hasattr(plugin_controller, 'plugin_service'):
             self.plugin_service = plugin_controller.plugin_service
@@ -51,188 +61,168 @@ class PluginManagementDialog(QDialog):
 
     def setup_ui(self) -> None:
         """Setup the dialog UI."""
-        layout = QVBoxLayout(self)
+        shell_layout = QVBoxLayout(self)
+        shell_layout.setContentsMargins(0, 0, 0, 0)
+        root = ui.create_column(parent=self, expand=True)
+        shell_layout.addWidget(root)
 
         # Filters/Search bar
-        filters_layout = QHBoxLayout()
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search by name, author, description...")
-        self.search_input.textChanged.connect(self.apply_filters)
-
-        self.type_filter = QComboBox()
-        self.type_filter.addItems(["All Types", "Core", "External"])
-        self.type_filter.currentIndexChanged.connect(self.apply_filters)
-
-        self.status_filter = QComboBox()
-        self.status_filter.addItems(["All Status", "Enabled", "Disabled", "Incompatible"])
-        self.status_filter.currentIndexChanged.connect(self.apply_filters)
-
-        self.perm_filter = QComboBox()
-        self.perm_filter.addItems(["All Permissions", "Requires Admin", "No Admin"])
-        self.perm_filter.currentIndexChanged.connect(self.apply_filters)
-
-        filters_layout.addWidget(QLabel("Search:"))
-        filters_layout.addWidget(self.search_input, stretch=1)
-        filters_layout.addWidget(QLabel("Type:"))
-        filters_layout.addWidget(self.type_filter)
-        filters_layout.addWidget(QLabel("Status:"))
-        filters_layout.addWidget(self.status_filter)
-        filters_layout.addWidget(QLabel("Permissions:"))
-        filters_layout.addWidget(self.perm_filter)
-        layout.addLayout(filters_layout)
+        filters = ui.create_row()
+        self.search_input = ui.create_input(
+            placeholder="Search by name, author, description..."
+        )
+        ui.set_expand(self.search_input)
+        self.type_filter = ui.create_combo(["All Types", "Core", "External"])
+        self.status_filter = ui.create_combo(
+            ["All Status", "Enabled", "Disabled", "Incompatible"]
+        )
+        self.perm_filter = ui.create_combo(
+            ["All Permissions", "Requires Admin", "No Admin"]
+        )
+        for label, control in (
+            ("Search:", self.search_input),
+            ("Type:", self.type_filter),
+            ("Status:", self.status_filter),
+            ("Permissions:", self.perm_filter),
+        ):
+            ui.add(filters, ui.create_label(label))
+            ui.add(filters, control)
+        ui.on_change(self.search_input, lambda _value: self.apply_filters())
+        ui.on_change(self.type_filter, lambda _value: self.apply_filters())
+        ui.on_change(self.status_filter, lambda _value: self.apply_filters())
+        ui.on_change(self.perm_filter, lambda _value: self.apply_filters())
+        ui.add(root, filters)
 
         # Splitter with table (left) and details (right)
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter = ui.create_split("horizontal")
 
         # Table setup
-        table_container = QWidget()
-        table_layout = QVBoxLayout(table_container)
-        table_layout.setContentsMargins(0, 0, 0, 0)
-        self.table = QTableWidget()
-        self.table.setColumnCount(3)
-        self.table.setHorizontalHeaderLabels([
-            "Enabled", "Name", "Type"
-        ])
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.table.setSortingEnabled(True)
-        self.table.itemSelectionChanged.connect(self.on_selection_changed)
-        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.table.customContextMenuRequested.connect(self.on_table_context_menu)
-        table_layout.addWidget(self.table)
-
-        splitter.addWidget(table_container)
+        table_container = ui.create_column(expand=True)
+        self.table = ui.create_table(
+            ["Enabled", "Name", "Type"],
+            check_column=0,
+            sortable=True,
+            stretch_column=1,
+        )
+        ui.set_expand(self.table)
+        ui.on_select(self.table, lambda _key: self.on_selection_changed())
+        ui.on_row_toggled(self.table, self._on_table_toggled)
+        ui.on_context_menu(self.table, self._build_table_context_menu)
+        ui.add(table_container, self.table)
+        ui.add(splitter, table_container)
 
         # Details panel
-        details_container = QWidget()
-        details_layout = QVBoxLayout(details_container)
-        details_layout.setContentsMargins(8, 8, 8, 8)
-        details_layout.setSpacing(10)
+        details_container = ui.create_column(expand=True)
 
         # Details header
-        header_widget = QWidget()
-        header_layout = QVBoxLayout(header_widget)
-        header_layout.setContentsMargins(0, 0, 0, 8)
-        header_layout.setSpacing(4)
-
-        self.details_name = QLabel("-")
-        name_font = self.details_name.font()
-        name_font.setBold(True)
-        name_font.setPointSize(14)
-        self.details_name.setFont(name_font)
-
-        self.details_version_author = QLabel("-")
-        header_layout.addWidget(self.details_name)
-        header_layout.addWidget(self.details_version_author)
-        details_layout.addWidget(header_widget)
+        header = ui.create_column()
+        self.details_name = ui.create_label("-", role=ui.LabelRole.HEADING)
+        self.details_version_author = ui.create_label("-", role=ui.LabelRole.MUTED)
+        ui.add(header, self.details_name)
+        ui.add(header, self.details_version_author)
+        ui.add(details_container, header)
 
         # Tab Widget
-        self.tab_widget = QTabWidget()
-        details_layout.addWidget(self.tab_widget)
+        self.tab_widget = ui.create_tabs()
+        ui.add(details_container, self.tab_widget)
 
         # Tab 1: Overview
-        overview_tab = QWidget()
-        overview_tab_layout = QVBoxLayout(overview_tab)
-        overview_tab_layout.setContentsMargins(4, 8, 4, 8)
-        overview_tab_layout.setSpacing(8)
-
-        overview_tab_layout.addWidget(QLabel("Description:"))
-        self.details_description = QTextEdit()
-        self.details_description.setReadOnly(True)
-        overview_tab_layout.addWidget(self.details_description)
+        overview_tab = ui.create_column(expand=True)
+        ui.add(overview_tab, ui.create_label("Description:"))
+        self.details_description = ui.create_text_area(read_only=True, expand=True)
+        ui.add(overview_tab, self.details_description)
 
         # Extension type toggles section
-        # NOTE: Keep a single checkbox group and a single handler. We always use
-        # `stateChanged(int)` so the handler receives Qt checkbox states (0/2).
-        self.extensions_group = QGroupBox("Extension Types (toggle to enable/disable)")
-        ext_layout = QHBoxLayout(self.extensions_group)
-        ext_layout.setContentsMargins(8, 4, 8, 4)
-
-        self.ext_checkboxes: Dict[str, QCheckBox] = {}
+        self.extensions_group = ui.create_group(
+            "Extension Types (toggle to enable/disable)"
+        )
+        extension_row = ui.create_row()
+        self.ext_checkboxes: Dict[str, Any] = {}
         from .....plugin_system.extensions import EXTENSION_POINTS
         for ep in EXTENSION_POINTS:
             if not ep.is_user_toggleable:
                 continue
             ext_type = ep.name
-            cb = QCheckBox(ext_type)
-            cb.setChecked(True)  # Default enabled
-            cb.setEnabled(False)  # Disabled until a plugin is selected
-            cb.stateChanged.connect(lambda state, t=ext_type: self._on_extension_toggled(t, state))
+            cb = ui.create_checkbox(ext_type, checked=True)
+            ui.set_enabled(cb, False)
+            ui.on_change(
+                cb,
+                lambda checked, t=ext_type: self._on_extension_toggled(t, checked),
+            )
             self.ext_checkboxes[ext_type] = cb
-            ext_layout.addWidget(cb)
+            ui.add(extension_row, cb)
 
-        ext_layout.addStretch()
-        overview_tab_layout.addWidget(self.extensions_group)
-        self.tab_widget.addTab(overview_tab, "Overview")
+        ui.add_stretch(extension_row)
+        ui.add(self.extensions_group, extension_row)
+        ui.add(overview_tab, self.extensions_group)
+        ui.add_tab(self.tab_widget, overview_tab, "Overview")
 
         # Tab 2: Technical Details
-        tech_tab = QWidget()
-        tech_tab_layout = QVBoxLayout(tech_tab)
-        tech_tab_layout.setContentsMargins(4, 8, 4, 8)
-
-        form = QFormLayout()
-        self.details_type = QLabel("-")
-        self.details_types = QLabel("-")  # Show plugin types
-        self.details_requires_admin = QLabel("-")
-        self.details_platforms = QLabel("-")
-        self.details_module = QLabel("-")
-        self.details_min_gui_version = QLabel("-")
-        self.details_required_gui_version = QLabel("-")
-
-        form.addRow("Type:", self.details_type)
-        form.addRow("Supported Interfaces:", self.details_types)
-        form.addRow("Requires Admin:", self.details_requires_admin)
-        form.addRow("Platforms:", self.details_platforms)
-        form.addRow("Module Path:", self.details_module)
-        form.addRow("Min GUI Version:", self.details_min_gui_version)
-        form.addRow("Required GUI Version:", self.details_required_gui_version)
-
-        tech_tab_layout.addLayout(form)
-        tech_tab_layout.addStretch()
-        self.tab_widget.addTab(tech_tab, "Technical Details")
+        tech_tab = ui.create_column()
+        form = ui.create_form()
+        self.details_type = ui.create_label("-")
+        self.details_types = ui.create_label("-")
+        self.details_requires_admin = ui.create_label("-")
+        self.details_platforms = ui.create_label("-")
+        self.details_module = ui.create_label("-")
+        self.details_min_gui_version = ui.create_label("-")
+        self.details_required_gui_version = ui.create_label("-")
+        for label, value in (
+            ("Type:", self.details_type),
+            ("Supported Interfaces:", self.details_types),
+            ("Requires Admin:", self.details_requires_admin),
+            ("Platforms:", self.details_platforms),
+            ("Module Path:", self.details_module),
+            ("Min GUI Version:", self.details_min_gui_version),
+            ("Required GUI Version:", self.details_required_gui_version),
+        ):
+            ui.add_form_row(form, label, value)
+        ui.add(tech_tab, form)
+        ui.add_stretch(tech_tab)
+        ui.add_tab(self.tab_widget, tech_tab, "Technical Details")
 
         # Action buttons for details
-        action_layout = QHBoxLayout()
-        self.enable_selected_btn = QPushButton("Enable Selected")
-        self.enable_selected_btn.clicked.connect(self.enable_selected)
-        self.disable_selected_btn = QPushButton("Disable Selected")
-        self.disable_selected_btn.clicked.connect(self.disable_selected)
-        self.configure_btn = QPushButton("Configure...")
-        self.configure_btn.clicked.connect(self.configure_selected)
-        action_layout.addWidget(self.enable_selected_btn)
-        action_layout.addWidget(self.disable_selected_btn)
-        action_layout.addStretch()
-        action_layout.addWidget(self.configure_btn)
-        details_layout.addLayout(action_layout)
+        actions = ui.create_row()
+        self.enable_selected_btn = ui.create_button(
+            "Enable Selected", on_click=self.enable_selected
+        )
+        self.disable_selected_btn = ui.create_button(
+            "Disable Selected", on_click=self.disable_selected
+        )
+        self.configure_btn = ui.create_button(
+            "Configure...", on_click=self.configure_selected
+        )
+        ui.add(actions, self.enable_selected_btn)
+        ui.add(actions, self.disable_selected_btn)
+        ui.add_stretch(actions)
+        ui.add(actions, self.configure_btn)
+        ui.add(details_container, actions)
 
-        splitter.addWidget(details_container)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
-        layout.addWidget(splitter)
+        ui.add(splitter, details_container)
+        ui.set_split_proportions(splitter, (1, 1))
+        ui.add(root, splitter)
 
         # Bottom controls
-        bottom_layout = QHBoxLayout()
-        self.status_label = QLabel("")
-        bottom_layout.addWidget(self.status_label)
-
-        bottom_layout.addStretch()
-        self.enable_all_btn = QPushButton("Enable All")
-        self.enable_all_btn.clicked.connect(self.enable_all)
-        self.disable_all_btn = QPushButton("Disable All")
-        self.disable_all_btn.clicked.connect(self.disable_all)
-        self.reload_btn = QPushButton("Reload Plugins")
-        self.reload_btn.clicked.connect(self.reload_plugins)
-        self.close_btn = QPushButton("Close")
-        self.close_btn.clicked.connect(self.accept)
-        bottom_layout.addWidget(self.enable_all_btn)
-        bottom_layout.addWidget(self.disable_all_btn)
-        bottom_layout.addWidget(self.reload_btn)
-        bottom_layout.addWidget(self.close_btn)
-        layout.addLayout(bottom_layout)
+        bottom = ui.create_row()
+        self.status_label = ui.create_label("", wrap=False)
+        ui.add(bottom, self.status_label)
+        ui.add_stretch(bottom)
+        self.enable_all_btn = ui.create_button("Enable All", on_click=self.enable_all)
+        self.disable_all_btn = ui.create_button(
+            "Disable All", on_click=self.disable_all
+        )
+        self.reload_btn = ui.create_button(
+            "Reload Plugins", on_click=self.reload_plugins
+        )
+        self.close_btn = ui.create_button("Close", on_click=self.accept)
+        for button in (
+            self.enable_all_btn,
+            self.disable_all_btn,
+            self.reload_btn,
+            self.close_btn,
+        ):
+            ui.add(bottom, button)
+        ui.add(root, bottom)
 
     def _get_extension_types(self, plugin_class: type) -> str:
         """Get a string describing which extension interfaces the plugin implements."""
@@ -266,25 +256,22 @@ class PluginManagementDialog(QDialog):
         if name == self.get_selected_plugin_name():
             self.on_selection_changed()
     
-    def _force_enable_plugin(self, name: str, state: int) -> None:
+    def _force_enable_plugin(self, name: str, state: bool) -> None:
         """Force-enable a version-incompatible plugin."""
         if not state:
             self.toggle_plugin(name, False)
             return
         
         # Show warning before force-enabling
-        result = QMessageBox.warning(
-            self,
+        confirmed = self._confirm(
             "Force Enable Incompatible Plugin",
             f"Plugin '{name}' is marked as incompatible:\n\n"
             f"{self._rejected_plugins.get(name, ('', 'Unknown reason'))[1]}\n\n"
             "Force-enabling may cause crashes or unexpected behavior.\n"
             "Do you want to continue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
         )
         
-        if result != QMessageBox.StandardButton.Yes:
+        if not confirmed:
             # User cancelled - uncheck the checkbox
             self.apply_filters()
             return
@@ -299,10 +286,9 @@ class PluginManagementDialog(QDialog):
     def reload_plugins(self) -> None:
         """Reload all plugins from the registry."""
         if not (self.plugin_controller and self.plugin_controller.plugin_service):
-            QMessageBox.warning(
-                self,
+            self._warning(
                 "Reload Unavailable",
-                "Plugin reload is unavailable because the plugin service is not initialized."
+                "Plugin reload is unavailable because the plugin service is not initialized.",
             )
             return
 
@@ -312,19 +298,18 @@ class PluginManagementDialog(QDialog):
             parent.reload_plugins()
             self.accept()
         else:
-            QMessageBox.warning(
-                self,
+            self._warning(
                 "Reload Unavailable",
                 "Plugin reload requires the main window so tabs and extensions "
                 "can be torn down safely. Close this dialog and use Manage Plugins "
-                "from the main window, or restart the application."
+                "from the main window, or restart the application.",
             )
 
     def apply_filters(self) -> None:
-        search_text = self.search_input.text().strip().lower()
-        type_sel = self.type_filter.currentText()
-        status_sel = self.status_filter.currentText()
-        perm_sel = self.perm_filter.currentText()
+        search_text = ui.get_text(self.search_input).strip().lower()
+        type_sel = ui.get_text(self.type_filter)
+        status_sel = ui.get_text(self.status_filter)
+        perm_sel = ui.get_text(self.perm_filter)
 
         # Preserve current selection
         selected_name = self.get_selected_plugin_name()
@@ -375,71 +360,52 @@ class PluginManagementDialog(QDialog):
         self.populate_table(filtered)
 
         # Restore selection
-        if selected_name:
-            for row in range(self.table.rowCount()):
-                item = self.table.item(row, 1)
-                if item and item.text() == selected_name:
-                    self.table.selectRow(row)
-                    break
+        restored = bool(selected_name and ui.select_row(self.table, selected_name))
         # Update details/status if nothing selected
-        if self.table.currentRow() == -1 and self.table.rowCount() > 0:
-            self.table.selectRow(0)
+        if not restored and filtered:
+            ui.select_row(self.table, filtered[0][0])
 
         self.update_status_label()
 
     def populate_table(self, data: List[Tuple[str, Type[BaseTabPlugin]]]) -> None:
-        self.table.setRowCount(len(data))
+        rows = []
         core_names = set(self.plugin_service.get_core_plugins().keys())
-        for row, (name, plugin_class) in enumerate(data):
+        for name, plugin_class in data:
             info = plugin_class.get_plugin_info()
             is_enabled = self.plugin_service.is_enabled(name)
             is_core = name in core_names
             is_rejected = name in self._rejected_plugins
-
-            # Enabled checkbox (with incompatibility indicator for rejected plugins)
+            tooltip = None
             if is_rejected:
-                # Create container widget with checkbox + warning label
-                container = QWidget()
-                container.setStyleSheet("background-color: transparent;")
-                container_layout = QHBoxLayout(container)
-                container_layout.setContentsMargins(4, 0, 4, 0)
-                container_layout.setSpacing(4)
-                
-                cb = QCheckBox()
                 rejection_reason = self._rejected_plugins[name][1]
-                
-                # Allow force-enabling incompatible plugins
-                is_loaded = name in dict(self._all_plugins)
-                cb.setChecked(is_enabled and is_loaded)  # Only check if actually loaded
-                cb.setEnabled(True)   # But can be enabled
-                cb.setToolTip(f"⚠ Incompatible: {rejection_reason}\nClick to force-enable anyway")
-                cb.stateChanged.connect(lambda state, n=name: self._force_enable_plugin(n, state))
-                container_layout.addWidget(cb)
-                
-                # Add warning label
-                warn_label = QLabel("⚠")
-                warn_label.setToolTip(f"Incompatible: {rejection_reason}")
-                warn_label.setStyleSheet("color: #FFA500; font-weight: bold;")  # Orange warning
-                container_layout.addWidget(warn_label)
-                container_layout.addStretch()
-                
-                self.table.setCellWidget(row, 0, container)
-            else:
-                cb = QCheckBox()
-                cb.setChecked(is_enabled)
-                cb.stateChanged.connect(lambda state, n=name: self.toggle_plugin(n, state))
-                self.table.setCellWidget(row, 0, cb)
+                tooltip = (
+                    f"Incompatible: {rejection_reason}\n"
+                    "Toggle to force-enable anyway"
+                )
+            rows.append(
+                ui.TableRow(
+                    key=name,
+                    cells=(
+                        "⚠" if is_rejected else "",
+                        info["name"],
+                        "Core" if is_core else "External",
+                    ),
+                    checked=is_enabled and (
+                        not is_rejected or name in dict(self._all_plugins)
+                    ),
+                    role=ui.LabelRole.WARNING if is_rejected else None,
+                    tooltip=tooltip,
+                )
+            )
+        self._shown_plugin_count = len(rows)
+        ui.set_table_rows(self.table, rows)
 
-            # Name - show in italic/gray if rejected
-            name_item = QTableWidgetItem(info['name'])
-            if is_rejected:
-                name_item.setToolTip(f"Incompatible: {self._rejected_plugins[name][1]}")
-                font = name_item.font()
-                font.setItalic(True)
-                name_item.setFont(font)
-            self.table.setItem(row, 1, name_item)
-            # Type
-            self.table.setItem(row, 2, QTableWidgetItem("Core" if is_core else "External"))
+    def _on_table_toggled(self, name: str, checked: bool) -> None:
+        """Dispatch a definitions table check change."""
+        if name in self._rejected_plugins:
+            self._force_enable_plugin(name, checked)
+        else:
+            self.toggle_plugin(name, checked)
 
     def on_selection_changed(self) -> None:
         name = self.get_selected_plugin_name()
@@ -460,24 +426,39 @@ class PluginManagementDialog(QDialog):
                 return
         
         info = plugin_class.get_plugin_info()
-        self.details_name.setText(info['name'])
+        ui.set_text(self.details_name, info['name'])
         
         authors_list = info.get('authors') or []
         authors_text = ", ".join(authors_list) if authors_list else info.get('author', '')
         author_str = f" by {authors_text}" if authors_text else ""
-        self.details_version_author.setText(f"Version {info['version']}{author_str}")
+        ui.set_text(
+            self.details_version_author,
+            f"Version {info['version']}{author_str}",
+        )
         
-        self.details_type.setText("Core" if name in self.plugin_service.get_core_plugins() else "External")
-        self.details_platforms.setText(', '.join(info['supported_platforms']))
-        self.details_requires_admin.setText("Yes" if info.get('requires_admin') else "No")
-        self.details_module.setText(plugin_class.__module__)
-        self.details_min_gui_version.setText(info.get('min_gui_version') or "-")
-        self.details_required_gui_version.setText(info.get('required_gui_version') or "-")
-        self.details_description.setPlainText(info.get('description', ''))
+        ui.set_text(
+            self.details_type,
+            "Core" if name in self.plugin_service.get_core_plugins() else "External",
+        )
+        ui.set_text(self.details_platforms, ', '.join(info['supported_platforms']))
+        ui.set_text(
+            self.details_requires_admin,
+            "Yes" if info.get('requires_admin') else "No",
+        )
+        ui.set_text(self.details_module, plugin_class.__module__)
+        ui.set_text(
+            self.details_min_gui_version,
+            info.get('min_gui_version') or "-",
+        )
+        ui.set_text(
+            self.details_required_gui_version,
+            info.get('required_gui_version') or "-",
+        )
+        ui.set_text(self.details_description, info.get('description', ''))
         
         # Detect plugin types
         types_str = self._get_extension_types(plugin_class)
-        self.details_types.setText(types_str if types_str else "Tab only")
+        ui.set_text(self.details_types, types_str if types_str else "Tab only")
         
         # Configure button availability
         has_config = any([
@@ -486,7 +467,7 @@ class PluginManagementDialog(QDialog):
             hasattr(plugin_class, 'get_configuration_widget'),
             hasattr(plugin_class, 'configure')
         ])
-        self.configure_btn.setEnabled(has_config)
+        ui.set_enabled(self.configure_btn, has_config)
         
         # Update extension checkboxes
         extension_types = self._get_extension_types(plugin_class).split(", ")
@@ -502,65 +483,59 @@ class PluginManagementDialog(QDialog):
                 is_supported = True
             
             # Reset state first
-            cb.blockSignals(True)
-            
             if is_supported:
-                cb.setVisible(True)
-                cb.setEnabled(is_plugin_enabled)
+                ui.set_visible(cb, True)
+                ui.set_enabled(cb, is_plugin_enabled)
                 any_visible = True
                 
                 # If plugin is disabled, visually uncheck extensions (even if enabled in settings)
                 if not is_plugin_enabled:
-                    cb.setChecked(False)
+                    ui.set_checked(cb, False, notify=False)
                 elif self.settings_service:
                     is_ext_enabled = self.settings_service.is_extension_enabled(name, ext_type)
-                    cb.setChecked(is_ext_enabled)
+                    ui.set_checked(cb, is_ext_enabled, notify=False)
                 else:
-                    cb.setChecked(True)
+                    ui.set_checked(cb, True, notify=False)
             else:
-                cb.setVisible(False)
-                cb.setChecked(False)
-                cb.setEnabled(False)
+                ui.set_visible(cb, False)
+                ui.set_checked(cb, False, notify=False)
+                ui.set_enabled(cb, False)
             
-            cb.blockSignals(False)
-            
-        self.extensions_group.setVisible(any_visible)
+        ui.set_visible(self.extensions_group, any_visible)
 
     def clear_details(self) -> None:
-        self.details_name.setText("-")
-        self.details_version_author.setText("-")
-        self.details_type.setText("-")
-        self.details_types.setText("-")
-        self.details_requires_admin.setText("-")
-        self.details_platforms.setText("-")
-        self.details_module.setText("-")
-        self.details_min_gui_version.setText("-")
-        self.details_required_gui_version.setText("-")
-        self.details_description.setPlainText("")
-        self.configure_btn.setEnabled(False)
+        for widget in (
+            self.details_name,
+            self.details_version_author,
+            self.details_type,
+            self.details_types,
+            self.details_requires_admin,
+            self.details_platforms,
+            self.details_module,
+            self.details_min_gui_version,
+            self.details_required_gui_version,
+        ):
+            ui.set_text(widget, "-")
+        ui.set_text(self.details_description, "")
+        ui.set_enabled(self.configure_btn, False)
         
         # Reset extension checkboxes
         for cb in self.ext_checkboxes.values():
-            cb.blockSignals(True)
-            cb.setChecked(False)
-            cb.setEnabled(False)
-            cb.blockSignals(False)
+            ui.set_checked(cb, False, notify=False)
+            ui.set_enabled(cb, False)
     
-    def _on_extension_toggled(self, extension_type: str, state: int | bool) -> None:
+    def _on_extension_toggled(self, extension_type: str, state: bool) -> None:
         """Handle extension type checkbox toggle.
         
         Args:
             extension_type: The extension type (e.g., "Tab", "Menu", "Toolbar")
-            state: Qt checkbox state (0=unchecked, 2=checked) or a bool from other signals
+            state: Whether the extension is enabled.
         """
         name = self.get_selected_plugin_name()
         if not name or not self.settings_service:
             return
         
-        if isinstance(state, bool):
-            enabled = state
-        else:
-            enabled = (state == Qt.CheckState.Checked.value)
+        enabled = bool(state)
         self.settings_service.set_extension_enabled(name, extension_type, enabled)
         
         # Service checkbox also controls Events (they're grouped for user simplicity)
@@ -573,16 +548,16 @@ class PluginManagementDialog(QDialog):
 
     def update_status_label(self) -> None:
         total = len(self._all_plugins)
-        shown = self.table.rowCount()
+        shown = self._shown_plugin_count
         enabled_count = sum(1 for name, _ in self._all_plugins if self.plugin_service.is_enabled(name))
-        self.status_label.setText(f"Showing {shown}/{total} plugins  |  Enabled: {enabled_count}")
+        ui.set_text(
+            self.status_label,
+            f"Showing {shown}/{total} plugins  |  Enabled: {enabled_count}",
+        )
 
     def get_selected_plugin_name(self) -> Optional[str]:
-        row = self.table.currentRow()
-        if row < 0:
-            return None
-        item = self.table.item(row, 1)
-        return item.text() if item else None
+        key = ui.get_selected_key(self.table)
+        return str(key) if key is not None else None
 
     def enable_selected(self) -> None:
         """Enable the currently selected plugin."""
@@ -645,62 +620,60 @@ class PluginManagementDialog(QDialog):
         self.apply_filters()
         self.on_selection_changed()
 
-    def on_table_context_menu(self, pos: QPoint) -> None:
-        index = self.table.indexAt(pos)
-        if not index.isValid():
-            return
-        row = index.row()
-        self.table.selectRow(row)
+    def _build_table_context_menu(self) -> List[ui.MenuAction]:
+        """Build context actions for the currently selected plugin."""
         name = self.get_selected_plugin_name()
         if not name:
-            return
+            return []
         plugin_class = self.plugin_service.get_plugin(name)
         if not plugin_class:
-            return
+            return []
         info = plugin_class.get_plugin_info()
         is_enabled = self.plugin_service.is_enabled(name)
-
-        menu = QMenu(self)
-        toggle_action = menu.addAction("Disable" if is_enabled else "Enable")
-        configure_action = menu.addAction("Configure...")
-        configure_action.setEnabled(any([
+        has_config = any([
             hasattr(plugin_class, 'get_settings_widget') and callable(getattr(plugin_class, 'get_settings_widget', None)),
             hasattr(plugin_class, 'open_settings_dialog'),
             hasattr(plugin_class, 'get_configuration_widget'),
             hasattr(plugin_class, 'configure')
-        ]))
-        menu.addSeparator()
-        copy_name_action = menu.addAction("Copy Name")
-        copy_info_action = menu.addAction("Copy Full Info")
+        ])
+        toggle = self.disable_selected if is_enabled else self.enable_selected
+        return [
+            ui.MenuAction("Disable" if is_enabled else "Enable", toggle),
+            ui.MenuAction(
+                "Configure...",
+                self.configure_selected,
+                enabled=has_config,
+            ),
+            ui.MenuAction(
+                "Copy Name",
+                lambda: ui.copy_to_clipboard(name),
+                separator_before=True,
+            ),
+            ui.MenuAction(
+                "Copy Full Info",
+                lambda: self._copy_full_info(name, plugin_class, info),
+            ),
+        ]
 
-        chosen = menu.exec(self.table.viewport().mapToGlobal(pos))
-        if chosen is None:
-            return
-        if chosen == toggle_action:
-            if is_enabled:
-                self.disable_selected()
-            else:
-                self.enable_selected()
-        elif chosen == configure_action:
-            self.configure_selected()
-        elif chosen == copy_name_action:
-            from ..bindings import QApplication
-            QApplication.clipboard().setText(name)
-        elif chosen == copy_info_action:
-            from ..bindings import QApplication
-            lines = [
-                f"Name: {info['name']}",
-                f"Version: {info['version']}",
-                f"Author: {info['author']}",
-                f"Type: {'Core' if name in self.plugin_service.get_core_plugins() else 'External'}",
-                f"Requires Admin: {'Yes' if info.get('requires_admin') else 'No'}",
-                f"Compatible: {'Yes' if info.get('compatible', True) else 'No'}",
-                f"Platforms: {', '.join(info['supported_platforms'])}",
-                f"Module: {plugin_class.__module__}",
-                f"Description: {info.get('description', '')}",
-            ]
-            QApplication.clipboard().setText("\n".join(lines))
-        # Removed "Open Module Location" from context menu since Module column was removed
+    def _copy_full_info(
+        self,
+        name: str,
+        plugin_class: Type[BaseTabPlugin],
+        info: Dict[str, Any],
+    ) -> None:
+        """Copy the selected plugin's complete summary."""
+        lines = [
+            f"Name: {info['name']}",
+            f"Version: {info['version']}",
+            f"Author: {info['author']}",
+            f"Type: {'Core' if name in self.plugin_service.get_core_plugins() else 'External'}",
+            f"Requires Admin: {'Yes' if info.get('requires_admin') else 'No'}",
+            f"Compatible: {'Yes' if info.get('compatible', True) else 'No'}",
+            f"Platforms: {', '.join(info['supported_platforms'])}",
+            f"Module: {plugin_class.__module__}",
+            f"Description: {info.get('description', '')}",
+        ]
+        ui.copy_to_clipboard("\n".join(lines))
 
     def configure_selected(self) -> None:
         """Configure the selected plugin using get_settings_widget() method."""
@@ -791,9 +764,49 @@ class PluginManagementDialog(QDialog):
                 plugin_target.configure(self)
                 return
             
-            QMessageBox.information(self, "No Configuration", f"Plugin '{name}' has no configurable settings.")
+            self._info(
+                "No Configuration",
+                f"Plugin '{name}' has no configurable settings.",
+            )
         except Exception as e:
-            QMessageBox.critical(self, "Configuration Error", f"Failed to open configuration for '{name}':\n{e}")
+            self._error(
+                "Configuration Error",
+                f"Failed to open configuration for '{name}':\n{e}",
+            )
+
+    def _warning(self, title: str, message: str) -> None:
+        """Show a warning through the neutral presenter when available."""
+        if self.dialog_presenter is not None:
+            self.dialog_presenter.warning(title, message)
+            return
+        QMessageBox.warning(self, title, message)
+
+    def _confirm(self, title: str, message: str) -> bool:
+        """Show a confirmation through the neutral presenter when available."""
+        if self.dialog_presenter is not None:
+            return self.dialog_presenter.confirm(title, message)
+        result = QMessageBox.question(
+            self,
+            title,
+            message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return result == QMessageBox.StandardButton.Yes
+
+    def _info(self, title: str, message: str) -> None:
+        """Show information through the neutral presenter when available."""
+        if self.dialog_presenter is not None:
+            self.dialog_presenter.info(title, message)
+            return
+        QMessageBox.information(self, title, message)
+
+    def _error(self, title: str, message: str) -> None:
+        """Show an error through the neutral presenter when available."""
+        if self.dialog_presenter is not None:
+            self.dialog_presenter.error(title, message)
+            return
+        QMessageBox.critical(self, title, message)
 
 
 __all__ = ['PluginManagementDialog']

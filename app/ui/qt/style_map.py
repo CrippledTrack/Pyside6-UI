@@ -10,18 +10,24 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from .bindings import (
+    QApplication,
     QAbstractItemView,
+    QCheckBox,
     QComboBox,
+    QFormLayout,
     QGroupBox,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QPushButton,
     QSizePolicy,
     QSpinBox,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QTextEdit,
     QTimer,
     QVBoxLayout,
@@ -39,7 +45,9 @@ SPACING_PX = {
 ROLE_PROPERTY = "cp_role"
 
 # Capabilities advertised to ``GUI.app.ui.definitions.supports``.
-CAPABILITIES = frozenset({"split", "stretch", "expand", "pixel_sizing"})
+CAPABILITIES = frozenset(
+    {"split", "stretch", "expand", "pixel_sizing", "context_menu"}
+)
 
 
 def supports(capability: str) -> bool:
@@ -97,10 +105,16 @@ def create_button(text: str, role: str = "default", parent: Any = None) -> QPush
     return btn
 
 
-def create_label(text: str, role: str = "body", parent: Any = None) -> QLabel:
+def create_label(
+    text: str,
+    role: str = "body",
+    parent: Any = None,
+    *,
+    wrap: bool = True,
+) -> QLabel:
     """Create a QLabel with the given role."""
     label = QLabel(text, parent)
-    label.setWordWrap(True)
+    label.setWordWrap(bool(wrap))
     apply_label_role(label, role)
     return label
 
@@ -156,23 +170,88 @@ def create_spin(
     return spin
 
 
-def create_table(columns: list[str], parent: Any = None) -> QTableWidget:
-    """Create a read-only table with stretchable final column."""
+def create_checkbox(
+    text: str = "",
+    checked: bool = False,
+    parent: Any = None,
+) -> QCheckBox:
+    """Create a QCheckBox with an initial state."""
+    checkbox = QCheckBox(text, parent)
+    checkbox.setChecked(bool(checked))
+    return checkbox
+
+
+def create_table(
+    columns: list[str],
+    parent: Any = None,
+    *,
+    check_column: int | None = None,
+    selectable: bool = True,
+    sortable: bool = False,
+    stretch_column: int | None = None,
+) -> QTableWidget:
+    """Create a read-only QTableWidget with neutral row semantics."""
     table = QTableWidget(parent)
     table.setColumnCount(len(columns))
     table.setHorizontalHeaderLabels(columns)
     table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-    table.horizontalHeader().setStretchLastSection(True)
+    table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+    table.setSelectionMode(
+        QAbstractItemView.SelectionMode.SingleSelection
+        if selectable
+        else QAbstractItemView.SelectionMode.NoSelection
+    )
+    table.setSortingEnabled(bool(sortable))
+    table.setProperty("_cp_check_column", -1 if check_column is None else check_column)
+
+    header = table.horizontalHeader()
+    if stretch_column is None:
+        header.setStretchLastSection(True)
+    else:
+        for index in range(len(columns)):
+            mode = (
+                QHeaderView.ResizeMode.Stretch
+                if index == stretch_column
+                else QHeaderView.ResizeMode.ResizeToContents
+            )
+            header.setSectionResizeMode(index, mode)
     return table
 
 
-def set_table_rows(table: QTableWidget, rows: list[list[str]]) -> None:
-    """Replace all rows in a QTableWidget."""
+def set_table_rows(table: QTableWidget, rows: list[dict[str, Any]]) -> None:
+    """Replace rows while preserving stable keys and semantic metadata."""
+    sorting = table.isSortingEnabled()
+    signals_blocked = table.blockSignals(True)
+    if sorting:
+        table.setSortingEnabled(False)
     table.setRowCount(len(rows))
     for row_index, row in enumerate(rows):
+        cells = row["cells"]
+        key = row["key"]
+        role = row.get("role")
+        tooltip = row.get("tooltip")
         for column_index in range(table.columnCount()):
-            value = row[column_index] if column_index < len(row) else ""
-            table.setItem(row_index, column_index, QTableWidgetItem(value))
+            value = cells[column_index] if column_index < len(cells) else ""
+            item = QTableWidgetItem(value)
+            item.setData(Qt.ItemDataRole.UserRole, key)
+            if tooltip:
+                item.setToolTip(str(tooltip))
+            if role in {"warning", "error", "muted"}:
+                font = item.font()
+                font.setItalic(True)
+                item.setFont(font)
+            check_column = table.property("_cp_check_column")
+            if column_index == int(check_column if check_column is not None else -1):
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(
+                    Qt.CheckState.Checked
+                    if row.get("checked")
+                    else Qt.CheckState.Unchecked
+                )
+            table.setItem(row_index, column_index, item)
+    if sorting:
+        table.setSortingEnabled(True)
+    table.blockSignals(signals_blocked)
 
 
 def spacing(name: str = "medium") -> int:
@@ -237,6 +316,37 @@ def create_group(title: str, parent: Any = None) -> QGroupBox:
     return group
 
 
+def create_tabs(parent: Any = None) -> QTabWidget:
+    """Create a QTabWidget."""
+    tabs = QTabWidget(parent)
+    set_expand(tabs, True)
+    return tabs
+
+
+def add_tab(tabs: QTabWidget, content: Any, title: str) -> None:
+    """Add content to a QTabWidget."""
+    tabs.addTab(content, title)
+
+
+def create_form(parent: Any = None) -> QWidget:
+    """Create a QWidget backed by QFormLayout."""
+    form = QWidget(parent)
+    layout = QFormLayout(form)
+    gap = spacing("medium")
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(gap)
+    form.setProperty("_cp_layout_kind", "form")
+    return form
+
+
+def add_form_row(form: QWidget, label: str, widget: Any) -> None:
+    """Add a labeled row to a definitions form."""
+    layout = form.layout()
+    if not isinstance(layout, QFormLayout):
+        raise ValueError("Form has no supported definitions form layout")
+    layout.addRow(label, widget)
+
+
 def create_split(orientation: str = "horizontal", parent: Any = None) -> QSplitter:
     """Create a horizontal or vertical QSplitter."""
     qt_orientation = (
@@ -248,6 +358,19 @@ def create_split(orientation: str = "horizontal", parent: Any = None) -> QSplitt
     split.setProperty("_cp_layout_kind", "split")
     set_expand(split, True)
     return split
+
+
+def set_split_proportions(
+    split: QSplitter,
+    proportions: list[float],
+) -> None:
+    """Apply relative stretch factors and initial QSplitter pane sizes."""
+    weights = [max(0, round(proportion * 1000)) for proportion in proportions]
+    for index, weight in enumerate(weights):
+        split.setStretchFactor(index, weight)
+    # QSplitter otherwise combines stretch factors with each child's size hint,
+    # which can let a detail pane start larger despite a higher table ratio.
+    split.setSizes(weights)
 
 
 def add(container: Any, child: Any) -> None:
@@ -281,6 +404,93 @@ def add_stretch(container: Any) -> None:
 def on_click(widget: Any, callback: Callable[[], None]) -> None:
     """Connect a button click to a no-arg callback."""
     widget.clicked.connect(callback)
+
+
+def on_change(widget: Any, callback: Callable[[Any], None]) -> None:
+    """Connect a supported control's semantic value-change signal."""
+    if isinstance(widget, QLineEdit):
+        widget.textChanged.connect(callback)
+    elif isinstance(widget, QComboBox):
+        widget.currentTextChanged.connect(callback)
+    elif isinstance(widget, QSpinBox):
+        widget.valueChanged.connect(callback)
+    elif isinstance(widget, QCheckBox):
+        widget.toggled.connect(callback)
+    else:
+        raise TypeError(f"Cannot connect value changes on {type(widget)!r}")
+
+
+def get_selected_key(table: QTableWidget) -> Any:
+    """Return the stable key of the current table row."""
+    row = table.currentRow()
+    if row < 0:
+        return None
+    item = table.item(row, 0)
+    return item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+
+
+def select_row(table: QTableWidget, key: Any) -> bool:
+    """Select a table row by stable key."""
+    for row in range(table.rowCount()):
+        item = table.item(row, 0)
+        if item is not None and item.data(Qt.ItemDataRole.UserRole) == key:
+            table.selectRow(row)
+            return True
+    return False
+
+
+def on_select(table: QTableWidget, callback: Callable[[Any], None]) -> None:
+    """Connect table selection changes to a stable-key callback."""
+    table.itemSelectionChanged.connect(lambda: callback(get_selected_key(table)))
+
+
+def on_row_toggled(
+    table: QTableWidget,
+    callback: Callable[[Any, bool], None],
+) -> None:
+    """Connect check-column changes to a stable-key callback."""
+    def changed(item: QTableWidgetItem) -> None:
+        value = table.property("_cp_check_column")
+        check_column = int(value if value is not None else -1)
+        if item.column() != check_column:
+            return
+        callback(
+            item.data(Qt.ItemDataRole.UserRole),
+            item.checkState() == Qt.CheckState.Checked,
+        )
+
+    table.itemChanged.connect(changed)
+
+
+def on_context_menu(
+    widget: Any,
+    builder: Callable[[], list[dict[str, Any]]],
+) -> None:
+    """Attach a QMenu built on demand without exposing QPoint."""
+    widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+
+    def show_menu(position: Any) -> None:
+        if isinstance(widget, QTableWidget):
+            index = widget.indexAt(position)
+            if not index.isValid():
+                return
+            widget.selectRow(index.row())
+
+        actions = builder()
+        if not actions:
+            return
+        menu = QMenu(widget)
+        for spec in actions:
+            if spec.get("separator_before"):
+                menu.addSeparator()
+            action = menu.addAction(str(spec["label"]))
+            action.setEnabled(bool(spec.get("enabled", True)))
+            callback = spec["on_select"]
+            action.triggered.connect(lambda _checked=False, cb=callback: cb())
+        target = widget.viewport() if hasattr(widget, "viewport") else widget
+        menu.exec(target.mapToGlobal(position))
+
+    widget.customContextMenuRequested.connect(show_menu)
 
 
 def on_interval(
@@ -326,6 +536,8 @@ def get_value(widget: Any) -> Any:
     """Read the semantic value of a supported Qt control."""
     if isinstance(widget, QSpinBox):
         return widget.value()
+    if isinstance(widget, QCheckBox):
+        return widget.isChecked()
     if isinstance(widget, QComboBox):
         return widget.currentText()
     return get_text(widget)
@@ -335,6 +547,8 @@ def set_value(widget: Any, value: Any) -> None:
     """Set the semantic value of a supported Qt control."""
     if isinstance(widget, QSpinBox):
         widget.setValue(int(value))
+    elif isinstance(widget, QCheckBox):
+        widget.setChecked(bool(value))
     elif isinstance(widget, QComboBox):
         index = widget.findText(str(value))
         if index >= 0:
@@ -360,6 +574,45 @@ def set_enabled(widget: Any, enabled: bool = True) -> None:
     widget.setEnabled(bool(enabled))
 
 
+def is_checked(widget: Any) -> bool:
+    """Return a QCheckBox state."""
+    if not isinstance(widget, QCheckBox):
+        raise TypeError(f"Cannot read checked state from {type(widget)!r}")
+    return widget.isChecked()
+
+
+def set_checked(
+    widget: Any,
+    checked: bool,
+    *,
+    notify: bool = True,
+) -> None:
+    """Set a QCheckBox state with optional signal suppression."""
+    if not isinstance(widget, QCheckBox):
+        raise TypeError(f"Cannot set checked state on {type(widget)!r}")
+    if notify:
+        widget.setChecked(bool(checked))
+        return
+    was_blocked = widget.blockSignals(True)
+    widget.setChecked(bool(checked))
+    widget.blockSignals(was_blocked)
+
+
+def set_visible(widget: Any, visible: bool = True) -> None:
+    """Set a Qt widget's visibility."""
+    widget.setVisible(bool(visible))
+
+
+def set_tooltip(widget: Any, text: str) -> None:
+    """Set a Qt widget tooltip."""
+    widget.setToolTip(str(text))
+
+
+def copy_to_clipboard(text: str) -> None:
+    """Copy text through the active QApplication clipboard."""
+    QApplication.clipboard().setText(str(text))
+
+
 __all__ = [
     "SPACING_PX",
     "ROLE_PROPERTY",
@@ -374,6 +627,7 @@ __all__ = [
     "create_text_area",
     "create_combo",
     "create_spin",
+    "create_checkbox",
     "create_table",
     "set_table_rows",
     "spacing",
@@ -381,10 +635,21 @@ __all__ = [
     "create_column",
     "create_row",
     "create_group",
+    "create_tabs",
+    "add_tab",
+    "create_form",
+    "add_form_row",
     "create_split",
+    "set_split_proportions",
     "add",
     "add_stretch",
     "on_click",
+    "on_change",
+    "on_select",
+    "on_row_toggled",
+    "get_selected_key",
+    "select_row",
+    "on_context_menu",
     "on_interval",
     "stop_interval",
     "set_text",
@@ -393,4 +658,9 @@ __all__ = [
     "set_value",
     "set_items",
     "set_enabled",
+    "is_checked",
+    "set_checked",
+    "set_visible",
+    "set_tooltip",
+    "copy_to_clipboard",
 ]

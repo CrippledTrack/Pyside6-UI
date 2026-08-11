@@ -33,20 +33,35 @@ See `plugins/example_plugin.py` in this package for a plugin that exercises the 
 
 New tabs should implement `create_tab_content(context)` and build their content
 through `GUI.app.ui.definitions`. The facade provides semantic labels and
-buttons, text and numeric inputs, combo selections, titled groups, and
-read-only tables, plus toolkit-neutral state/event helpers such as
-`get_value`, `set_enabled`, `on_click`, and `on_interval`.
+buttons, text and numeric inputs, checkboxes, combo selections, titled groups,
+tabs, forms, and read-only tables. `TableRow` adds stable row keys, optional
+check columns, selection callbacks, and row-toggle callbacks without exposing
+toolkit item objects. State/event helpers include `get_value`, `set_enabled`,
+`on_change`, `on_click`, and `on_interval`.
 
 Desktop-only layout ideas — resizable splits, stretch spacers, expand fill,
 and pixel sizing — are **optional capabilities**. Query them with
 `supports(UICapability.…)` rather than assuming Qt-style layout. When a
 capability is missing, helpers no-op or fall back (for example `create_split`
-stacks panes in a column). Prefer `expand=True` over pixel heights.
+stacks panes in a column). `set_split_proportions(split, (3, 2))` expresses
+relative pane sizing without hardcoded pixels. Prefer `expand=True` over pixel
+heights. Labels wrap by default; use `create_label(..., wrap=False)` for compact
+single-line status text.
+Tabs and form rows are required operations because every backend can represent
+their content, even if it uses stacked sections instead of desktop tab chrome.
+Table `sortable=True` is a preference a backend may ignore. Pointer-oriented
+context menus are optional via `UICapability.CONTEXT_MENU`.
 
 The facade contains no toolkit imports. Each active backend implements the same
 operations in its own `style_map`; plugins must not import a backend style map
-directly. Dialogs and main-thread dispatch remain separate concerns supplied by
+directly. Definitions-built content may be hosted inside a backend-owned custom
+dialog, but dialog window lifecycle remains outside this facade. Message boxes
+and main-thread dispatch remain separate concerns supplied by
 `IDialogPresenter` and `IUIEventLoop`.
+
+Prefer `tab_root(context)` for the tab's root column, and
+`create_button(..., on_click=callback)` to wire actions in one step. Role
+arguments are optional (defaults are fine for simple tabs).
 
 Omit `ui_backends` (or leave it empty) to support every registered UI backend;
 set it only when a plugin must restrict hosts (for example `["qt"]`).

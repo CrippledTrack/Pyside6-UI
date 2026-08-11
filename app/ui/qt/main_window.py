@@ -385,7 +385,18 @@ class MainWindow(QMainWindow):
             return
 
         from .dialogs.plugin_dialog import PluginManagementDialog
-        dlg = PluginManagementDialog(self, self.settings_service, self.plugin_controller)
+        from ..abstractions.presenters import IDialogPresenter
+
+        try:
+            dialog_presenter = self.container.get(IDialogPresenter)
+        except ValueError:
+            dialog_presenter = None
+        dlg = PluginManagementDialog(
+            self,
+            self.settings_service,
+            self.plugin_controller,
+            dialog_presenter,
+        )
         dlg.setWindowModality(Qt.WindowModality.NonModal)
         dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dlg.plugin_toggled.connect(self.plugin_controller.toggle_plugin)

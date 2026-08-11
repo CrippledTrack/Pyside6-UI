@@ -176,7 +176,8 @@ def generate_stylesheet(
             selection-color: {button_text};
         }}
         QWidget[_cp_layout_kind="row"],
-        QWidget[_cp_layout_kind="column"] {{
+        QWidget[_cp_layout_kind="column"],
+        QWidget[_cp_layout_kind="form"] {{
             background-color: transparent;
             border: none;
         }}

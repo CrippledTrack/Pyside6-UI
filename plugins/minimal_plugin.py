@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..app.ui.definitions import create_column
+from ..app.ui.definitions import tab_root
 from ..plugin_system.base import BaseTabPlugin
 from ..plugin_system.types import TabContent, TabCreateContext
 
@@ -27,7 +27,7 @@ class MinimalTabPlugin(BaseTabPlugin):
     plugin_description = "A minimal plugin with only required components"
     supported_platforms = ["Windows", "Linux", "macOS"]
     requires_admin = False
-    plugin_version = "1.2.0"
+    plugin_version = "1.3.0"
     plugin_author = "Plugin Creator"
     min_gui_version = "6.0.0"
     required_gui_version = ">=6.0.0"
@@ -43,7 +43,7 @@ class MinimalTabPlugin(BaseTabPlugin):
 
     def create_tab_content(self, context: TabCreateContext) -> TabContent:
         """Create blank tab content via shared UI definitions."""
-        return create_column(parent=context.parent, expand=True)
+        return tab_root(context)
 
 
 __all__ = ["MinimalTabPlugin"]

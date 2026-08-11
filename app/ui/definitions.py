@@ -14,12 +14,12 @@ panes in a column).
 Example::
 
     from GUI.app.ui.definitions import (
-        ButtonRole, LabelRole, create_button, create_label, create_column, add,
+        LabelRole, add, create_button, create_label, tab_root,
     )
 
-    root = create_column(parent=context.parent)
+    root = tab_root(context)
     add(root, create_label("Title", role=LabelRole.HEADING))
-    add(root, create_button("Save", role=ButtonRole.PRIMARY))
+    add(root, create_button("Save", on_click=self.save))
 
 Raw toolkit widgets remain allowed as an escape hatch; use ``apply_*_role``
 to attach semantic roles to them.
@@ -27,6 +27,7 @@ to attach semantic roles to them.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Optional, Sequence, Union
 
@@ -89,8 +90,32 @@ class UICapability(str, Enum):
     PIXEL_SIZING = "pixel_sizing"
     """Pixel-oriented sizes (spacing ints, fixed heights, etc.)."""
 
+    CONTEXT_MENU = "context_menu"
+    """Pointer-oriented context menus attached to content."""
+
 
 RoleValue = Union[str, Enum]
+
+
+@dataclass(frozen=True)
+class TableRow:
+    """Toolkit-neutral row data for tables with stable selection keys."""
+
+    key: Any
+    cells: Sequence[str]
+    checked: bool = False
+    role: Optional[RoleValue] = None
+    tooltip: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class MenuAction:
+    """An action shown in a content-level context menu."""
+
+    label: str
+    on_select: Callable[[], None]
+    enabled: bool = True
+    separator_before: bool = False
 
 
 def _role_str(role: RoleValue) -> str:
@@ -129,29 +154,57 @@ def supports(capability: RoleValue) -> bool:
     return bool(checker(_capability_str(capability)))
 
 
+def tab_root(context: Any = None, *, parent: Any = None, expand: bool = True) -> Any:
+    """Create a standard expanding column for ``create_tab_content``.
+
+    Pass the ``TabCreateContext`` from ``create_tab_content`` to pick up
+    ``context.parent``, or pass ``parent=`` directly. Prefer this over
+    manually wiring ``create_column(parent=..., expand=True)``.
+    """
+    if context is not None and parent is None:
+        parent = getattr(context, "parent", None)
+    return create_column(parent=parent, expand=expand)
+
+
 def create_button(
     text: str,
     role: RoleValue = ButtonRole.DEFAULT,
     parent: Any = None,
+    *,
+    on_click: Optional[Callable[[], None]] = None,
 ) -> Any:
     """Create a button with the given semantic role for the active backend.
 
     ``parent`` is an optional attachment hint for backends that use ownership
     trees; other backends may ignore it.
+
+    Pass ``on_click=callback`` to wire the press handler in one step (same as
+    calling :func:`on_click` afterward).
     """
-    return _load_style_map().create_button(text, _role_str(role), parent)
+    button = _load_style_map().create_button(text, _role_str(role), parent)
+    if on_click is not None:
+        _load_style_map().on_click(button, on_click)
+    return button
 
 
 def create_label(
     text: str,
     role: RoleValue = LabelRole.BODY,
     parent: Any = None,
+    *,
+    wrap: bool = True,
 ) -> Any:
     """Create a label with the given semantic role for the active backend.
 
     ``parent`` is an optional attachment hint; backends may ignore it.
+    Set ``wrap=False`` for compact single-line status text.
     """
-    return _load_style_map().create_label(text, _role_str(role), parent)
+    return _load_style_map().create_label(
+        text,
+        _role_str(role),
+        parent,
+        wrap=wrap,
+    )
 
 
 def create_input(
@@ -201,17 +254,68 @@ def create_spin(
     return _load_style_map().create_spin(minimum, maximum, value, parent)
 
 
-def create_table(columns: Sequence[str], parent: Any = None) -> Any:
-    """Create a read-only table with the supplied column headings."""
-    return _load_style_map().create_table(list(columns), parent)
+def create_checkbox(
+    text: str = "",
+    checked: bool = False,
+    parent: Any = None,
+) -> Any:
+    """Create a boolean checkbox, optionally with a text label."""
+    return _load_style_map().create_checkbox(text, checked, parent)
 
 
-def set_table_rows(table: Any, rows: Sequence[Sequence[str]]) -> None:
-    """Replace all rows in a table created by :func:`create_table`."""
-    _load_style_map().set_table_rows(
-        table,
-        [[str(cell) for cell in row] for row in rows],
+def create_table(
+    columns: Sequence[str],
+    parent: Any = None,
+    *,
+    check_column: Optional[int] = None,
+    selectable: bool = True,
+    sortable: bool = False,
+    stretch_column: Optional[int] = None,
+) -> Any:
+    """Create a read-only table with optional selection and check controls.
+
+    ``sortable`` is a preference rather than a capability requirement;
+    backends without interactive sorting may ignore it.
+    """
+    return _load_style_map().create_table(
+        list(columns),
+        parent,
+        check_column=check_column,
+        selectable=selectable,
+        sortable=sortable,
+        stretch_column=stretch_column,
     )
+
+
+def set_table_rows(
+    table: Any,
+    rows: Sequence[Union[TableRow, Sequence[str]]],
+) -> None:
+    """Replace table rows while preserving plain-sequence compatibility."""
+    normalized = []
+    for row in rows:
+        if isinstance(row, TableRow):
+            normalized.append(
+                {
+                    "key": row.key,
+                    "cells": [str(cell) for cell in row.cells],
+                    "checked": bool(row.checked),
+                    "role": _role_str(row.role) if row.role is not None else None,
+                    "tooltip": row.tooltip,
+                }
+            )
+            continue
+        cells = [str(cell) for cell in row]
+        normalized.append(
+            {
+                "key": cells[0] if cells else None,
+                "cells": cells,
+                "checked": False,
+                "role": None,
+                "tooltip": None,
+            }
+        )
+    _load_style_map().set_table_rows(table, normalized)
 
 
 def apply_button_role(widget: Any, role: RoleValue) -> None:
@@ -261,6 +365,26 @@ def create_group(title: str, parent: Any = None) -> Any:
     return _load_style_map().create_group(title, parent)
 
 
+def create_tabs(parent: Any = None) -> Any:
+    """Create a required multi-section tab container."""
+    return _load_style_map().create_tabs(parent)
+
+
+def add_tab(tabs: Any, content: Any, title: str) -> None:
+    """Add titled ``content`` to a container created by :func:`create_tabs`."""
+    _load_style_map().add_tab(tabs, content, title)
+
+
+def create_form(parent: Any = None) -> Any:
+    """Create a required label-and-control form container."""
+    return _load_style_map().create_form(parent)
+
+
+def add_form_row(form: Any, label: str, widget: Any) -> None:
+    """Add a labeled control or value to a form."""
+    _load_style_map().add_form_row(form, label, widget)
+
+
 def create_split(orientation: str = "horizontal", parent: Any = None) -> Any:
     """Create a multi-pane container; falls back to a column when unsupported.
 
@@ -273,6 +397,23 @@ def create_split(orientation: str = "horizontal", parent: Any = None) -> Any:
     if not supports(UICapability.SPLIT):
         return create_column(parent, expand=True)
     return _load_style_map().create_split(key, parent)
+
+
+def set_split_proportions(
+    split: Any,
+    proportions: Sequence[Union[int, float]],
+) -> None:
+    """Set relative pane proportions on a supported split container.
+
+    Ratios such as ``(3, 2)`` are backend-neutral and avoid pixel sizing.
+    This is a no-op when split containers are unavailable.
+    """
+    if not supports(UICapability.SPLIT):
+        return
+    values = [float(value) for value in proportions]
+    if not values or any(value < 0 for value in values) or not any(values):
+        raise ValueError("proportions must contain at least one positive ratio")
+    _load_style_map().set_split_proportions(split, values)
 
 
 def set_expand(widget: Any, expand: bool = True) -> Any:
@@ -302,6 +443,59 @@ def add_stretch(container: Any) -> None:
 def on_click(widget: Any, callback: Callable[[], None]) -> None:
     """Connect a no-arg click/press callback on a button widget."""
     _load_style_map().on_click(widget, callback)
+
+
+def on_change(widget: Any, callback: Callable[[Any], None]) -> None:
+    """Connect a value-change callback to an input, combo, spin, or checkbox."""
+    _load_style_map().on_change(widget, callback)
+
+
+def on_select(table: Any, callback: Callable[[Any], None]) -> None:
+    """Connect a callback receiving the selected table row key."""
+    _load_style_map().on_select(table, callback)
+
+
+def on_row_toggled(
+    table: Any,
+    callback: Callable[[Any, bool], None],
+) -> None:
+    """Connect a callback receiving a table row key and checked state."""
+    _load_style_map().on_row_toggled(table, callback)
+
+
+def get_selected_key(table: Any) -> Any:
+    """Return the stable key for the selected table row, or ``None``."""
+    return _load_style_map().get_selected_key(table)
+
+
+def select_row(table: Any, key: Any) -> bool:
+    """Select the row with ``key``; return whether it was found."""
+    return bool(_load_style_map().select_row(table, key))
+
+
+def on_context_menu(
+    widget: Any,
+    builder: Callable[[], Sequence[MenuAction]],
+) -> None:
+    """Attach an optional content context menu.
+
+    This is a no-op on backends without :attr:`UICapability.CONTEXT_MENU`.
+    """
+    if not supports(UICapability.CONTEXT_MENU):
+        return
+
+    def normalized_builder() -> list[dict[str, Any]]:
+        return [
+            {
+                "label": action.label,
+                "on_select": action.on_select,
+                "enabled": bool(action.enabled),
+                "separator_before": bool(action.separator_before),
+            }
+            for action in builder()
+        ]
+
+    _load_style_map().on_context_menu(widget, normalized_builder)
 
 
 def on_interval(
@@ -352,6 +546,35 @@ def set_enabled(widget: Any, enabled: bool = True) -> None:
     _load_style_map().set_enabled(widget, enabled)
 
 
+def is_checked(widget: Any) -> bool:
+    """Return the boolean state of a checkbox-like control."""
+    return bool(_load_style_map().is_checked(widget))
+
+
+def set_checked(widget: Any, checked: bool, *, notify: bool = True) -> None:
+    """Set a checkbox state, optionally suppressing its change callback."""
+    _load_style_map().set_checked(widget, checked, notify=notify)
+
+
+def set_visible(widget: Any, visible: bool = True) -> None:
+    """Show or hide a content element."""
+    _load_style_map().set_visible(widget, visible)
+
+
+def set_tooltip(widget: Any, text: str) -> None:
+    """Set best-effort explanatory text for pointer-capable backends."""
+    setter = getattr(_load_style_map(), "set_tooltip", None)
+    if setter is not None:
+        setter(widget, text)
+
+
+def copy_to_clipboard(text: str) -> None:
+    """Copy text when the active backend provides a clipboard."""
+    copier = getattr(_load_style_map(), "copy_to_clipboard", None)
+    if copier is not None:
+        copier(text)
+
+
 __all__ = [
     "ROLE_PROPERTY",
     "SPACING_SMALL",
@@ -362,13 +585,17 @@ __all__ = [
     "LabelRole",
     "InputRole",
     "UICapability",
+    "TableRow",
+    "MenuAction",
     "supports",
+    "tab_root",
     "create_button",
     "create_label",
     "create_input",
     "create_text_area",
     "create_combo",
     "create_spin",
+    "create_checkbox",
     "create_table",
     "set_table_rows",
     "apply_button_role",
@@ -378,11 +605,22 @@ __all__ = [
     "create_column",
     "create_row",
     "create_group",
+    "create_tabs",
+    "add_tab",
+    "create_form",
+    "add_form_row",
     "create_split",
+    "set_split_proportions",
     "set_expand",
     "add",
     "add_stretch",
     "on_click",
+    "on_change",
+    "on_select",
+    "on_row_toggled",
+    "get_selected_key",
+    "select_row",
+    "on_context_menu",
     "on_interval",
     "stop_interval",
     "set_text",
@@ -391,4 +629,9 @@ __all__ = [
     "set_value",
     "set_items",
     "set_enabled",
+    "is_checked",
+    "set_checked",
+    "set_visible",
+    "set_tooltip",
+    "copy_to_clipboard",
 ]

@@ -20,18 +20,16 @@ from __future__ import annotations
 from typing import Optional, Dict, List, Any, Callable, TYPE_CHECKING
 
 from ..app.ui.definitions import (
-    ButtonRole,
     LabelRole,
     add,
     add_stretch,
     create_button,
-    create_column,
     create_label,
     create_row,
     create_text_area,
-    on_click,
     on_interval,
     set_text,
+    tab_root,
 )
 from ..plugin_system.base import BaseTabPlugin
 from ..plugin_system.types import MenuItemDefinition, ToolbarAction, TabContent, TabCreateContext
@@ -85,7 +83,7 @@ class ExampleTabPlugin(BaseTabPlugin):
 
     def create_tab_content(self, context: TabCreateContext) -> TabContent:
         """Create tab content via shared UI definitions (backend-auto-dispatch)."""
-        root = create_column(parent=context.parent)
+        root = tab_root(context)
 
         add(
             root,
@@ -120,20 +118,11 @@ class ExampleTabPlugin(BaseTabPlugin):
         add(root, self._tab_log)
 
         row = create_row()
-        refresh_btn = create_button("Refresh Log", role=ButtonRole.DEFAULT)
-        clear_btn = create_button("Clear Log", role=ButtonRole.DEFAULT)
-        test_btn = create_button("Generate Test Event", role=ButtonRole.DEFAULT)
-        trigger_btn = create_button("Trigger Menu Action", role=ButtonRole.DEFAULT)
-        add(row, refresh_btn)
-        add(row, clear_btn)
-        add(row, test_btn)
-        add(row, trigger_btn)
+        add(row, create_button("Refresh Log", on_click=self._refresh_log))
+        add(row, create_button("Clear Log", on_click=self._clear_log))
+        add(row, create_button("Generate Test Event", on_click=self._generate_test_event))
+        add(row, create_button("Trigger Menu Action", on_click=self._on_menu_action))
         add(root, row)
-
-        on_click(refresh_btn, self._refresh_log)
-        on_click(clear_btn, self._clear_log)
-        on_click(test_btn, self._generate_test_event)
-        on_click(trigger_btn, self._on_menu_action)
 
         add_stretch(root)
 
