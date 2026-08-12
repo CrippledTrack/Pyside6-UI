@@ -11,9 +11,9 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
-from ... import definitions as ui
-from ...abstractions.presenters import IDialogPresenter
-from .....plugin_system.base import BaseTabPlugin
+from .. import definitions as ui
+from ..abstractions.presenters import IDialogPresenter
+from ....plugin_system.base import BaseTabPlugin
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +139,7 @@ class PluginManagementDialog:
         )
         extension_row = ui.create_row()
         self.ext_checkboxes: Dict[str, Any] = {}
-        from .....plugin_system.extensions import EXTENSION_POINTS
+        from ....plugin_system.extensions import EXTENSION_POINTS
         for ep in EXTENSION_POINTS:
             if not ep.is_user_toggleable:
                 continue
@@ -231,7 +231,7 @@ class PluginManagementDialog:
 
     def _get_extension_types(self, plugin_class: type) -> str:
         """Get a string describing which extension interfaces the plugin implements."""
-        from .....plugin_system.extensions import EXTENSION_POINTS
+        from ....plugin_system.extensions import EXTENSION_POINTS
         extensions = []
         for ep in EXTENSION_POINTS:
             if ep.name in ("Events", "PluginProtocol"):

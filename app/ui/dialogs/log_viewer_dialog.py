@@ -1,4 +1,4 @@
-"""Definitions-backed log viewer with a Qt-local logging signal bridge."""
+"""Definitions-backed log viewer with toolkit-neutral live log marshaling."""
 
 from __future__ import annotations
 
@@ -6,41 +6,46 @@ import logging
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from ..bindings import QObject, Signal, Slot
-from ... import definitions as ui
-from ....services.logging_service import CustomFormatter, LOG_FORMAT
-from ....utils.paths import logs_dir
+from .. import definitions as ui
+from ..abstractions import IUIEventLoop
+from ...services.logging_service import CustomFormatter, LOG_FORMAT
+from ...utils.paths import logs_dir
 
 logger = logging.getLogger(__name__)
 
 
-class SignalHandler(QObject, logging.Handler):
-    """Marshal log records from worker threads onto the Qt UI thread."""
+class UIThreadLogHandler(logging.Handler):
+    """Forward log records onto the UI main thread via :class:`IUIEventLoop`."""
 
-    new_log = Signal(str, int)
-
-    def __init__(self, callback: Callable[[str, int], None]) -> None:
-        QObject.__init__(self)
-        logging.Handler.__init__(self)
+    def __init__(
+        self,
+        event_loop: IUIEventLoop,
+        callback: Callable[[str, int], None],
+    ) -> None:
+        super().__init__()
+        self._event_loop = event_loop
         self._callback = callback
         self.setFormatter(CustomFormatter(LOG_FORMAT))
-        self.new_log.connect(self._deliver)
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            self.new_log.emit(self.format(record), record.levelno)
+            message = self.format(record)
+            level = record.levelno
+            self._event_loop.invoke_on_main(self._callback, message, level)
         except Exception:
             self.handleError(record)
-
-    @Slot(str, int)
-    def _deliver(self, message: str, level: int) -> None:
-        self._callback(message, level)
 
 
 class LogViewerDialog:
     """Definitions-backed controller for browsing and tailing application logs."""
 
-    def __init__(self, parent: Any = None) -> None:
+    def __init__(
+        self,
+        parent: Any = None,
+        *,
+        event_loop: IUIEventLoop,
+    ) -> None:
+        self._event_loop = event_loop
         self._auto_scroll = True
         self._min_level = logging.DEBUG
         self._paused = False
@@ -60,8 +65,8 @@ class LogViewerDialog:
         )
         self._setup_ui()
 
-        self._signal_handler = SignalHandler(self._on_new_log)
-        logging.getLogger().addHandler(self._signal_handler)
+        self._log_handler = UIThreadLogHandler(event_loop, self._on_new_log)
+        logging.getLogger().addHandler(self._log_handler)
         self._refresh_log_files()
         logger.debug("Log viewer dialog opened")
 
@@ -344,11 +349,11 @@ class LogViewerDialog:
         if self._closed:
             return
         self._closed = True
-        logging.getLogger().removeHandler(self._signal_handler)
+        logging.getLogger().removeHandler(self._log_handler)
         logger.debug("Log viewer dialog closed")
 
     def close(self) -> None:
         ui.reject_dialog(self.dialog)
 
 
-__all__ = ["LogViewerDialog", "SignalHandler"]
+__all__ = ["LogViewerDialog", "UIThreadLogHandler"]

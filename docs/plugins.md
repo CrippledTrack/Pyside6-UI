@@ -77,6 +77,12 @@ There is deliberately no blocking public `run_modal()` result. Backends may
 render a dialog as a native window, overlay, or panel while preserving the
 callback contract. Message boxes and main-thread dispatch remain separate
 concerns supplied by `IDialogPresenter` and `IUIEventLoop`.
+Live log viewers should marshal worker-thread records with
+`IUIEventLoop.invoke_on_main` rather than toolkit signal bridges.
+
+Host dialog controllers that are toolkit-neutral live in `GUI.app.ui.dialogs`
+(About, Log Viewer, Plugin Management). Qt-only dialogs such as Theme remain
+under `GUI.app.ui.qt.dialogs`.
 
 Use `create_card()` for themed untitled panels, `create_label(..., align="center"|"end")`
 for header/value alignment, and `ButtonRole.SECONDARY` for outlined actions next

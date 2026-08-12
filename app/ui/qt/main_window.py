@@ -18,10 +18,10 @@ if TYPE_CHECKING:
     from ...services.container import ServiceContainer
     from ...services.interfaces import ISettingsService, IAdminService, IDaemonService, INotificationService
     from .themes.theme_manager import ThemeManager
-    from .dialogs.plugin_dialog import PluginManagementDialog
+    from ..dialogs.plugin_dialog import PluginManagementDialog
     from .dialogs.theme_dialog import ThemeDialog
-    from .dialogs.log_viewer_dialog import LogViewerDialog
-    from .dialogs.about_dialog import AboutDialog
+    from ..dialogs.log_viewer_dialog import LogViewerDialog
+    from ..dialogs.about_dialog import AboutDialog
     from .controllers.menu_bar_controller import MenuBarController
     from .controllers.window_title_manager import WindowTitleManager
     from .controllers.status_bar_manager import StatusBarManager
@@ -385,7 +385,7 @@ class MainWindow(QMainWindow):
             ui.open_dialog(self._plugin_dialog.dialog)
             return
 
-        from .dialogs.plugin_dialog import PluginManagementDialog
+        from ..dialogs.plugin_dialog import PluginManagementDialog
         from ..abstractions.presenters import IDialogPresenter
 
         controller = PluginManagementDialog(
@@ -464,13 +464,17 @@ class MainWindow(QMainWindow):
     def open_log_viewer_dialog(self) -> None:
         """Open the log viewer dialog (non-modal)."""
         from .. import definitions as ui
+        from ..abstractions import IUIEventLoop
 
         if self._log_viewer_dialog is not None:
             ui.open_dialog(self._log_viewer_dialog.dialog)
             return
 
-        from .dialogs.log_viewer_dialog import LogViewerDialog
-        controller = LogViewerDialog(parent=self)
+        from ..dialogs.log_viewer_dialog import LogViewerDialog
+        controller = LogViewerDialog(
+            parent=self,
+            event_loop=self.container.get(IUIEventLoop),
+        )
 
         def clear_controller(_accepted: bool) -> None:
             controller.on_closed()
@@ -483,7 +487,7 @@ class MainWindow(QMainWindow):
     def show_about_dialog(self) -> None:
         """Show the About dialog without blocking the main window."""
         from ...constants import GUI_API_VERSION as GUI_VERSION, VERSION_NAME as DEFAULT_VERSION_NAME
-        from .dialogs import create_about_dialog
+        from ..dialogs import create_about_dialog
         from .. import definitions as ui
         
         if self._about_dialog is not None:

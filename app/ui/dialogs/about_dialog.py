@@ -5,8 +5,8 @@ from __future__ import annotations
 import platform
 from typing import Any, Optional
 
-from ... import definitions as ui
-from ....utils.about_info import _format_build_time, _read_linux_pretty_name
+from .. import definitions as ui
+from ...utils.about_info import _format_build_time, _read_linux_pretty_name
 
 
 class AboutDialog:
@@ -105,7 +105,7 @@ class AboutDialog:
 
         details.append(("GUI API Version", self.gui_api_version))
 
-        from ....utils.display_utils import _format_platform_name
+        from ...utils.display_utils import _format_platform_name
 
         details.append(("Platform", _format_platform_name(self.platform_name)))
 
@@ -115,7 +115,7 @@ class AboutDialog:
                 details.append(("Distro", pretty))
 
         try:
-            from ....utils.admin import is_dev_mode
+            from ...utils.admin import is_dev_mode
 
             dev_mode = is_dev_mode()
         except Exception:
@@ -123,7 +123,7 @@ class AboutDialog:
 
         if dev_mode:
             try:
-                from ....build_info import BUILD_DISTRO, BUILD_TIME_UTC, GIT_COMMIT
+                from ...build_info import BUILD_DISTRO, BUILD_TIME_UTC, GIT_COMMIT
 
                 if BUILD_DISTRO and BUILD_DISTRO != "unknown":
                     details.append(("Build Distro", BUILD_DISTRO))
@@ -154,7 +154,7 @@ class AboutDialog:
                 pass
 
         try:
-            from ..bindings import get_binding_name
+            from ..qt.bindings import get_binding_name
 
             binding_name = get_binding_name()
         except Exception:
