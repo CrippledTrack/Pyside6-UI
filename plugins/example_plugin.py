@@ -12,13 +12,16 @@ extension interfaces:
 - SettingsExtension - provides configurable settings
 
 Tab chrome (labels, buttons, log, layout) uses ``GUI.app.ui.definitions``
-so the active UI backend supplies the toolkit. Settings still uses raw Qt
+so the active UI backend supplies the toolkit. Info popups use
+``IDialogPresenter`` (not raw Qt MessageBox). Settings still uses raw Qt
 widgets (checkbox/spinbox are outside the basic definitions kit).
 """
 from __future__ import annotations
 
+import logging
 from typing import Optional, Dict, List, Any, Callable, TYPE_CHECKING
 
+from ..app.ui.abstractions.presenters import IDialogPresenter
 from ..app.ui.definitions import (
     LabelRole,
     add,
@@ -37,6 +40,8 @@ from ..plugin_system.types import MenuItemDefinition, ToolbarAction, TabContent,
 if TYPE_CHECKING:
     from ..app.services.container import ServiceContainer
 
+logger = logging.getLogger(__name__)
+
 
 class ExampleTabPlugin(BaseTabPlugin):
     """
@@ -51,12 +56,12 @@ class ExampleTabPlugin(BaseTabPlugin):
     plugin_description = "A comprehensive example plugin showing all extension points"
     supported_platforms = ["Windows", "Linux", "macOS"]
     requires_admin = False
-    plugin_version = "2.2.0"
+    plugin_version = "2.2.1"
     plugin_author = "Example Author"
     plugin_authors = ["Example Author", "Contributors"]
     min_gui_version = "6.0.0"
     required_gui_version = ">=6.0.0"
-    disabled_by_default = True
+    disabled_by_default = False
 
     # Dependencies on other plugins
     dependencies: List[str] = []
@@ -88,7 +93,7 @@ class ExampleTabPlugin(BaseTabPlugin):
         add(
             root,
             create_label(
-                "Example Plugin v2.2 (Extensions Demo)",
+                "Example Plugin v2.2.1 (Extensions Demo)",
                 role=LabelRole.HEADING,
             ),
         )
@@ -213,7 +218,7 @@ class ExampleTabPlugin(BaseTabPlugin):
         self._refresh_log()
         self._show_info(
             "About Example Plugin",
-            "Example Plugin v2.2\n\n"
+            "Example Plugin v2.2.1\n\n"
             "Demonstrates all extension interfaces:\n"
             "- TabExtension (definitions facade)\n"
             "- MenuExtension\n"
@@ -225,12 +230,13 @@ class ExampleTabPlugin(BaseTabPlugin):
         )
 
     def _show_info(self, title: str, message: str) -> None:
-        """Show an info dialog; uses Qt MessageBox as an escape hatch."""
+        """Show an info dialog via the host ``IDialogPresenter``."""
         try:
-            from ..app.ui.qt.bindings import QMessageBox
-        except ImportError:
+            presenter = self.container.get(IDialogPresenter)
+        except (ValueError, KeyError, TypeError):
+            logger.warning("IDialogPresenter unavailable; skipping info dialog: %s", title)
             return
-        QMessageBox.information(None, title, message)
+        presenter.info(title, message)
 
     # =========================================================================
     # StatusExtension Interface

@@ -21,6 +21,9 @@ MAX_LOG_SIZE = 5 * 1024 * 1024  # 5MB
 MAX_LOG_FILES = 6
 LOG_FORMAT = "%(asctime)s - %(levelname)s - [%(threadName)s] - %(name)s - %(message)s%(exc_text)s"
 
+# Console StreamHandlers detached while a full-screen TUI owns the terminal.
+_suspended_console_handlers: list[logging.Handler] = []
+
 ANSI_RESET = "\033[0m"
 LEVEL_COLOR_MAP = {
     logging.DEBUG: "\033[36m",     # Cyan
@@ -223,6 +226,50 @@ def _configure_handlers(root_logger: logging.Logger, level: int) -> None:
     root_logger.addHandler(console_handler)
 
 
+def _is_console_stream_handler(handler: logging.Handler) -> bool:
+    """Return True for stderr/stdout stream handlers (not file handlers)."""
+    if isinstance(handler, logging.FileHandler):
+        return False
+    if not isinstance(handler, logging.StreamHandler):
+        return False
+    stream = getattr(handler, "stream", None)
+    return stream in (sys.stderr, sys.stdout, getattr(sys, "__stderr__", None), getattr(sys, "__stdout__", None))
+
+
+def suspend_console_logging() -> None:
+    """Detach console stream handlers so logs do not paint over a TUI.
+
+    File handlers (and the Log Viewer) keep receiving records. Call
+    :func:`resume_console_logging` when the TUI exits.
+    """
+    global _suspended_console_handlers
+    if _suspended_console_handlers:
+        return
+    root = logging.getLogger()
+    for handler in list(root.handlers):
+        if _is_console_stream_handler(handler):
+            root.removeHandler(handler)
+            _suspended_console_handlers.append(handler)
+    if _suspended_console_handlers:
+        logging.getLogger(__name__).debug(
+            "Suspended %s console log handler(s) for TUI",
+            len(_suspended_console_handlers),
+        )
+
+
+def resume_console_logging() -> None:
+    """Re-attach console stream handlers suspended for a TUI session."""
+    global _suspended_console_handlers
+    if not _suspended_console_handlers:
+        return
+    root = logging.getLogger()
+    for handler in _suspended_console_handlers:
+        root.addHandler(handler)
+    count = len(_suspended_console_handlers)
+    _suspended_console_handlers = []
+    logging.getLogger(__name__).debug("Resumed %s console log handler(s)", count)
+
+
 def setup_logging() -> logging.Logger:
     """Configure logging with rotation and proper error handling.
 
@@ -298,6 +345,8 @@ def setup_logging() -> logging.Logger:
 
 __all__ = [
     "setup_logging",
+    "suspend_console_logging",
+    "resume_console_logging",
     "log_display_role",
     "LOG_LEVEL_DISPLAY_ROLES",
     "LEVEL_COLOR_MAP",

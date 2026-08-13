@@ -104,3 +104,8 @@ arguments are optional (defaults are fine for simple tabs).
 
 Omit `ui_backends` (or leave it empty) to support every registered UI backend;
 set it only when a plugin must restrict hosts (for example `["qt"]`).
+
+Legacy tabs that only override `create_widget` (Qt widgets) are treated as
+Qt-shaped: non-Qt backends such as TUI will not host them even when
+`ui_backends` is empty. Prefer `create_tab_content` + definitions for portable
+tabs.

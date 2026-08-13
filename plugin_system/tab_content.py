@@ -21,6 +21,35 @@ def _is_overridden(plugin: Any, method_name: str) -> bool:
     return method is not base_method
 
 
+def supports_tab_on_backend(plugin_class: type, backend_id: str) -> bool:
+    """Return whether *plugin_class* can provide a tab on *backend_id*.
+
+    Rules:
+    - Honors ``BaseTabPlugin.ui_backends`` / ``is_supported_ui_backend``.
+    - Non-``qt`` backends require an overridden ``create_tab_content`` (definitions
+      path). Legacy ``create_widget``-only plugins are treated as Qt-shaped and
+      are not hosted on TUI or other non-Qt backends.
+    """
+    from .base import BaseTabPlugin
+
+    key = (backend_id or "qt").strip().lower()
+
+    if issubclass(plugin_class, BaseTabPlugin):
+        if not plugin_class.is_supported_ui_backend(key):
+            return False
+        if key != "qt":
+            has_tab_content = (
+                getattr(plugin_class, "create_tab_content", None)
+                is not BaseTabPlugin.create_tab_content
+            )
+            if not has_tab_content:
+                return False
+        return True
+
+    # Non-BaseTabPlugin tabs: only Qt may attempt legacy widget construction.
+    return key == "qt"
+
+
 def resolve_tab_content(
     plugin_instance: Any,
     *,
@@ -57,4 +86,4 @@ def resolve_tab_content(
     )
 
 
-__all__ = ["resolve_tab_content"]
+__all__ = ["resolve_tab_content", "supports_tab_on_backend"]

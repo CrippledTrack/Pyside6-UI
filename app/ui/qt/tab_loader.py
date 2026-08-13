@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from ...services.settings_service import SettingsService
 
 from ..active_backend import get_active_ui_backend_id
-from ....plugin_system.base import BaseTabPlugin
+from ....plugin_system.tab_content import supports_tab_on_backend
 
 logger = logging.getLogger(__name__)
 
@@ -136,14 +136,13 @@ class TabLoaderThread(QThread):
 
     @staticmethod
     def _supports_active_backend(plugin_class: type, backend_id: str) -> bool:
-        if issubclass(plugin_class, BaseTabPlugin):
-            if not plugin_class.is_supported_ui_backend(backend_id):
-                logger.debug(
-                    "Skipping tab %s: not supported on UI backend %s",
-                    getattr(plugin_class, "plugin_name", plugin_class.__name__),
-                    backend_id,
-                )
-                return False
+        if not supports_tab_on_backend(plugin_class, backend_id):
+            logger.debug(
+                "Skipping tab %s: not hostable on UI backend %s",
+                getattr(plugin_class, "plugin_name", plugin_class.__name__),
+                backend_id,
+            )
+            return False
         return True
 
     def _should_cancel(self) -> bool:

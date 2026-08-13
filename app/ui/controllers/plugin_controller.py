@@ -1,45 +1,40 @@
-"""
-Plugin management controller.
+"""Toolkit-neutral plugin lifecycle controller.
 
-Qt-facing wrapper around the toolkit-neutral PluginExtensionHost, plus
-plugin enable/disable and Qt signals.
+Wraps :class:`~GUI.app.ui.plugin_extension_host.PluginExtensionHost` and
+exposes enable/disable plus optional listeners for shell updates.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
-from ..bindings import QObject, Signal
-
-from ....services.plugin_service import PluginService
-from ....services.interfaces import ISettingsService
-from ...abstractions.shell import IMainWindowShell
-from ...plugin_extension_host import PluginExtensionHost
+from ...services.plugin_service import PluginService
+from ...services.interfaces import ISettingsService
+from ..abstractions.shell import IMainWindowShell
+from ..plugin_extension_host import PluginExtensionHost
 
 if TYPE_CHECKING:
-    from ....services.container import ServiceContainer
+    from ...services.container import ServiceContainer
 
 logger = logging.getLogger(__name__)
 
+PluginToggledListener = Callable[[str, bool], None]
+PluginStateChangedListener = Callable[[], None]
 
-class PluginController(QObject):
+
+class PluginController:
     """Controller for managing plugins and their lifecycle."""
 
-    plugin_toggled = Signal(str, bool)  # Emitted when a plugin is toggled (name, enabled)
-    plugin_state_changed = Signal()  # Emitted when plugin states change
-
-    def __init__(
-        self,
-        container: "ServiceContainer",
-        parent: Optional[QObject] = None,
-    ) -> None:
-        super().__init__(parent)
+    def __init__(self, container: "ServiceContainer") -> None:
         self.container = container
         self._host = PluginExtensionHost(container)
 
         self.settings_service = container.get(ISettingsService)
         self.plugin_service = container.get(PluginService)
+
+        self._plugin_toggled_listeners: List[PluginToggledListener] = []
+        self._plugin_state_changed_listeners: List[PluginStateChangedListener] = []
 
     @property
     def _main_window(self) -> Optional[IMainWindowShell]:
@@ -48,6 +43,48 @@ class PluginController(QObject):
     @_main_window.setter
     def _main_window(self, value: Optional[IMainWindowShell]) -> None:
         self._host.set_main_window(value)
+
+    def add_plugin_toggled_listener(self, callback: PluginToggledListener) -> None:
+        """Register a listener invoked after a successful plugin toggle."""
+        if callback not in self._plugin_toggled_listeners:
+            self._plugin_toggled_listeners.append(callback)
+
+    def remove_plugin_toggled_listener(self, callback: PluginToggledListener) -> None:
+        """Remove a previously registered plugin-toggled listener."""
+        try:
+            self._plugin_toggled_listeners.remove(callback)
+        except ValueError:
+            pass
+
+    def add_plugin_state_changed_listener(
+        self, callback: PluginStateChangedListener
+    ) -> None:
+        """Register a listener invoked when plugin enabled/disabled state changes."""
+        if callback not in self._plugin_state_changed_listeners:
+            self._plugin_state_changed_listeners.append(callback)
+
+    def remove_plugin_state_changed_listener(
+        self, callback: PluginStateChangedListener
+    ) -> None:
+        """Remove a previously registered state-changed listener."""
+        try:
+            self._plugin_state_changed_listeners.remove(callback)
+        except ValueError:
+            pass
+
+    def _notify_plugin_toggled(self, plugin_name: str, enabled: bool) -> None:
+        for callback in list(self._plugin_toggled_listeners):
+            try:
+                callback(plugin_name, enabled)
+            except Exception:
+                logger.exception("plugin_toggled listener failed")
+
+    def _notify_plugin_state_changed(self) -> None:
+        for callback in list(self._plugin_state_changed_listeners):
+            try:
+                callback()
+            except Exception:
+                logger.exception("plugin_state_changed listener failed")
 
     def toggle_plugin(self, plugin_name: str, enabled: bool) -> bool:
         """Toggle a plugin on or off."""
@@ -105,8 +142,8 @@ class PluginController(QObject):
                 self._host.remove_plugin_extensions_dynamic(plugin_name, plugin_class)
 
         self._save_plugin_states()
-        self.plugin_toggled.emit(plugin_name, enabled)
-        self.plugin_state_changed.emit()
+        self._notify_plugin_toggled(plugin_name, enabled)
+        self._notify_plugin_state_changed()
 
         if not enabled:
             try:

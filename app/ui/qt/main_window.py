@@ -47,7 +47,7 @@ from ...services.interfaces import IAdminService, IDaemonService, ISettingsServi
 from ...services.plugin_service import PluginService
 from .tab_loader import TabLoaderThread
 from .controllers.tab_controller import TabController
-from .controllers.plugin_controller import PluginController
+from ..controllers.plugin_controller import PluginController
 from ...utils.imports import get_platforms_constants
 from ..abstractions.types import (
     MenuItemHandle,
@@ -203,14 +203,10 @@ class MainWindow(QMainWindow):
         self.plugin_service.subscribe_lifecycle(self.tab_controller)
 
         # Create plugin controller - now accepts container directly
-        self.plugin_controller = PluginController(
-            self.container,
-            self
-        )
+        self.plugin_controller = PluginController(self.container)
         # Set main_window reference for dynamic extension integration
         self.plugin_controller._main_window = self
-        # Connect plugin controller signals
-        self.plugin_controller.plugin_toggled.connect(self._on_plugin_toggled)
+        self.plugin_controller.add_plugin_toggled_listener(self._on_plugin_toggled)
     
     def _setup_managers(self) -> None:
         """Setup UI controllers for window title and status bar."""
