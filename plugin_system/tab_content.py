@@ -28,7 +28,7 @@ def supports_tab_on_backend(plugin_class: type, backend_id: str) -> bool:
     - Honors ``BaseTabPlugin.ui_backends`` / ``is_supported_ui_backend``.
     - Non-``qt`` backends require an overridden ``create_tab_content`` (definitions
       path). Legacy ``create_widget``-only plugins are treated as Qt-shaped and
-      are not hosted on TUI or other non-Qt backends.
+      are not hosted on non-Qt backends.
     """
     from .base import BaseTabPlugin
 

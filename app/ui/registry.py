@@ -8,7 +8,7 @@ from typing import Any, Callable, List, Optional, Type
 
 def list_ui_backends() -> List[str]:
     """Return UI backend ids registered for this release."""
-    return ["qt", "tui"]
+    return ["qt"]
 
 
 def resolve_ui_backend_name(argv: Optional[List[str]] = None) -> str:
@@ -52,7 +52,6 @@ def get_ui_backend(name: str) -> Type[Any]:
     key = (name or "qt").strip().lower()
     loaders: dict[str, Callable[[], Type[Any]]] = {
         "qt": _load_qt,
-        "tui": _load_tui,
     }
     if key not in loaders:
         raise ValueError(
@@ -64,19 +63,6 @@ def get_ui_backend(name: str) -> Type[Any]:
 def _load_qt() -> Type[Any]:
     from .qt.application import QtApplicationBackend
     return QtApplicationBackend
-
-
-def _load_tui() -> Type[Any]:
-    try:
-        from .tui.application import TextualApplicationBackend
-    except ImportError as exc:
-        raise RuntimeError(
-            "The TUI backend is registered but could not be imported. "
-            "Ensure the Textual package is installed (textual>=0.80) and "
-            "that GUI.app.ui.tui is available. Use the Qt backend (default) "
-            "via UI_BACKEND=qt or --ui-backend=qt."
-        ) from exc
-    return TextualApplicationBackend
 
 
 __all__ = ["get_ui_backend", "resolve_ui_backend_name", "list_ui_backends"]

@@ -20,10 +20,11 @@ Toolkit-neutral shell dialogs (About, Log Viewer, Plugin Management) live in
 
 Shared host controllers (for example `PluginController`) live under
 `GUI.app.ui.controllers`. Backend-specific controllers remain under
-`GUI.app.ui.qt.controllers` or `GUI.app.ui.tui`.
+`GUI.app.ui.qt.controllers`.
 
 ## UI backends
 
-- **Qt** (`GUI.app.ui.qt`) — default desktop backend
-- **TUI** (`GUI.app.ui.tui`) — WIP Textual shell with definitions `style_map` /
-  `dialog_map`; select with `UI_BACKEND=tui` or `--ui-backend=tui`
+- **Qt** (`GUI.app.ui.qt`) — shipped desktop backend for 6.0 (default)
+
+Additional backends are not registered in 6.0; the abstractions and definitions
+contracts are the extension point for later releases.

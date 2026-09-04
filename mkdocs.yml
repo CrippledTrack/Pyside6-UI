@@ -1,5 +1,5 @@
 site_name: Basic UI Application
-site_description: Reusable multi-UI application framework (Pyside6-UI)
+site_description: Reusable Qt application framework with toolkit-neutral plugin contracts (Pyside6-UI)
 site_url: https://github.com/CrippledTrack/Pyside6-UI
 repo_url: https://github.com/CrippledTrack/Pyside6-UI
 docs_dir: docs

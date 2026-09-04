@@ -22,6 +22,6 @@ High-level layout after the 6.0 Qt / abstractions separation. Breaking import an
 - Themes live under `app/ui/qt/themes/`.
 - Prefer `app/ui/qt/themes/ui_mode` helpers for classic vs modern stylesheet branches.
 
-## Multi-UI
+## UI backends
 
-`app/ui/registry.py` registers backends (currently `qt`; `tui` is registered as WIP). Plugins that need chrome without hard-coding Qt should prefer `app/ui/definitions` so the active backend supplies widgets.
+`app/ui/registry.py` registers the shipped backends for this release (currently **`qt` only**). Plugins that need chrome without hard-coding Qt should prefer `app/ui/definitions` so the active backend supplies widgets. Definitions load `style_map` / `dialog_map` by package convention (`GUI.app.ui.<backend>…`), which leaves room for additional backends later without editing the facade.

@@ -13,10 +13,11 @@ from .interfaces import (
     ServiceExtension,
     EventSubscriberExtension,
     SettingsExtension,
+    IPluginLifecycle,
     IPluginResourceCleanup,
 )
 from .types import MenuItemDefinition, ToolbarAction, PluginEvent, TabContent, TabCreateContext
-from .tab_content import resolve_tab_content
+from .tab_content import resolve_tab_content, supports_tab_on_backend
 from .extensions import (
     ExtensionPoint,
     EXTENSION_POINTS,
@@ -40,6 +41,7 @@ __all__ = [
     "ServiceExtension",
     "EventSubscriberExtension",
     "SettingsExtension",
+    "IPluginLifecycle",
     "IPluginResourceCleanup",
     # Types
     "MenuItemDefinition",
@@ -49,6 +51,7 @@ __all__ = [
     "TabCreateContext",
     # Tab content helpers
     "resolve_tab_content",
+    "supports_tab_on_backend",
     # Extensions Registry
     "ExtensionPoint",
     "EXTENSION_POINTS",

@@ -12,7 +12,7 @@ import platform
 # =============================================================================
 # GUI Internal Variables (app_plugins will NOT override these)
 # =============================================================================
-GUI_API_VERSION = "6.0.0-dev-12"
+GUI_API_VERSION = "6.0.0-rc-1"
 
 # =============================================================================
 # Version Information (can be overridden by app_plugins/constants.py)
@@ -41,7 +41,7 @@ LOG_TO_FILE = True
 SHOW_CONSOLE = False
 
 # UI configuration — cross-backend (toolkit-neutral)
-DEFAULT_UI_BACKEND = "qt"  # "qt" 
+DEFAULT_UI_BACKEND = "qt"
 
 # UI configuration — Qt backend only (ignored when DEFAULT_UI_BACKEND is not "qt")
 DEFAULT_QT_BINDING = "pyside6"  # Prefer a single binding; avoids probing PySide6 then PyQt6

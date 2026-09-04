@@ -61,7 +61,7 @@ class ExampleTabPlugin(BaseTabPlugin):
     plugin_authors = ["Example Author", "Contributors"]
     min_gui_version = "6.0.0"
     required_gui_version = ">=6.0.0"
-    disabled_by_default = False
+    disabled_by_default = True
 
     # Dependencies on other plugins
     dependencies: List[str] = []
