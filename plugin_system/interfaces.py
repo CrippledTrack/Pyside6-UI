@@ -54,7 +54,7 @@ class TabExtension(Protocol):
     supported as a legacy Qt-oriented entry point; hosts may accept either.
     
     Attributes:
-        plugin_name: Unique identifier for the plugin
+        plugin_name: Display name for the plugin (identity is ``plugin_id``)
         tab_title: Display name shown in the tab bar (not plugin_id)
         requires_admin: Whether admin privileges are needed
     """
@@ -241,19 +241,19 @@ class ISettingsService(Protocol):
         ...
 
     def save_disabled_plugins(self, plugin_names: List[str]) -> None:
-        """Save user-disabled plugin names."""
+        """Save user-disabled plugin ids."""
         ...
 
     def get_disabled_plugins(self) -> List[str]:
-        """Get saved user-disabled plugin names."""
+        """Get saved user-disabled plugin ids."""
         ...
 
     def save_enabled_plugins(self, plugin_names: List[str]) -> None:
-        """Save user-enabled plugin names (overrides for disabled_by_default)."""
+        """Save user-enabled plugin ids (overrides for disabled_by_default)."""
         ...
 
     def get_enabled_plugins(self) -> List[str]:
-        """Get saved user-enabled plugin names (overrides for disabled_by_default)."""
+        """Get saved user-enabled plugin ids (overrides for disabled_by_default)."""
         ...
 
     def save_window_geometry(self, x: int, y: int, width: int, height: int) -> None:

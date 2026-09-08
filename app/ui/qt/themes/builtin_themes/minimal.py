@@ -60,7 +60,7 @@ def get_theme() -> Dict[str, Any]:
                 font-weight: bold;
             }
         """,
-        # Classic mode structural tokens (v5.1.0)
+        # Classic mode structural tokens
         "classic_border_radius": "2px",
         "classic_scrollbar_size": "8px",
         "classic_scrollbar_handle_radius": "4px",

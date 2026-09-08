@@ -159,6 +159,7 @@ class PluginController:
         return self.plugin_service.get_all_plugins()
 
     def list_plugin_names(self) -> list[str]:
+        """Return registry keys (``plugin_id`` values) for all registered plugins."""
         return self.plugin_service.list_plugin_names()
 
     def get_plugin_info(self, plugin_name: str) -> Optional[Dict[str, Any]]:

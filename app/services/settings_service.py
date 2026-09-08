@@ -377,23 +377,23 @@ class SettingsService:
         return self._settings.theme
     
     def save_disabled_plugins(self, plugin_names: List[str]) -> None:
-        """Save user-disabled plugin names (excludes disabled_by_default)"""
+        """Save user-disabled plugin ids (excludes disabled_by_default)"""
         self._settings.disabled_plugins = plugin_names
         self._save_settings()
         logger.debug(f"Disabled plugins saved: {plugin_names}")
     
     def get_disabled_plugins(self) -> List[str]:
-        """Get saved user-disabled plugin names"""
+        """Get saved user-disabled plugin ids"""
         return self._settings.disabled_plugins.copy()
 
     def save_enabled_plugins(self, plugin_names: List[str]) -> None:
-        """Save user-enabled plugin names (overrides for disabled_by_default)."""
+        """Save user-enabled plugin ids (overrides for disabled_by_default)."""
         self._settings.enabled_plugins = plugin_names
         self._save_settings()
         logger.debug(f"Enabled plugins saved: {plugin_names}")
 
     def get_enabled_plugins(self) -> List[str]:
-        """Get saved user-enabled plugin names (overrides for disabled_by_default)."""
+        """Get saved user-enabled plugin ids (overrides for disabled_by_default)."""
         return self._settings.enabled_plugins.copy()
     
     def save_window_geometry(self, x: int, y: int, width: int, height: int) -> None:
@@ -617,8 +617,8 @@ class SettingsService:
         Save session state (tab order and active tab).
         
         Args:
-            tab_order: List of tab names in order
-            last_active_tab: Name of the currently active tab
+            tab_order: Visual tab order as ``plugin_id`` values
+            last_active_tab: ``plugin_id`` of the currently active tab
         """
         self._settings.tab_order = tab_order
         self._settings.last_active_tab = last_active_tab
@@ -626,11 +626,11 @@ class SettingsService:
         logger.debug(f"Session state saved: {len(tab_order)} tabs, active={last_active_tab}")
 
     def get_tab_order(self) -> List[str]:
-        """Get saved tab order."""
+        """Get saved tab order (``plugin_id`` values)."""
         return self._settings.tab_order.copy()
 
     def get_last_active_tab(self) -> Optional[str]:
-        """Get saved last active tab."""
+        """Get saved last active tab (``plugin_id``)."""
         return self._settings.last_active_tab
 
     def save_favorite_themes(self, favorite_themes: List[str]) -> None:

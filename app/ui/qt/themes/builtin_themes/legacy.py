@@ -299,7 +299,7 @@ def get_theme() -> Dict[str, Any]:
                 border: 1px solid #d0d0d0;
             }
         """,
-        # Classic mode structural tokens (v5.1.0)
+        # Classic mode structural tokens
         "classic_border_radius": "4px",
         "classic_scrollbar_size": "12px",
         "classic_tab_font_weight": "bold",

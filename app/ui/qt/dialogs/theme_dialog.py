@@ -22,20 +22,13 @@ from ....services.settings_service import SettingsService
 from ..bindings import (
     Qt,
     Signal,
-    QPoint,
     QAction,
-    QColor,
-    QFont,
-    QPalette,
-)
-
-if TYPE_CHECKING:
-    from ....services.interfaces import ISettingsService
-from ..bindings import (
     QCheckBox,
+    QColor,
     QComboBox,
     QDialog,
     QFileDialog,
+    QFont,
     QFormLayout,
     QFrame,
     QGroupBox,
@@ -45,6 +38,8 @@ from ..bindings import (
     QListWidgetItem,
     QMenu,
     QMessageBox,
+    QPalette,
+    QPoint,
     QPushButton,
     QSplitter,
     QTextEdit,
@@ -52,7 +47,8 @@ from ..bindings import (
     QWidget,
 )
 
-
+if TYPE_CHECKING:
+    from ....services.interfaces import ISettingsService
 
 logger = logging.getLogger(__name__)
 

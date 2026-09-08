@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, List, Optional, Tuple, Type
 
 from .base import BaseTabPlugin
+from .identity import UNNAMED_PLUGIN, plugin_identity
 from .sources import PluginSource
 
 logger = logging.getLogger(__name__)
@@ -35,14 +36,14 @@ class PluginDiscovery:
             plugins_dir: Path to the plugins directory (defaults to "plugins")
         """
         self.plugins_dir = plugins_dir or DEFAULT_PLUGINS_DIR
-        self.discovered_plugins: List[Tuple[str, Type[Any], str]] = []  # (name, class, source)
+        self.discovered_plugins: List[Tuple[str, Type[Any], str]] = []  # (plugin_id, class, source)
     
     def discover_local_plugins(self) -> List[Tuple[str, Type[Any], str]]:
         """
         Discover plugins in the local plugins directory.
         
         Returns:
-            List of tuples containing (plugin_name, plugin_class, "local")
+            List of tuples containing (plugin_id, plugin_class, source tag)
         """
         plugins = []
         plugins_path = Path(self.plugins_dir)
@@ -146,12 +147,9 @@ class PluginDiscovery:
         
         plugin_classes = self._find_plugin_classes_in_module(module)
         for plugin_class in plugin_classes:
-            plugin_name = getattr(plugin_class, 'plugin_name', None)
-            if not plugin_name or plugin_name == "Unnamed Plugin":
-                plugin_name = plugin_class.__name__
-                
-            plugins.append((plugin_name, plugin_class, f"local:{py_file.name}"))
-            logger.info(f"Successfully loaded local plugin: {plugin_name} from {py_file.name}")
+            plugin_id = plugin_identity(plugin_class)
+            plugins.append((plugin_id, plugin_class, f"local:{py_file.name}"))
+            logger.info(f"Successfully loaded local plugin: {plugin_id} from {py_file.name}")
         
         return plugins
 
@@ -198,7 +196,7 @@ class PluginDiscovery:
                 return False
 
             # Must have a valid identifier (plugin_name)
-            has_plugin_name = bool(getattr(cls, 'plugin_name', None)) and getattr(cls, 'plugin_name') != "Unnamed Plugin"
+            has_plugin_name = bool(getattr(cls, 'plugin_name', None)) and getattr(cls, 'plugin_name') != UNNAMED_PLUGIN
             if not has_plugin_name:
                 return False
 
@@ -242,10 +240,8 @@ class PluginDiscovery:
                     continue
 
                 for plugin_class in self._find_plugin_classes_in_module(module):
-                    plugin_name = getattr(plugin_class, 'plugin_name', None)
-                    if not plugin_name or plugin_name == "Unnamed Plugin":
-                        plugin_name = plugin_class.__name__
-                    discovered.append((plugin_name, plugin_class, f"package:{source.package}"))
+                    plugin_id = plugin_identity(plugin_class)
+                    discovered.append((plugin_id, plugin_class, f"package:{source.package}"))
 
         self.discovered_plugins.extend(discovered)
         return discovered.copy()

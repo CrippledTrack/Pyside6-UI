@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple, Type, TYPE_CHECKING
 
 from ...plugin_system.registry import PluginRegistry
 from ...plugin_system.base import BaseTabPlugin
-from ...plugin_system.identity import plugin_display_name
+from ...plugin_system.identity import plugin_display_name, plugin_identity
 from ...plugin_system.dependencies import declared_dependencies, resolve_dep_token
 from ...plugin_system.discovery import PluginDiscovery
 from ...plugin_system.sources import PluginSource
@@ -128,7 +128,7 @@ class PluginService:
         return self._registry.has_plugin_instance(name)
 
     def list_plugin_names(self) -> List[str]:
-        """Get list of all plugin names."""
+        """Return registry keys (``plugin_id`` values) for all registered plugins."""
         return self._registry.list_plugin_names()
 
     def register_plugin(self, plugin_class: Type[BaseTabPlugin], is_core: bool = False) -> None:
@@ -242,8 +242,10 @@ class PluginService:
             return True
         unsat = self._unsatisfied_dependencies(key)
         if unsat:
+            plugin_class = self.get_plugin(key)
+            display = plugin_display_name(plugin_class) if plugin_class else key
             self._last_activation_error = (
-                f"Plugin '{key}' has unsatisfied dependencies: {', '.join(unsat)}"
+                f"Plugin '{display}' has unsatisfied dependencies: {', '.join(unsat)}"
             )
             logger.error(self._last_activation_error)
             return False
@@ -681,11 +683,7 @@ class PluginService:
                 self.register_plugin(plugin_class, is_core=True)
                 registered.append(plugin_class)
                 
-                name = getattr(plugin_class, 'plugin_name', None)
-                if not name or name == "Unnamed Plugin":
-                    name = plugin_class.__name__
-                
-                logger.info(f"Registered core plugin: {name}")
+                logger.info(f"Registered core plugin: {plugin_identity(plugin_class)}")
             except Exception as e:
                 logger.error(f"Failed to register core plugin {plugin_class.__name__}: {e}")
         return registered
@@ -723,7 +721,7 @@ class PluginService:
         Also cleans up any disabled_by_default plugins that were incorrectly saved.
         
         Args:
-            disabled_plugins: List of plugin names that user has disabled
+            disabled_plugins: List of plugin ids that user has disabled
         """
         logger.info(f"Loading saved user-disabled plugins: {disabled_plugins}")
         

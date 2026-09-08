@@ -33,7 +33,7 @@ from .interfaces import (
     ISettingsService,
 )
 from .version_utils import check_version_compatibility, get_gui_version
-from .identity import plugin_display_name, plugin_identity
+from .identity import UNNAMED_PLUGIN, plugin_display_name, plugin_identity
 from .dependencies import (
     resolve_dependency_graph,
     transitive_dependents,
@@ -83,7 +83,7 @@ def _get_platforms_constants_cached() -> Any:
 def _create_prefixed_plugin(original_class: Type[Any], platform_prefix: str) -> Type[Any]:
     """Create a wrapper plugin class with a prefixed plugin_name."""
     original_name = getattr(original_class, 'plugin_name', None)
-    if not original_name or original_name == "Unnamed Plugin":
+    if not original_name or original_name == UNNAMED_PLUGIN:
         original_name = original_class.__name__
 
     original_title = getattr(original_class, 'tab_title', original_name)
@@ -283,13 +283,16 @@ class PluginRegistry:
                     class_name = plugin_class.__name__.lower()
                     curr_name = getattr(plugin_class, 'plugin_name', '').lower()
                     curr_title = getattr(plugin_class, 'tab_title', '').lower()
+                    curr_id = plugin_identity(plugin_class).lower()
                     
                     if (single_name_lower != class_name and 
                         single_name_lower != curr_name and 
                         single_name_lower != curr_title and 
+                        single_name_lower != curr_id and
                         single_name_lower not in class_name and 
                         single_name_lower not in curr_name and 
-                        single_name_lower not in curr_title):
+                        single_name_lower not in curr_title and
+                        single_name_lower not in curr_id):
                         logger.debug(f"Skipping plugin '{plugin_name}' in single plugin mode (target: '{single_name}')")
                         return
                 else:
@@ -551,7 +554,7 @@ class PluginRegistry:
         
         # Check that plugin has a valid (non-default) name
         pn = getattr(plugin_class, 'plugin_name', None)
-        has_valid_name = bool(pn and pn != "Unnamed Plugin")
+        has_valid_name = bool(pn and pn != UNNAMED_PLUGIN)
         if not has_valid_name:
             errors.append("Plugin must define plugin_name")
         
@@ -696,7 +699,7 @@ class PluginRegistry:
         return self._plugins.get(key)
 
     def list_plugin_names(self) -> List[str]:
-        """Get list of all plugin names."""
+        """Return registry keys (``plugin_id`` values) for all registered plugins."""
         return list(self._plugins.keys())
 
     def clear(self) -> None:

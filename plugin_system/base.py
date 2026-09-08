@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from ..app.services.container import ServiceContainer
     from .registry import PluginRegistry
 
-from .identity import plugin_identity
+from .identity import UNNAMED_PLUGIN, plugin_identity
 from .interfaces import (
     IServiceContainer,
     ISettingsService,
@@ -60,7 +60,7 @@ class BaseTabPlugin:
     """
     
     # Required metadata (class-level)
-    plugin_name: str = "Unnamed Plugin"
+    plugin_name: str = UNNAMED_PLUGIN
     plugin_description: str = "No description provided"
     plugin_version: str = "1.0.0"
     plugin_author: str = "Unknown"
@@ -249,7 +249,7 @@ class BaseTabPlugin:
         """Validate the plugin configuration and return any error messages."""
         errors = []
         
-        has_name = bool(getattr(cls, 'plugin_name', None) and cls.plugin_name != "Unnamed Plugin")
+        has_name = bool(getattr(cls, 'plugin_name', None) and cls.plugin_name != UNNAMED_PLUGIN)
         if not has_name:
             errors.append("Plugin must define a valid plugin_name")
         

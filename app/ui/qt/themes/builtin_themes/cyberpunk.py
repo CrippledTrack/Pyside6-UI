@@ -34,7 +34,7 @@ def get_theme() -> Dict[str, Any]:
             tab_hover_text="#0a0a0a",
             scrollbar_handle_radius="0px",      # Sharp square scrollbar handles
         ),
-        # Classic mode structural tokens (v5.1.0)
+        # Classic mode structural tokens
         "classic_border_width": "2px",
         "classic_border_radius": "0px",
         "classic_tab_selected_bg": "#00ff41",    # Inverted: green bg on selected tab

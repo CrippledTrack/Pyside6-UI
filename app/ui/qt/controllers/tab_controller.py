@@ -112,10 +112,6 @@ class TabController(QObject):
                 return i
         return -1
 
-    def _bind_tab(self, index: int, plugin_id: str, plugin_class: Any) -> None:
-        self.tab_widget.setTabText(index, self.tab_label(plugin_class))
-        self.tab_widget.tabBar().setTabData(index, plugin_id)
-    
     def add_tab(self, tab_name: str, plugin_class: Any) -> None:
         """Add a new tab to the tab widget.
         
@@ -143,7 +139,7 @@ class TabController(QObject):
         plugin teardown is owned by disable/reload/``clear_all_tabs``.
 
         Args:
-            tab_name: Name of the tab to remove
+            tab_name: Registry ``plugin_id`` of the tab to remove
         """
         index = self.index_for_plugin(tab_name)
         if index >= 0:
@@ -322,7 +318,7 @@ class TabController(QObject):
         """Reload a specific tab by replacing its widget.
         
         Args:
-            tab_name: Name of the tab to reload
+            tab_name: Registry ``plugin_id`` of the tab to reload
         """
         tab_info = self.loaded_tabs.get(tab_name)
         if not tab_info:
@@ -391,7 +387,7 @@ class TabController(QObject):
         """Get information about a tab.
         
         Args:
-            tab_name: Name of the tab
+            tab_name: Registry ``plugin_id`` of the tab
             
         Returns:
             Tab info dictionary or None if tab not found
@@ -512,7 +508,7 @@ class TabController(QObject):
         """Create an admin required placeholder widget.
         
         Args:
-            tab_name: Name of the tab
+            tab_name: Display label shown in the placeholder
             
         Returns:
             AdminRequiredPlaceholder widget
@@ -630,7 +626,7 @@ class TabController(QObject):
         """Show information about the plugin in the tab.
         
         Args:
-            tab_name: Name of the tab plugin to query
+            tab_name: Registry ``plugin_id`` of the tab plugin to query
         """
         plugin_class = self.plugin_service.get_plugin(tab_name)
         
