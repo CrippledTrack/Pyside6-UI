@@ -338,6 +338,16 @@ def _collect_hidden_imports() -> List[str]:
         # may not exist at analysis time.
         "app._build_info_generated" if IS_STANDALONE else f"{GUI_ROOT.name}.app._build_info_generated",
     ]
+    prefix = "" if IS_STANDALONE else f"{GUI_ROOT.name}."
+    # definitions loads these by importlib; builtin themes are lazy factories.
+    imports.append(f"{prefix}app.ui.qt.style_map")
+    imports.append(f"{prefix}app.ui.qt.dialog_map")
+    themes_dir = GUI_ROOT / "app" / "ui" / "qt" / "themes" / "builtin_themes"
+    if themes_dir.is_dir():
+        for path in themes_dir.glob("*.py"):
+            if path.stem.startswith("_"):
+                continue
+            imports.append(f"{prefix}app.ui.qt.themes.builtin_themes.{path.stem}")
 
     if not IS_STANDALONE:
         # app_plugins.core_plugins is imported at runtime by the plugin

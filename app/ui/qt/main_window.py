@@ -409,8 +409,13 @@ class MainWindow(QMainWindow):
         if enabled:
             plugin_class = self.plugin_controller.get_plugin(plugin_name)
             if plugin_class:
-                # Check if Tab extension is enabled
-                if self.settings_service.is_extension_enabled(plugin_name, "Tab"):
+                from ....plugin_system.extensions import get_extension_point
+                tab_ep = get_extension_point("Tab")
+                if (
+                    tab_ep is not None
+                    and tab_ep.check_implements(plugin_class)
+                    and self.settings_service.is_extension_enabled(plugin_name, "Tab")
+                ):
                     self.tab_controller.add_tab(plugin_name, plugin_class)
         else:
             self.tab_controller.remove_tab(plugin_name)

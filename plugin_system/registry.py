@@ -246,6 +246,7 @@ class PluginRegistry:
             plugin_class: The plugin class to register
             is_core: Whether this is a core plugin
         """
+        discovered: Optional[str] = None
         with self._lock:
             # Get plugin name - check for non-default values
             plugin_name = getattr(plugin_class, 'plugin_name', None)
@@ -314,12 +315,16 @@ class PluginRegistry:
             if not self._handle_plugin_conflicts(plugin_name, is_core):
                 return
 
-            # Register the plugin class
+            # Register the plugin class (maps only; notify after releasing the lock)
             self._add_plugin_to_registry(plugin_name, plugin_class, is_core)
             self._apply_default_disabled_state(plugin_class, plugin_name)
             self._seen_plugins.add(plugin_name)
-            
+            discovered = plugin_name
+
             logger.debug(f"Registered plugin: {plugin_name} (core={is_core})")
+
+        if discovered is not None:
+            self._notify_plugins_discovered([discovered])
 
     def get_registered_name(self, plugin_class: Type[Any]) -> str:
         """Get the name this plugin class will be registered under."""
@@ -343,32 +348,40 @@ class PluginRegistry:
 
     def get_plugin_instance(self, name: str) -> Any:
         """Get or create a plugin instance by name.
-        
+
         Creates instances on first access, caches them for reuse.
-        
+        Construction runs *outside* the registry lock so plugin constructors
+        (and any registry queries they make) cannot deadlock.
+
         Args:
             name: Plugin name
-            
+
         Returns:
             Plugin instance
-            
+
         Raises:
             ValueError: If plugin not found or container not set
         """
         with self._lock:
-            if name in self._plugin_instances:
-                return self._plugin_instances[name]
-            
+            cached = self._plugin_instances.get(name)
+            if cached is not None:
+                return cached
             plugin_class = self._plugins.get(name)
+            container = self._container
             if not plugin_class:
                 raise ValueError(f"Plugin '{name}' not found in registry")
-            
-            if not self._container:
+            if not container:
                 raise ValueError("ServiceContainer not set - call set_container() first")
-            # Instantiate strict new-architecture plugin directly
-            instance = plugin_class(self._container)
+
+        instance = plugin_class(container)
+
+        with self._lock:
+            existing = self._plugin_instances.get(name)
+            if existing is not None:
+                return existing
+            if name not in self._plugins:
+                raise ValueError(f"Plugin '{name}' not found in registry")
             self._plugin_instances[name] = instance
-            
             logger.debug(f"Created instance for plugin: {name}")
             return instance
     
@@ -479,15 +492,19 @@ class PluginRegistry:
         return True
 
     def _add_plugin_to_registry(self, plugin_name: str, plugin_class: Type[Any], is_core: bool) -> None:
-        """Add plugin to the appropriate registry dictionaries."""
+        """Add plugin to the appropriate registry dictionaries.
+
+        Callers must invoke ``_notify_plugins_discovered`` *after* releasing
+        ``_lock``. Lifecycle callbacks must not run while the registry lock
+        is held (subscribers may query the instance cache).
+        """
         self._plugins[plugin_name] = plugin_class
         if is_core:
             self._core_plugins[plugin_name] = plugin_class
         else:
             self._external_plugins[plugin_name] = plugin_class
-        
+
         self._categorize_plugin_by_interface(plugin_name, plugin_class)
-        self._notify_plugins_discovered([plugin_name])
     
     def _categorize_plugin_by_interface(self, plugin_name: str, plugin_class: Type[Any]) -> None:
         """Categorize a plugin by which interfaces it implements."""
@@ -608,10 +625,13 @@ class PluginRegistry:
                 raise KeyError(f"Plugin '{name}' is not in the rejected plugins list")
 
             self._add_plugin_to_registry(name, plugin_class, is_core=False)
-            self.enable_plugin(name)
+            self._disabled_plugins.discard(name)
             del self._rejected_plugins[name]
             self._version_incompatibilities.pop(name, None)
             logger.info(f"Force-registered rejected plugin: {name}")
+
+        self._notify_plugins_discovered([name])
+        self._notify_plugin_state_changed(name, True)
 
     # =========================================================================
     # Enable/Disable

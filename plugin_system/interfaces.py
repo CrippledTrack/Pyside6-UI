@@ -243,6 +243,14 @@ class ISettingsService(Protocol):
         """Get saved user-disabled plugin names."""
         ...
 
+    def save_enabled_plugins(self, plugin_names: List[str]) -> None:
+        """Save user-enabled plugin names (overrides for disabled_by_default)."""
+        ...
+
+    def get_enabled_plugins(self) -> List[str]:
+        """Get saved user-enabled plugin names (overrides for disabled_by_default)."""
+        ...
+
     def save_window_geometry(self, x: int, y: int, width: int, height: int) -> None:
         """Save window geometry."""
         ...

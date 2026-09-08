@@ -52,6 +52,7 @@ class AppSettings:
     """Application settings with persistence"""
     theme: str = ""  # Default theme (blank defaults to DEFAULT_THEME or auto-detection)
     disabled_plugins: List[str] = None  # User-disabled plugins (separate from disabled_by_default)
+    enabled_plugins: List[str] = None  # User-enabled plugins that are disabled_by_default
     logging_enabled: bool = True
     log_to_file: bool = True
     window_geometry: WindowGeometry = None
@@ -85,6 +86,8 @@ class AppSettings:
         """Initialize default values for complex fields"""
         if self.disabled_plugins is None:
             self.disabled_plugins = []
+        if self.enabled_plugins is None:
+            self.enabled_plugins = []
         if self.window_geometry is None:
             self.window_geometry = WindowGeometry()
         if self.plugin_settings is None:
@@ -125,6 +128,9 @@ class SettingsService:
             # Load disabled plugins (user-disabled, not including disabled_by_default)
             if 'disabled_plugins' in data and isinstance(data['disabled_plugins'], list):
                 self._settings.disabled_plugins = data['disabled_plugins']
+
+            if 'enabled_plugins' in data and isinstance(data['enabled_plugins'], list):
+                self._settings.enabled_plugins = data['enabled_plugins']
             
             # Load logging settings
             if 'logging_enabled' in data:
@@ -207,6 +213,7 @@ class SettingsService:
             data = {
                 'theme': self._settings.theme,
                 'disabled_plugins': self._settings.disabled_plugins,
+                'enabled_plugins': self._settings.enabled_plugins,
                 'logging_enabled': self._settings.logging_enabled,
                 'log_to_file': self._settings.log_to_file,
                 'window_geometry': {
@@ -281,6 +288,16 @@ class SettingsService:
     def get_disabled_plugins(self) -> List[str]:
         """Get saved user-disabled plugin names"""
         return self._settings.disabled_plugins.copy()
+
+    def save_enabled_plugins(self, plugin_names: List[str]) -> None:
+        """Save user-enabled plugin names (overrides for disabled_by_default)."""
+        self._settings.enabled_plugins = plugin_names
+        self._save_settings()
+        logger.debug(f"Enabled plugins saved: {plugin_names}")
+
+    def get_enabled_plugins(self) -> List[str]:
+        """Get saved user-enabled plugin names (overrides for disabled_by_default)."""
+        return self._settings.enabled_plugins.copy()
     
     def save_window_geometry(self, x: int, y: int, width: int, height: int) -> None:
         """Save window geometry (only saves size, not position to avoid off-screen issues)"""

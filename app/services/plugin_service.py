@@ -169,6 +169,10 @@ class PluginService:
         """Publish a plugin event to subscribers."""
         self._registry.publish_event(event_name, event_data)
 
+    def get_tab_extensions(self, enabled_only: bool = True) -> Dict[str, Type[Any]]:
+        """Get TabExtension plugin classes."""
+        return self._registry.get_tab_extensions(enabled_only=enabled_only)
+
     def get_menu_extensions(self, enabled_only: bool = True) -> Dict[str, Type[Any]]:
         """Get MenuExtension plugin classes."""
         return self._registry.get_menu_extensions(enabled_only=enabled_only)
@@ -523,6 +527,7 @@ class PluginService:
         
         This is the main entry point for loading plugin states after discovery.
         It handles both first-run scenarios and loading saved user preferences.
+        Default-off plugins the user enabled are restored from ``enabled_plugins``.
         """
         if not self.settings_service:
             logger.debug("No settings service, skipping plugin state loading")
@@ -530,9 +535,12 @@ class PluginService:
 
         try:
             saved_disabled = self.settings_service.get_disabled_plugins()
+            saved_enabled = self.settings_service.get_enabled_plugins()
             if saved_disabled:
                 self._apply_user_disabled_plugins(saved_disabled)
-            else:
+            if saved_enabled:
+                self._apply_user_enabled_plugins(saved_enabled)
+            if not saved_disabled and not saved_enabled:
                 self._handle_first_run()
         except Exception as e:
             logger.warning(f"Failed to load saved plugin states: {e}")
@@ -566,9 +574,26 @@ class PluginService:
         if len(cleaned_disabled) != len(disabled_plugins) and self.settings_service:
             logger.info(f"Cleaning up settings: removed {len(disabled_plugins) - len(cleaned_disabled)} disabled_by_default plugins")
             self.settings_service.save_disabled_plugins(cleaned_disabled)
+
+    def _apply_user_enabled_plugins(self, enabled_plugins: List[str]) -> None:
+        """Apply user-enabled overrides for plugins that are disabled_by_default."""
+        logger.info(f"Loading saved user-enabled plugins: {enabled_plugins}")
+        cleaned_enabled = []
+        for plugin_name in enabled_plugins:
+            plugin_class = self.get_plugin(plugin_name)
+            if plugin_class and getattr(plugin_class, 'disabled_by_default', False):
+                self.enable_plugin(plugin_name)
+                cleaned_enabled.append(plugin_name)
+                logger.debug(f"Applied user preference: {plugin_name} enabled")
+            elif plugin_class:
+                logger.debug(f"Skipping non-default-off plugin in enabled list: {plugin_name}")
+            else:
+                logger.debug(f"Skipping non-existent plugin: {plugin_name}")
+        if len(cleaned_enabled) != len(enabled_plugins) and self.settings_service:
+            self.settings_service.save_enabled_plugins(cleaned_enabled)
     
     def _handle_first_run(self) -> None:
-        """Handle first run scenario - log defaults and initialize empty disabled list."""
+        """Handle first run scenario - log defaults and initialize empty override lists."""
         logger.info("First run detected, applying default plugin states (disabled_by_default flags)")
         # Log default states for information
         enabled_by_default = [name for name in self.list_plugin_names() 
@@ -580,9 +605,9 @@ class PluginService:
         if disabled_by_default:
             logger.info(f"Disabled by default: {', '.join(disabled_by_default)}")
         
-        # Initialize empty disabled list (user hasn't disabled anything yet)
         if self.settings_service:
             self.settings_service.save_disabled_plugins([])
+            self.settings_service.save_enabled_plugins([])
     
     @property
     def is_discovery_complete(self) -> bool:

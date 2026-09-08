@@ -5,6 +5,7 @@ Run from the repository root::
     python -m pytest GUI/tests -q
 
 These tests do not require a display or elevated privileges.
+Offscreen Qt tests set ``QT_QPA_PLATFORM=offscreen``.
 """
 
 from __future__ import annotations

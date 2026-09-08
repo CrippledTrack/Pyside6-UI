@@ -99,8 +99,12 @@ class TabController(QObject):
         logger.debug(f"Added tab: {tab_name}")
     
     def remove_tab(self, tab_name: str) -> None:
-        """Remove a tab from the tab widget.
-        
+        """Remove a tab view from the tab widget.
+
+        Closes the tab widget only. The plugin instance stays cached while the
+        plugin remains enabled so Menu/Service extensions keep running. Whole-
+        plugin teardown is owned by disable/reload/``clear_all_tabs``.
+
         Args:
             tab_name: Name of the tab to remove
         """
@@ -115,29 +119,21 @@ class TabController(QObject):
                     except Exception as e:
                         logger.error(f"Error closing/deleting tab widget '{tab_name}': {e}")
                 break
-        
+
         if tab_name in self.loaded_tabs:
-            # Call deactivation hook if instance exists
             tab_info = self.loaded_tabs[tab_name]
-            if tab_info.get("instance"):
-                # Call deactivation hook
+            plugin_instance = tab_info.get("instance")
+            if plugin_instance is not None:
                 try:
-                    plugin_instance = self.plugin_service.get_plugin_instance(tab_name)
                     if hasattr(plugin_instance, 'on_tab_deactivated'):
                         plugin_instance.on_tab_deactivated()
                 except Exception as e:
                     logger.debug(f"Error calling deactivation hook: {e}")
-            
+                if getattr(plugin_instance, '_widget', None) is not None:
+                    plugin_instance._widget = None
+
             del self.loaded_tabs[tab_name]
-            
-            # PERF: Unload the plugin instance from the registry cache to free
-            # the entire plugin object graph (timers, threads, sub-widgets).
-            # The instance will be re-created on demand if the tab is re-added.
-            try:
-                self.plugin_service.unload_plugin_instance(tab_name)
-            except Exception as e:
-                logger.debug(f"Error unloading plugin instance '{tab_name}': {e}")
-            
+
             self.tab_removed.emit(tab_name)
             self.title_update_requested.emit()
             logger.debug(f"Removed tab: {tab_name}")

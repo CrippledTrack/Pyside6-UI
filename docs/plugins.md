@@ -108,3 +108,10 @@ set it only when a plugin must restrict hosts (for example `["qt"]`).
 Legacy tabs that only override `create_widget` (Qt widgets) are treated as
 Qt-shaped: future non-Qt backends will not host them even when `ui_backends`
 is empty. Prefer `create_tab_content` + definitions for portable tabs.
+
+Only plugins that implement the **Tab** extension are hosted as tabs. Menu-only
+or service-only plugins can still be enabled for their other extensions.
+
+User enable/disable choices are persisted as diffs from each plugin's
+`disabled_by_default` flag (`disabled_plugins` and `enabled_plugins` in
+settings). Enabling a default-off plugin survives restart and reload.

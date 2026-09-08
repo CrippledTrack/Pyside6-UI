@@ -578,36 +578,86 @@ class LocalDaemonClient:
                 command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
+                bufsize=0,
             )
             with self._jobs_lock:
                 self._active_jobs[request_id] = proc
 
-            stdout_lines: list[str] = []
+            stdout_parts: list[str] = []
+            stderr_parts: list[str] = []
             try:
                 assert proc.stdout is not None
+                assert proc.stderr is not None
                 deadline = None if cmd_timeout is None else time.monotonic() + float(cmd_timeout)
-                while True:
-                    if deadline is not None and time.monotonic() > deadline:
-                        proc.kill()
-                        raise subprocess.TimeoutExpired(command, cmd_timeout)
-                    line = proc.stdout.readline()
-                    if line == '' and proc.poll() is not None:
-                        break
-                    if line:
-                        stdout_lines.append(line)
+                output_queue: queue.Queue[tuple[str, Optional[str]]] = queue.Queue()
+
+                def _drain(stream, label: str) -> None:
+                    try:
+                        while True:
+                            chunk = stream.read(4096)
+                            if not chunk:
+                                break
+                            output_queue.put(
+                                (label, chunk.decode("utf-8", errors="replace"))
+                            )
+                    finally:
+                        output_queue.put((label, None))
+
+                stdout_reader = threading.Thread(
+                    target=_drain, args=(proc.stdout, 'stdout'), daemon=True
+                )
+                stderr_reader = threading.Thread(
+                    target=_drain, args=(proc.stderr, 'stderr'), daemon=True
+                )
+                stdout_reader.start()
+                stderr_reader.start()
+
+                stdout_done = False
+                stderr_done = False
+                stdout_carry = ''
+                while not (stdout_done and stderr_done):
+                    remaining = None
+                    if deadline is not None:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            proc.kill()
+                            stdout_reader.join(timeout=1)
+                            stderr_reader.join(timeout=1)
+                            raise subprocess.TimeoutExpired(command, cmd_timeout)
+                    try:
+                        wait = 0.1 if remaining is None else min(0.1, max(remaining, 0.001))
+                        label, chunk = output_queue.get(timeout=wait)
+                    except queue.Empty:
+                        continue
+                    if chunk is None:
+                        if label == 'stdout':
+                            stdout_done = True
+                            if stdout_carry and on_chunk is not None:
+                                on_chunk(stdout_carry.rstrip('\n'))
+                                stdout_carry = ''
+                        else:
+                            stderr_done = True
+                        continue
+                    if label == 'stdout':
+                        stdout_parts.append(chunk)
                         if on_chunk is not None:
-                            on_chunk(line.rstrip('\n'))
-                stderr = proc.stderr.read() if proc.stderr else ''
+                            stdout_carry += chunk
+                            while '\n' in stdout_carry:
+                                line, stdout_carry = stdout_carry.split('\n', 1)
+                                on_chunk(line)
+                    else:
+                        stderr_parts.append(chunk)
+
+                stdout_reader.join(timeout=1)
+                stderr_reader.join(timeout=1)
                 returncode = proc.wait()
                 return {
                     'id': request_id,
                     'success': True,
                     'result': {
                         'returncode': returncode,
-                        'stdout': ''.join(stdout_lines),
-                        'stderr': stderr or '',
+                        'stdout': ''.join(stdout_parts),
+                        'stderr': ''.join(stderr_parts),
                         'success': returncode == 0,
                     },
                 }
