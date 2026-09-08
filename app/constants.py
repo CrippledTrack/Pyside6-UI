@@ -12,7 +12,7 @@ import platform
 # =============================================================================
 # GUI Internal Variables (app_plugins will NOT override these)
 # =============================================================================
-GUI_API_VERSION = "6.0.0-rc-4"
+GUI_API_VERSION = "6.0.0-rc-5"
 
 # =============================================================================
 # Version Information (can be overridden by app_plugins/constants.py)

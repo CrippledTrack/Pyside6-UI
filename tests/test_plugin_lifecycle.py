@@ -266,13 +266,50 @@ def test_tab_label_uses_title_not_plugin_id() -> None:
     assert plugin_tab_label(unnamed) == "Example Plugin"
 
 
-def test_settings_alias_migrates_display_name_to_id(_isolate_host_paths) -> None:
-    from GUI.app.services.settings_service import SettingsService
+def test_show_all_wrap_keeps_canonical_id() -> None:
+    from GUI.plugin_system.identity import (
+        plugin_identity,
+        plugin_display_name,
+        plugin_ui_label,
+        plugin_tab_label,
+    )
+    from GUI.plugin_system.registry import PluginRegistry, _create_prefixed_plugin
+    from GUI.plugin_system.dependencies import resolve_dep_token
 
-    settings = SettingsService(settings_file=_isolate_host_paths / "alias.json")
-    settings.save_plugin_settings("Example Plugin", {"k": 1})
-    svc = PluginService(settings_service=settings, registry=PluginRegistry())
-    svc.bind_container(_FakeContainer())
-    svc.register_plugin(_probe("Example Plugin", plugin_id="gui.example"))
-    svc.finalize_plugin_graph()
-    assert settings.get_plugin_settings("gui.example")["k"] == 1
+    original = _probe("Updates", plugin_id="gui.linux.updates", tab_title="Updates")
+    wrapped = _create_prefixed_plugin(original, "[Linux]")
+    assert plugin_identity(wrapped) == "gui.linux.updates"
+    assert plugin_display_name(wrapped) == "Updates"
+    assert plugin_ui_label(wrapped) == "[Linux] Updates"
+    assert wrapped.tab_title == "[Linux] Updates"
+    assert plugin_tab_label(wrapped) == "[Linux] Updates"
+    assert PluginRegistry().get_registered_name(wrapped) == "gui.linux.updates"
+    plugins = {plugin_identity(wrapped): wrapped}
+    dep_id, err = resolve_dep_token("gui.linux.updates", plugins)
+    assert err is None and dep_id == "gui.linux.updates"
+    dep_id, err = resolve_dep_token("Updates", plugins)
+    assert err is None and dep_id == "gui.linux.updates"
+
+    svc = _service()
+    svc.register_plugin(wrapped)
+    assert svc.resolve_plugin_key("Updates") == "gui.linux.updates"
+
+
+def test_show_all_wrap_name_only_stamps_original_identity() -> None:
+    from GUI.plugin_system.identity import plugin_identity, plugin_display_name, plugin_ui_label
+    from GUI.plugin_system.registry import _create_prefixed_plugin
+
+    original = _probe("Updates")
+    wrapped = _create_prefixed_plugin(original, "[Linux]")
+    assert plugin_identity(wrapped) == "Updates"
+    assert plugin_display_name(wrapped) == "Updates"
+    assert plugin_ui_label(wrapped) == "[Linux] Updates"
+
+
+def test_same_plugin_id_second_external_skipped() -> None:
+    svc = _service()
+    first = _probe("One", plugin_id="shared.id")
+    second = _probe("Two", plugin_id="shared.id")
+    svc.register_plugin(first)
+    svc.register_plugin(second)
+    assert svc.get_plugin("shared.id") is first

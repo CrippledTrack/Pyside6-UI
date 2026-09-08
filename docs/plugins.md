@@ -124,6 +124,11 @@ window title use `tab_title` (falling back to `plugin_name`); session restore
 and registry lookups keep using `plugin_id`. If `plugin_id` is omitted,
 it defaults to `plugin_name`, so unique existing names keep working.
 
+Show All Platform Tabs prefixes UI labels (`plugin_ui_label`) and
+`tab_title` (`[Linux] Updates`). `plugin_name` and `plugin_id` stay
+unprefixed so settings, session restore, and `dependencies` never see a
+prefixed key.
+
 `dependencies` lists provider ids (or unique display names). After discovery
 the host rejects missing or cyclic edges, starts providers first, and stops
 consumers first. Disabling a provider also disables enabled dependents

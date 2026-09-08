@@ -1,6 +1,6 @@
 """How to run GUI headless smoke tests
 
-From the CyberPatriot repo root (parent of ``GUI/``)::
+From the repository root (parent of ``GUI/``)::
 
 ```bash
 python -m pytest GUI/tests -q

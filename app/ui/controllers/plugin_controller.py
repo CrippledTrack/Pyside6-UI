@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
+from ....plugin_system.identity import plugin_ui_label
 from ...services.plugin_service import PluginService
 from ...services.interfaces import ISettingsService
 from ..abstractions.shell import IMainWindowShell
@@ -109,7 +110,7 @@ class PluginController:
                         f": {err}" if err else "",
                     )
                     return False
-                logger.info("Enabled plugin: %s", key)
+                logger.info("Enabled plugin: %s", plugin_ui_label(plugin_class))
 
             if self._host.main_window is not None:
                 if not self._host.has_chrome_for_plugin(key):
@@ -198,63 +199,6 @@ class PluginController:
             self.settings_service.save_enabled_plugins(user_enabled)
         except Exception as e:
             logger.warning("Failed to save plugin states: %s", e)
-
-    def load_plugin_states(self) -> None:
-        if not self.settings_service:
-            return
-
-        try:
-            saved_disabled = self.settings_service.get_disabled_plugins()
-            saved_enabled = self.settings_service.get_enabled_plugins()
-            if saved_disabled:
-                logger.info("Loading saved user-disabled plugins: %s", saved_disabled)
-
-                cleaned_disabled = []
-                for plugin_name in saved_disabled:
-                    plugin_class = self.plugin_service.get_plugin(plugin_name)
-                    if plugin_class:
-                        if getattr(plugin_class, "disabled_by_default", False):
-                            logger.debug(
-                                "Removing disabled_by_default plugin from settings: %s",
-                                plugin_name,
-                            )
-                        else:
-                            self.plugin_service.disable_plugin(plugin_name)
-                            cleaned_disabled.append(plugin_name)
-                            logger.debug(
-                                "Applied user preference: %s disabled", plugin_name
-                            )
-                    else:
-                        logger.debug("Skipping non-existent plugin: %s", plugin_name)
-
-                if len(cleaned_disabled) != len(saved_disabled):
-                    logger.info(
-                        "Cleaning up settings: removed %s disabled_by_default plugins",
-                        len(saved_disabled) - len(cleaned_disabled),
-                    )
-                    self.settings_service.save_disabled_plugins(cleaned_disabled)
-
-            if saved_enabled:
-                logger.info("Loading saved user-enabled plugins: %s", saved_enabled)
-                cleaned_enabled = []
-                for plugin_name in saved_enabled:
-                    plugin_class = self.plugin_service.get_plugin(plugin_name)
-                    if plugin_class and getattr(
-                        plugin_class, "disabled_by_default", False
-                    ):
-                        self.plugin_service.enable_plugin(plugin_name)
-                        cleaned_enabled.append(plugin_name)
-                    elif plugin_class:
-                        logger.debug(
-                            "Skipping non-default-off plugin in enabled list: %s",
-                            plugin_name,
-                        )
-                    else:
-                        logger.debug("Skipping non-existent plugin: %s", plugin_name)
-                if len(cleaned_enabled) != len(saved_enabled):
-                    self.settings_service.save_enabled_plugins(cleaned_enabled)
-        except Exception as e:
-            logger.warning("Failed to load plugin states: %s", e)
 
     def cleanup_all_extensions(self) -> None:
         self._host.cleanup_all_extensions()

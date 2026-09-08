@@ -19,7 +19,7 @@ High-level layout after the 6.0 Qt / abstractions separation. Breaking import an
 
 - Services must not import Qt at module load time.
 - Use `PluginService` from the container; do not register raw `PluginRegistry` for app code.
-- Plugin registry keys are ``plugin_id`` (display ``plugin_name`` is a unique-name convenience). Tab chrome shows ``tab_title`` (or ``plugin_name``), not the id.
+- Plugin registry keys are ``plugin_id`` (display ``plugin_name`` is a unique-name convenience). Tab chrome shows ``tab_title`` (or ``plugin_name``), not the id. Show All prefixes ``tab_title`` and ``plugin_ui_label`` only; ``plugin_name`` and identity stay canonical.
 - Writable settings/logs go through ``GUI.app.host_config.HostConfig`` (portable adapter defaults to ``get_base_path()``).
 - Import Qt widgets from **leaf** modules under `app/ui/qt/widgets/` (package `__init__` does not re-export).
 - Themes live under `app/ui/qt/themes/`.

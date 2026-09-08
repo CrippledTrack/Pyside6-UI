@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, List, Optional, Tuple, Type
 
 from .base import BaseTabPlugin
-from .identity import UNNAMED_PLUGIN, plugin_identity
+from .identity import UNNAMED_PLUGIN, plugin_identity, plugin_ui_label
 from .sources import PluginSource
 
 logger = logging.getLogger(__name__)
@@ -149,7 +149,10 @@ class PluginDiscovery:
         for plugin_class in plugin_classes:
             plugin_id = plugin_identity(plugin_class)
             plugins.append((plugin_id, plugin_class, f"local:{py_file.name}"))
-            logger.info(f"Successfully loaded local plugin: {plugin_id} from {py_file.name}")
+            logger.info(
+                f"Successfully loaded local plugin: {plugin_ui_label(plugin_class)} "
+                f"from {py_file.name}"
+            )
         
         return plugins
 

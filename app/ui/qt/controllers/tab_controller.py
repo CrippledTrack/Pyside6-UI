@@ -93,22 +93,13 @@ class TabController(QObject):
         data = self.tab_widget.tabBar().tabData(index)
         if isinstance(data, str) and data:
             return data
-        text = self.tab_widget.tabText(index)
-        if text in self.loaded_tabs:
-            return text
-        try:
-            return self.plugin_service.resolve_plugin_key(text)
-        except ValueError:
-            return None
+        return None
 
     def index_for_plugin(self, plugin_id: str) -> int:
-        """Find the tab index for a plugin_id (or unique display name)."""
+        """Find the tab index for a plugin_id."""
         bar = self.tab_widget.tabBar()
         for i in range(self.tab_widget.count()):
             if bar.tabData(i) == plugin_id:
-                return i
-        for i in range(self.tab_widget.count()):
-            if self.tab_widget.tabText(i) == plugin_id:
                 return i
         return -1
 
@@ -236,7 +227,7 @@ class TabController(QObject):
                     
                     if not self.admin_service.needs_admin_for_plugin(requires_admin):
                         # Privileges or daemon are available, reload the tab
-                        logger.info(f"Admin requirements met, reloading tab '{tab_name}'")
+                        logger.info(f"Admin requirements met, reloading tab '{self.tab_label(plugin_class)}'")
                         self._reload_tab(tab_name)
                         self._previous_tab_index = index
                         self.is_loading_tab = False
@@ -280,7 +271,7 @@ class TabController(QObject):
                     self.tab_widget.tabBar().setTabData(current_index, tab_name)
                     self.tab_widget.setCurrentIndex(current_index)
                 
-                logger.info(f"Lazy loaded plugin tab: {tab_name}")
+                logger.info(f"Lazy loaded plugin tab: {self.tab_label(plugin_class)}")
             
             # Call activation hook for newly active tab
             if tab_info["instance"] and not isinstance(tab_info["instance"], (LoadingPlaceholder, ErrorPlaceholder, AdminRequiredPlaceholder)):
@@ -342,7 +333,10 @@ class TabController(QObject):
                 logger.debug(f"Tab '{tab_name}' still needs admin, keeping placeholder")
                 return
             
-            logger.info(f"Creating widget for tab '{tab_name}' (daemon/privilege available)")
+            logger.info(
+                f"Creating widget for tab '{self.tab_label(plugin_class)}' "
+                "(daemon/privilege available)"
+            )
             # Create the actual content using dual-path resolver
             plugin_instance = self.plugin_service.get_plugin_instance(tab_name)
             widget = resolve_tab_content(
@@ -371,7 +365,7 @@ class TabController(QObject):
             if current_index != index:
                 self.tab_widget.setCurrentIndex(index)
             
-            logger.info(f"Successfully reloaded tab '{tab_name}'")
+            logger.info(f"Successfully reloaded tab '{self.tab_label(plugin_class)}'")
         except Exception as e:
             logger.error(f"Error reloading tab '{tab_name}': {e}", exc_info=True)
             # Keep the placeholder on error

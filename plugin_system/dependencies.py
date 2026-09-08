@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple, Type
 
-from .identity import plugin_display_name, plugin_identity
+from .identity import plugin_display_name, plugin_ui_label
 
 
 def _alias_map(plugins: Mapping[str, Type[Any]]) -> Dict[str, List[str]]:
@@ -73,7 +73,7 @@ def resolve_dependency_graph(
         for token in declared_dependencies(plugin_class):
             dep_id, err = resolve_dep_token(token, plugins, aliases)
             if err or dep_id is None:
-                label = plugin_display_name(plugin_class)
+                label = plugin_ui_label(plugin_class)
                 errors[plugin_id] = (
                     f"Plugin '{label}' ({plugin_id}) {err}."
                 )
@@ -81,7 +81,7 @@ def resolve_dependency_graph(
                 break
             if dep_id == plugin_id:
                 errors[plugin_id] = (
-                    f"Plugin '{plugin_display_name(plugin_class)}' "
+                    f"Plugin '{plugin_ui_label(plugin_class)}' "
                     f"({plugin_id}) lists itself as a dependency."
                 )
                 failed = True
@@ -99,7 +99,7 @@ def resolve_dependency_graph(
             if bad is None:
                 continue
             if plugin_id not in errors:
-                label = plugin_display_name(plugins[plugin_id])
+                label = plugin_ui_label(plugins[plugin_id])
                 cause = errors.get(bad, f"'{bad}' is unavailable")
                 errors[plugin_id] = (
                     f"Plugin '{label}' ({plugin_id}) depends on '{bad}' "
@@ -132,7 +132,7 @@ def resolve_dependency_graph(
     if cyclic:
         cycle_txt = " -> ".join(cyclic + cyclic[:1])
         for plugin_id in cyclic:
-            label = plugin_display_name(plugins[plugin_id])
+            label = plugin_ui_label(plugins[plugin_id])
             errors[plugin_id] = (
                 f"Plugin '{label}' ({plugin_id}) is involved in a "
                 f"dependency cycle: {cycle_txt}."

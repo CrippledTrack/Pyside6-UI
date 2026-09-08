@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
+from ...plugin_system.identity import plugin_ui_label
 from ..services.interfaces import ISettingsService
 from ..services.plugin_service import PluginService
 from .abstractions.shell import IMainWindowShell
@@ -53,6 +54,11 @@ class PluginExtensionHost:
 
     def set_main_window(self, main_window: Optional[IMainWindowShell]) -> None:
         self._main_window = main_window
+
+    def _label(self, plugin_id: str, plugin_class: Optional[type] = None) -> str:
+        if plugin_class is not None:
+            return plugin_ui_label(plugin_class)
+        return self.plugin_service.plugin_label(plugin_id)
 
     def is_extension_enabled(self, plugin_name: str, extension_type: str) -> bool:
         """Check if a specific extension type is enabled for a plugin."""
@@ -158,7 +164,7 @@ class PluginExtensionHost:
                             logger.info(
                                 "Dynamically integrated %s extension for '%s'",
                                 ep.name,
-                                plugin_name,
+                                plugin_ui_label(plugin_class),
                             )
                         else:
                             logger.debug(
@@ -194,7 +200,7 @@ class PluginExtensionHost:
                 del self._plugin_menu_actions[plugin_name]
                 if plugin_name in self._plugin_created_menus:
                     del self._plugin_created_menus[plugin_name]
-                logger.info("Removed menu extensions for '%s'", plugin_name)
+                logger.info("Removed menu extensions for '%s'", plugin_ui_label(plugin_class))
 
             if plugin_name in self._plugin_toolbar_actions:
                 for handle in self._plugin_toolbar_actions[plugin_name]:
@@ -204,7 +210,7 @@ class PluginExtensionHost:
                     except Exception as exc:
                         logger.debug("Error removing toolbar action: %s", exc)
                 del self._plugin_toolbar_actions[plugin_name]
-                logger.info("Removed toolbar actions for '%s'", plugin_name)
+                logger.info("Removed toolbar actions for '%s'", plugin_ui_label(plugin_class))
 
             if plugin_name in self._plugin_status_widgets:
                 for handle in self._plugin_status_widgets[plugin_name]:
@@ -214,14 +220,17 @@ class PluginExtensionHost:
                     except Exception as exc:
                         logger.debug("Error removing status widget: %s", exc)
                 del self._plugin_status_widgets[plugin_name]
-                logger.info("Removed status extensions for '%s'", plugin_name)
+                logger.info("Removed status extensions for '%s'", plugin_ui_label(plugin_class))
 
             if hasattr(plugin_class, "on_application_shutdown"):
                 try:
                     if self.plugin_service.has_plugin_instance(plugin_name):
                         instance = self.plugin_service.get_plugin_instance(plugin_name)
                         instance.on_application_shutdown()
-                        logger.info("Shutdown service extension for '%s'", plugin_name)
+                        logger.info(
+                            "Shutdown service extension for '%s'",
+                            plugin_ui_label(plugin_class),
+                        )
                     else:
                         logger.debug(
                             "Skipping service shutdown for '%s' - instance not created",
@@ -263,12 +272,12 @@ class PluginExtensionHost:
 
             if should_have_tab and not tab_exists:
                 self._main_window.add_plugin_tab(plugin_name, plugin_class)
-                logger.info("Dynamically added tab for '%s'", plugin_name)
+                logger.info("Dynamically added tab for '%s'", plugin_ui_label(plugin_class))
             elif not should_have_tab and tab_exists:
                 self._main_window.remove_plugin_tab(plugin_name)
-                logger.info("Dynamically removed tab for '%s'", plugin_name)
+                logger.info("Dynamically removed tab for '%s'", plugin_ui_label(plugin_class))
 
-        logger.info("Refreshed extensions for '%s'", plugin_name)
+        logger.info("Refreshed extensions for '%s'", plugin_ui_label(plugin_class))
 
     def has_chrome_for_plugin(self, plugin_name: str) -> bool:
         """Return True if menu/toolbar/status chrome is already tracked."""
@@ -310,10 +319,14 @@ class PluginExtensionHost:
                 if leftover not in names:
                     names.append(leftover)
             for name in names:
+                plugin_class = service_plugins.get(name)
                 try:
                     if self.plugin_service.has_plugin_instance(name):
                         instance = self.plugin_service.get_plugin_instance(name)
-                        logger.info("Shutting down service extension: %s", name)
+                        logger.info(
+                            "Shutting down service extension: %s",
+                            self._label(name, plugin_class),
+                        )
                         instance.on_application_shutdown()
                 except Exception as exc:
                     logger.error(
@@ -380,9 +393,8 @@ class PluginExtensionHost:
             )
 
     def _integrate_service_extension(self, name: str, plugin_class: type) -> None:
-        del plugin_class
         instance = self.plugin_service.get_plugin_instance(name)
-        logger.info("Starting service extension: %s", name)
+        logger.info("Starting service extension: %s", self._label(name, plugin_class))
         instance.on_application_start(self.container)
 
 

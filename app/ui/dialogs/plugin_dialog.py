@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 from .. import definitions as ui
 from ..abstractions.presenters import IDialogPresenter
 from ....plugin_system.base import BaseTabPlugin
-from ....plugin_system.identity import plugin_display_name
+from ....plugin_system.identity import plugin_ui_label
 
 logger = logging.getLogger(__name__)
 
@@ -240,7 +240,7 @@ class PluginManagementDialog:
         if cls is None and plugin_id in self._rejected_plugins:
             cls = self._rejected_plugins[plugin_id][0]
         if cls is not None:
-            return plugin_display_name(cls)
+            return plugin_ui_label(cls)
         return plugin_id
 
     def _get_extension_types(self, plugin_class: type) -> str:

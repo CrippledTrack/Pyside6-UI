@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple, Type, TYPE_CHECKING
 
 from ...plugin_system.registry import PluginRegistry
 from ...plugin_system.base import BaseTabPlugin
-from ...plugin_system.identity import plugin_display_name, plugin_identity
+from ...plugin_system.identity import plugin_ui_label
 from ...plugin_system.dependencies import declared_dependencies, resolve_dep_token
 from ...plugin_system.discovery import PluginDiscovery
 from ...plugin_system.sources import PluginSource
@@ -108,6 +108,16 @@ class PluginService:
         """Get a specific plugin by plugin_id or unique display name."""
         return self._registry.get_plugin(name)
 
+    def plugin_label(self, name_or_id: str) -> str:
+        """Display name for INFO logs and UI; falls back to *name_or_id*."""
+        try:
+            plugin_class = self.get_plugin(name_or_id)
+        except ValueError:
+            plugin_class = None
+        if plugin_class is not None:
+            return plugin_ui_label(plugin_class)
+        return name_or_id
+
     def resolve_plugin_key(self, name: str) -> Optional[str]:
         """Resolve a display name or id to the registry key."""
         return self._registry.resolve_plugin_key(name)
@@ -180,39 +190,7 @@ class PluginService:
             logger.warning(
                 "Rejected %s plugin(s) due to dependency errors", len(errors)
             )
-        self._migrate_settings_aliases()
         return errors
-
-    def _migrate_settings_aliases(self) -> None:
-        """Copy plugin_settings / enablement keys from display name to plugin_id."""
-        if not self.settings_service:
-            return
-        try:
-            for plugin_id, plugin_class in list(self._registry.get_all_plugins().items()):
-                display = plugin_display_name(plugin_class)
-                if display == plugin_id:
-                    continue
-                existing = self.settings_service.get_plugin_settings(plugin_id)
-                aliased = self.settings_service.get_plugin_settings(display)
-                if not existing and aliased:
-                    self.settings_service.save_plugin_settings(plugin_id, aliased)
-            disabled = self.settings_service.get_disabled_plugins()
-            enabled = self.settings_service.get_enabled_plugins()
-            disabled_mapped = self._map_saved_plugin_keys(disabled)
-            enabled_mapped = self._map_saved_plugin_keys(enabled)
-            if disabled_mapped != disabled:
-                self.settings_service.save_disabled_plugins(disabled_mapped)
-            if enabled_mapped != enabled:
-                self.settings_service.save_enabled_plugins(enabled_mapped)
-        except Exception as e:
-            logger.debug("Plugin settings alias migration skipped: %s", e)
-
-    def _map_saved_plugin_keys(self, names: List[str]) -> List[str]:
-        mapped: List[str] = []
-        for name in names:
-            key = self.resolve_plugin_key(name)
-            mapped.append(key if key else name)
-        return mapped
 
     def _unsatisfied_dependencies(self, name: str) -> List[str]:
         plugin_class = self.get_plugin(name)
@@ -243,7 +221,7 @@ class PluginService:
         unsat = self._unsatisfied_dependencies(key)
         if unsat:
             plugin_class = self.get_plugin(key)
-            display = plugin_display_name(plugin_class) if plugin_class else key
+            display = plugin_ui_label(plugin_class) if plugin_class else key
             self._last_activation_error = (
                 f"Plugin '{display}' has unsatisfied dependencies: {', '.join(unsat)}"
             )
@@ -274,7 +252,7 @@ class PluginService:
             except Exception:
                 pass
             return False
-        display = plugin_display_name(self.get_plugin(key) or type(instance))
+        display = plugin_ui_label(self.get_plugin(key) or type(instance))
         self.publish_event(
             "plugin_enabled",
             {"plugin_id": key, "plugin_name": display},
@@ -306,9 +284,9 @@ class PluginService:
                     "Error calling on_plugin_disabled for '%s': %s", tid, e
                 )
             plugin_class = self.get_plugin(tid)
-            display = plugin_display_name(plugin_class) if plugin_class else tid
+            display = plugin_ui_label(plugin_class) if plugin_class else tid
             self.disable_plugin(tid)
-            logger.info("Disabled plugin: %s", tid)
+            logger.info("Disabled plugin: %s", display)
             self.publish_event(
                 "plugin_disabled",
                 {"plugin_id": tid, "plugin_name": display},
@@ -683,7 +661,7 @@ class PluginService:
                 self.register_plugin(plugin_class, is_core=True)
                 registered.append(plugin_class)
                 
-                logger.info(f"Registered core plugin: {plugin_identity(plugin_class)}")
+                logger.info(f"Registered core plugin: {plugin_ui_label(plugin_class)}")
             except Exception as e:
                 logger.error(f"Failed to register core plugin {plugin_class.__name__}: {e}")
         return registered
@@ -723,7 +701,10 @@ class PluginService:
         Args:
             disabled_plugins: List of plugin ids that user has disabled
         """
-        logger.info(f"Loading saved user-disabled plugins: {disabled_plugins}")
+        logger.info(
+            f"Loading saved user-disabled plugins: "
+            f"{[self.plugin_label(p) for p in disabled_plugins]}"
+        )
         
         # Filter out plugins that are disabled_by_default (they shouldn't be in settings)
         cleaned_disabled = []
@@ -747,7 +728,10 @@ class PluginService:
 
     def _apply_user_enabled_plugins(self, enabled_plugins: List[str]) -> None:
         """Apply user-enabled overrides for plugins that are disabled_by_default."""
-        logger.info(f"Loading saved user-enabled plugins: {enabled_plugins}")
+        logger.info(
+            f"Loading saved user-enabled plugins: "
+            f"{[self.plugin_label(p) for p in enabled_plugins]}"
+        )
         cleaned_enabled = []
         for plugin_name in enabled_plugins:
             plugin_class = self.get_plugin(plugin_name)
@@ -773,7 +757,9 @@ class PluginService:
         logger.info(f"Default plugin states: {len(enabled_by_default)} enabled, "
                    f"{len(disabled_by_default)} disabled by default")
         if disabled_by_default:
-            logger.info(f"Disabled by default: {', '.join(disabled_by_default)}")
+            logger.info(
+                f"Disabled by default: {', '.join(self.plugin_label(p) for p in disabled_by_default)}"
+            )
         
         if self.settings_service:
             self.settings_service.save_disabled_plugins([])

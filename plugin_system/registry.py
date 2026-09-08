@@ -33,7 +33,7 @@ from .interfaces import (
     ISettingsService,
 )
 from .version_utils import check_version_compatibility, get_gui_version
-from .identity import UNNAMED_PLUGIN, plugin_display_name, plugin_identity
+from .identity import UNNAMED_PLUGIN, plugin_display_name, plugin_identity, plugin_ui_label
 from .dependencies import (
     resolve_dependency_graph,
     transitive_dependents,
@@ -81,30 +81,23 @@ def _get_platforms_constants_cached() -> Any:
 
 
 def _create_prefixed_plugin(original_class: Type[Any], platform_prefix: str) -> Type[Any]:
-    """Create a wrapper plugin class with a prefixed plugin_name."""
-    original_name = getattr(original_class, 'plugin_name', None)
-    if not original_name or original_name == UNNAMED_PLUGIN:
-        original_name = original_class.__name__
-
-    original_title = getattr(original_class, 'tab_title', original_name)
-
-    prefixed_name = f"{platform_prefix} {original_name}"
+    """Wrap an off-platform plugin: prefix tab chrome, keep plugin_name and id."""
+    original_title = getattr(original_class, "tab_title", None)
+    if not original_title or original_title == "Unnamed Tab":
+        original_title = plugin_display_name(original_class)
     prefixed_title = f"{platform_prefix} {original_title}"
     original_id = plugin_identity(original_class)
-    prefixed_id = f"{platform_prefix} {original_id}"
 
-    new_class = type(
+    return type(
         f"CrossPlatform_{original_class.__name__}",
         (original_class,),
         {
-            'plugin_name': prefixed_name,
-            'plugin_id': prefixed_id,
-            'tab_title': prefixed_title,
-            '_original_tab_name': original_title,
-            '_is_cross_platform': True,
-        }
+            "plugin_id": original_id,
+            "tab_title": prefixed_title,
+            "_show_all_prefix": platform_prefix,
+            "_is_cross_platform": True,
+        },
     )
-    return new_class
 
 
 def _check_implements_interface(plugin_class: Type[Any], interface: Type) -> bool:
@@ -129,7 +122,7 @@ def _check_implements_interface(plugin_class: Type[Any], interface: Type) -> boo
 
 
 def _get_platform_prefix(supported_platforms: List[str]) -> str:
-    """Determine the platform prefix for display/registration name mapping."""
+    """Determine the Show-All display prefix for an off-platform plugin."""
     if supported_platforms:
         sp = supported_platforms[0].lower()
         if "win" in sp:
@@ -329,7 +322,10 @@ class PluginRegistry:
 
                 plugin_class = _create_prefixed_plugin(plugin_class, platform_prefix)
                 plugin_name = plugin_identity(plugin_class)
-                logger.info(f"Loading cross-platform plugin '{plugin_name}' (supported: {supported_platforms})")
+                logger.info(
+                    f"Loading cross-platform plugin '{plugin_ui_label(plugin_class)}' "
+                    f"(supported: {supported_platforms})"
+                )
 
             # Check version compatibility
             if not self._check_plugin_compatibility(plugin_class, plugin_name):
@@ -352,20 +348,7 @@ class PluginRegistry:
 
     def get_registered_name(self, plugin_class: Type[Any]) -> str:
         """Get the identity this plugin class will be registered under."""
-        name = plugin_identity(plugin_class)
-
-        show_all = _is_show_all_platforms()
-        if hasattr(plugin_class, 'is_compatible'):
-            is_compatible = plugin_class.is_compatible()
-        else:
-            is_compatible = self._check_extension_plugin_compatibility(plugin_class)
-
-        if show_all and not is_compatible:
-            supported_platforms = getattr(plugin_class, 'supported_platforms', [])
-            platform_prefix = _get_platform_prefix(supported_platforms)
-            return f"{platform_prefix} {name}"
-
-        return name
+        return plugin_identity(plugin_class)
 
     def resolve_plugin_key(self, name_or_id: str) -> Optional[str]:
         """Resolve a plugin_id or unique display name to a registry key.
@@ -379,11 +362,10 @@ class PluginRegistry:
     def _resolve_plugin_key_unlocked(self, name_or_id: str) -> Optional[str]:
         if name_or_id in self._plugins:
             return name_or_id
-        matches = [
-            pid
-            for pid, cls in self._plugins.items()
-            if plugin_display_name(cls) == name_or_id
-        ]
+        matches = []
+        for pid, cls in self._plugins.items():
+            if plugin_display_name(cls) == name_or_id:
+                matches.append(pid)
         if len(matches) == 1:
             return matches[0]
         if len(matches) > 1:
@@ -628,13 +610,19 @@ class PluginRegistry:
             return False
         
         if not existing_is_core and is_core:
-            logger.info(f"Replacing external plugin '{plugin_name}' with core plugin")
+            existing = self._plugins.get(plugin_name)
+            label = plugin_ui_label(existing) if existing is not None else plugin_name
+            logger.info(f"Replacing external plugin '{label}' with core plugin")
             if plugin_name in self._external_plugins:
                 del self._external_plugins[plugin_name]
             self._bump_generation(plugin_name)
             self._plugin_instances.pop(plugin_name, None)
-        
-        return True
+            return True
+
+        logger.warning(
+            f"Skipping plugin '{plugin_name}' - identity already used by another plugin"
+        )
+        return False
 
     def _add_plugin_to_registry(self, plugin_name: str, plugin_class: Type[Any], is_core: bool) -> None:
         """Add plugin to the appropriate registry dictionaries.
@@ -791,7 +779,9 @@ class PluginRegistry:
             self._disabled_plugins.discard(name)
             del self._rejected_plugins[name]
             self._version_incompatibilities.pop(name, None)
-            logger.info(f"Force-registered rejected plugin: {name}")
+            logger.info(
+                f"Force-registered rejected plugin: {plugin_ui_label(plugin_class)}"
+            )
 
         self._notify_plugins_discovered([name])
         self._notify_plugin_state_changed(name, True)
