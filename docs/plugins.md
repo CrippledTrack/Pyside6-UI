@@ -115,3 +115,23 @@ or service-only plugins can still be enabled for their other extensions.
 User enable/disable choices are persisted as diffs from each plugin's
 `disabled_by_default` flag (`disabled_plugins` and `enabled_plugins` in
 settings). Enabling a default-off plugin survives restart and reload.
+
+## Identity, dependencies, and lifecycle
+
+Set `plugin_id` to a namespaced immutable id (for example `gui.example`).
+`plugin_name` and `tab_title` are display strings. The main window tab bar and
+window title use `tab_title` (falling back to `plugin_name`); session restore
+and registry lookups keep using `plugin_id`. If `plugin_id` is omitted,
+it defaults to `plugin_name`, so unique existing names keep working.
+
+`dependencies` lists provider ids (or unique display names). After discovery
+the host rejects missing or cyclic edges, starts providers first, and stops
+consumers first. Disabling a provider also disables enabled dependents
+(Plugin Management warns first).
+
+`PluginService.activate_plugin` / `deactivate_plugin` own enablement:
+construction and `on_plugin_enabled` must succeed before the enabled flag is
+kept; disable stops dependents, runs `on_plugin_disabled`, then unloads.
+Queued async events are dropped after unload. Application close shuts service
+extensions down before disposing tab views.
+

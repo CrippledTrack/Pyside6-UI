@@ -84,6 +84,48 @@ def create_palette_from_data(palette_data: Dict[str, Any]) -> QPalette:
     return palette
 
 
+def stylesheet_from_json_value(value: Any) -> str:
+    """Normalize a file-form stylesheet to an in-memory QSS string.
+
+    Older 6.0 exports store ``stylesheet`` as one JSON string. Newer writes
+    store it as an array of lines so the file stays readable.
+    """
+    if isinstance(value, list):
+        return "\n".join(str(line) for line in value)
+    if value is None:
+        return ""
+    return str(value)
+
+
+def stylesheet_to_json_value(value: Any) -> Any:
+    """Convert an in-memory stylesheet to a JSON-friendly value.
+
+    Multi-line QSS becomes a list of lines. A list is left as strings.
+    """
+    if isinstance(value, list):
+        return [str(line) for line in value]
+    if not isinstance(value, str):
+        return value
+    if "\n" in value:
+        return value.splitlines()
+    return value
+
+
+def normalize_theme_stylesheet(theme_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Mutate *theme_data* so ``stylesheet`` is a string. Returns the same dict."""
+    if "stylesheet" in theme_data:
+        theme_data["stylesheet"] = stylesheet_from_json_value(theme_data["stylesheet"])
+    return theme_data
+
+
+def theme_data_for_json(theme_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Shallow copy of *theme_data* with ``stylesheet`` in file form (line array)."""
+    payload = dict(theme_data)
+    if "stylesheet" in payload:
+        payload["stylesheet"] = stylesheet_to_json_value(payload["stylesheet"])
+    return payload
+
+
 # Mapping of builtin theme name -> submodule name under builtin_themes.
 # Each module is imported only the first time its theme is accessed.
 _BUILTIN_THEME_MODULES: Dict[str, str] = {
@@ -176,6 +218,9 @@ class ThemeManager:
             try:
                 with open(theme_file, 'r', encoding='utf-8') as f:
                     theme_data = json.load(f)
+                    if not isinstance(theme_data, dict):
+                        raise ValueError("theme JSON must be an object")
+                    normalize_theme_stylesheet(theme_data)
                     theme_name = theme_file.stem
                     self._themes[theme_name] = theme_data
                     logger.info(f"Loaded custom theme: {theme_name}")
@@ -228,8 +273,10 @@ class ThemeManager:
             import tempfile
             temp_fd, temp_path = tempfile.mkstemp(dir=str(self.themes_dir), prefix=f".theme_{theme_name}_")
             try:
+                stored = dict(theme_data)
+                normalize_theme_stylesheet(stored)
                 with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
-                    json.dump(theme_data, f, indent=2, ensure_ascii=False)
+                    json.dump(theme_data_for_json(stored), f, indent=2, ensure_ascii=False)
                 os.replace(temp_path, theme_path)
             except Exception as e:
                 if os.path.exists(temp_path):
@@ -238,7 +285,7 @@ class ThemeManager:
                     except Exception:
                         pass
                 raise e
-            self._themes[theme_name] = theme_data
+            self._themes[theme_name] = stored
             self._sorted_names_cache = None  # Invalidate name cache
             logger.info(f"Saved custom theme: {theme_name}")
             return True
@@ -579,5 +626,12 @@ class ThemeManager:
         return f"#{r:02x}{g:02x}{b:02x}"
 
 
-__all__ = ['ThemeManager']
+__all__ = [
+    'ThemeManager',
+    'create_palette_from_data',
+    'stylesheet_from_json_value',
+    'stylesheet_to_json_value',
+    'normalize_theme_stylesheet',
+    'theme_data_for_json',
+]
 

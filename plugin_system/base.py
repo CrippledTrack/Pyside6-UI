@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from ..app.services.container import ServiceContainer
     from .registry import PluginRegistry
 
+from .identity import plugin_identity
 from .interfaces import (
     IServiceContainer,
     ISettingsService,
@@ -76,8 +77,11 @@ class BaseTabPlugin:
     # (empty list = all backends supported)
     ui_backends: List[str] = []
     
-    # Plugin dependencies (optional)
+    # Plugin dependencies (plugin_id or unique display name). Enforced after discovery.
     dependencies: List[str] = []
+
+    # Immutable identity. Empty means default to plugin_name.
+    plugin_id: str = ""
     
     # If True, plugin is disabled by default on first discovery
     disabled_by_default: bool = False
@@ -217,12 +221,14 @@ class BaseTabPlugin:
         name = getattr(cls, 'plugin_name', cls.__name__)
         title = getattr(cls, 'tab_title', name)
         description = getattr(cls, 'plugin_description', "No description provided")
+        identity = plugin_identity(cls)
 
         # If supported_platforms is empty, show all application-supported platforms
         display_platforms = cls.supported_platforms if cls.supported_platforms else ["Windows", "Linux", "macOS"]
         
         return {
             'name': name,
+            'plugin_id': identity,
             'tab_title': title,
             'description': description,
             'supported_platforms': display_platforms,

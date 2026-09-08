@@ -203,8 +203,8 @@ def _configure_handlers(root_logger: logging.Logger, level: int) -> None:
     base_formatter = CustomFormatter(LOG_FORMAT)
 
     if SAVE_LOGS_TO_FILE:
-        from ..utils.paths import logs_dir
-        log_dir = logs_dir()
+        from ..host_config import get_host_config
+        log_dir = get_host_config().logs_dir()
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / f"app_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
         file_handler = RotatingFileHandler(

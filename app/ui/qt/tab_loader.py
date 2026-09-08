@@ -114,14 +114,21 @@ class TabLoaderThread(QThread):
                 return
             
             # PERF: Use pop() to get and remove in one atomic operation (1 hash lookup vs 3)
-            plugin_class = enabled_plugins.pop(tab_name, None)
+            key = tab_name
+            try:
+                resolved = self._plugin_service.resolve_plugin_key(tab_name)
+                if resolved:
+                    key = resolved
+            except ValueError:
+                key = tab_name
+            plugin_class = enabled_plugins.pop(key, None)
             if plugin_class is not None:
                 # PERF: Inline the extension enabled check to avoid function call overhead in loop
-                if has_settings and not self._settings_service.is_extension_enabled(tab_name, "Tab"):
+                if has_settings and not self._settings_service.is_extension_enabled(key, "Tab"):
                     continue
                 if not self._supports_active_backend(plugin_class, backend_id):
                     continue
-                self.add_tab.emit(tab_name, plugin_class)
+                self.add_tab.emit(key, plugin_class)
         
         # 2. Add remaining (new/unsaved) tabs alphabetically
         for tab_name in sorted(enabled_plugins.keys()):

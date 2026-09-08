@@ -22,6 +22,8 @@ from typing import Any, Dict, List, Optional, Tuple, Type, TYPE_CHECKING
 
 from ...plugin_system.registry import PluginRegistry
 from ...plugin_system.base import BaseTabPlugin
+from ...plugin_system.identity import plugin_display_name
+from ...plugin_system.dependencies import declared_dependencies, resolve_dep_token
 from ...plugin_system.discovery import PluginDiscovery
 from ...plugin_system.sources import PluginSource
 from ..utils.paths import parent_has_gui_plugin_dirs
@@ -78,6 +80,7 @@ class PluginService:
         self.settings_service = settings_service
         self._registry = registry or PluginRegistry()
         self._discovery_complete = False
+        self._last_activation_error: Optional[str] = None
         if container is not None:
             self.bind_container(container)
 
@@ -102,8 +105,15 @@ class PluginService:
         return self._registry.get_external_plugins()
 
     def get_plugin(self, name: str) -> Optional[Type[BaseTabPlugin]]:
-        """Get a specific plugin by name."""
+        """Get a specific plugin by plugin_id or unique display name."""
         return self._registry.get_plugin(name)
+
+    def resolve_plugin_key(self, name: str) -> Optional[str]:
+        """Resolve a display name or id to the registry key."""
+        return self._registry.resolve_plugin_key(name)
+
+    def get_last_activation_error(self) -> Optional[str]:
+        return self._last_activation_error
 
     def get_plugin_instance(self, name: str) -> Any:
         """Get or create a plugin instance by name."""
@@ -152,6 +162,167 @@ class PluginService:
     def get_enabled_plugins(self) -> Dict[str, Type[BaseTabPlugin]]:
         """Get all enabled plugins."""
         return self._registry.get_enabled_plugins()
+
+    def get_enabled_dependents(self, name: str) -> List[str]:
+        """Enabled plugins that transitively depend on *name* (not including it)."""
+        return self._registry.get_enabled_dependents(name)
+
+    def get_startup_order(self) -> List[str]:
+        return self._registry.get_startup_order()
+
+    def get_shutdown_order(self) -> List[str]:
+        return self._registry.get_shutdown_order()
+
+    def finalize_plugin_graph(self) -> Dict[str, str]:
+        """Reject plugins with missing or cyclic dependencies after discovery."""
+        errors = self._registry.finalize_dependency_graph()
+        if errors:
+            logger.warning(
+                "Rejected %s plugin(s) due to dependency errors", len(errors)
+            )
+        self._migrate_settings_aliases()
+        return errors
+
+    def _migrate_settings_aliases(self) -> None:
+        """Copy plugin_settings / enablement keys from display name to plugin_id."""
+        if not self.settings_service:
+            return
+        try:
+            for plugin_id, plugin_class in list(self._registry.get_all_plugins().items()):
+                display = plugin_display_name(plugin_class)
+                if display == plugin_id:
+                    continue
+                existing = self.settings_service.get_plugin_settings(plugin_id)
+                aliased = self.settings_service.get_plugin_settings(display)
+                if not existing and aliased:
+                    self.settings_service.save_plugin_settings(plugin_id, aliased)
+            disabled = self.settings_service.get_disabled_plugins()
+            enabled = self.settings_service.get_enabled_plugins()
+            disabled_mapped = self._map_saved_plugin_keys(disabled)
+            enabled_mapped = self._map_saved_plugin_keys(enabled)
+            if disabled_mapped != disabled:
+                self.settings_service.save_disabled_plugins(disabled_mapped)
+            if enabled_mapped != enabled:
+                self.settings_service.save_enabled_plugins(enabled_mapped)
+        except Exception as e:
+            logger.debug("Plugin settings alias migration skipped: %s", e)
+
+    def _map_saved_plugin_keys(self, names: List[str]) -> List[str]:
+        mapped: List[str] = []
+        for name in names:
+            key = self.resolve_plugin_key(name)
+            mapped.append(key if key else name)
+        return mapped
+
+    def _unsatisfied_dependencies(self, name: str) -> List[str]:
+        plugin_class = self.get_plugin(name)
+        if plugin_class is None:
+            return []
+        plugins = dict(self._registry.get_all_plugins())
+        unsat: List[str] = []
+        for token in declared_dependencies(plugin_class):
+            dep_id, err = resolve_dep_token(token, plugins)
+            if err or dep_id is None or not self.is_enabled(dep_id):
+                unsat.append(token)
+        return unsat
+
+    def activate_plugin(self, name: str) -> bool:
+        """Construct, run ``on_plugin_enabled``, then commit enablement.
+
+        Returns False and leaves the plugin disabled when construction or the
+        enable hook fails, or when dependencies are missing/disabled.
+        """
+        self._last_activation_error = None
+        key = self.resolve_plugin_key(name)
+        if not key:
+            self._last_activation_error = f"Plugin '{name}' not found"
+            logger.warning(self._last_activation_error)
+            return False
+        if self.is_enabled(key) and self.has_plugin_instance(key):
+            return True
+        unsat = self._unsatisfied_dependencies(key)
+        if unsat:
+            self._last_activation_error = (
+                f"Plugin '{key}' has unsatisfied dependencies: {', '.join(unsat)}"
+            )
+            logger.error(self._last_activation_error)
+            return False
+        try:
+            instance = self.get_plugin_instance(key)
+        except Exception as e:
+            self._last_activation_error = str(e)
+            logger.error("Failed to construct plugin '%s': %s", key, e)
+            try:
+                self.unload_plugin_instance(key)
+            except Exception:
+                pass
+            return False
+        was_enabled = self.is_enabled(key)
+        if not was_enabled:
+            self.enable_plugin(key)
+        try:
+            if hasattr(instance, "on_plugin_enabled"):
+                instance.on_plugin_enabled()
+        except Exception as e:
+            self._last_activation_error = str(e)
+            logger.error("Error calling on_plugin_enabled for '%s': %s", key, e)
+            self.disable_plugin(key)
+            try:
+                self.unload_plugin_instance(key)
+            except Exception:
+                pass
+            return False
+        display = plugin_display_name(self.get_plugin(key) or type(instance))
+        self.publish_event(
+            "plugin_enabled",
+            {"plugin_id": key, "plugin_name": display},
+        )
+        return True
+
+    def deactivate_plugin(self, name: str, *, cascade: bool = True) -> List[str]:
+        """Disable a plugin, optionally cascading to enabled dependents.
+
+        Consumers are stopped before providers. Each target gets
+        ``on_plugin_disabled``, is marked disabled, then unloaded.
+        Returns the plugin ids that were deactivated.
+        """
+        key = self.resolve_plugin_key(name) or name
+        targets: List[str] = []
+        if cascade:
+            targets.extend(self.get_enabled_dependents(key))
+        if self.is_enabled(key) or self.has_plugin_instance(key):
+            targets.append(key)
+        deactivated: List[str] = []
+        for tid in targets:
+            try:
+                if self.has_plugin_instance(tid):
+                    instance = self.get_plugin_instance(tid)
+                    if hasattr(instance, "on_plugin_disabled"):
+                        instance.on_plugin_disabled()
+            except Exception as e:
+                logger.error(
+                    "Error calling on_plugin_disabled for '%s': %s", tid, e
+                )
+            plugin_class = self.get_plugin(tid)
+            display = plugin_display_name(plugin_class) if plugin_class else tid
+            self.disable_plugin(tid)
+            logger.info("Disabled plugin: %s", tid)
+            self.publish_event(
+                "plugin_disabled",
+                {"plugin_id": tid, "plugin_name": display},
+            )
+            try:
+                self.unload_plugin_instance(tid)
+            except Exception as e:
+                logger.error("Error unloading plugin instance '%s': %s", tid, e)
+            deactivated.append(tid)
+        return deactivated
+
+    def publish_event_async(
+        self, event_name: str, event_data: Dict[str, Any] | None = None
+    ) -> Any:
+        """Publish a plugin event asynchronously."""
+        return self._registry.publish_event_async(event_name, event_data or {})
 
     def get_version_incompatibility(self, name: str) -> Optional[str]:
         """Get the version incompatibility reason for a plugin, if any."""
@@ -362,8 +533,8 @@ class PluginService:
                         priority=100,
                     ))
 
-                from ..utils.paths import get_plugins_dir
-                plugins_dir = get_plugins_dir()
+                from ..host_config import get_host_config
+                plugins_dir = get_host_config().plugins_dir()
                 discovery = PluginDiscovery(plugins_dir=str(plugins_dir))
                 total_registered = 0
                 builtin_registered = 0
@@ -425,6 +596,7 @@ class PluginService:
             raise
 
         self._discovery_complete = True
+        self.finalize_plugin_graph()
         
         # PERF: Clear the discovery object's accumulated list — all plugins have
         # been registered into the registry, so these (name, class, source) tuples

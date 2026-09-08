@@ -24,6 +24,10 @@ class PluginProtocol(Protocol):
     
     This is checked at runtime using isinstance() to determine if a class
     is a valid plugin.
+
+    ``plugin_id`` is the immutable registry key (optional; defaults to
+    ``plugin_name``). ``dependencies`` lists provider ids and is enforced
+    after discovery.
     """
     
     # Required metadata (class-level)
@@ -32,6 +36,7 @@ class PluginProtocol(Protocol):
     supported_platforms: List[str]
     
     # Optional metadata with defaults
+    plugin_id: str
     plugin_description: str
     plugin_author: str
     plugin_authors: List[str]
@@ -50,7 +55,7 @@ class TabExtension(Protocol):
     
     Attributes:
         plugin_name: Unique identifier for the plugin
-        tab_title: Display name shown in the tab bar
+        tab_title: Display name shown in the tab bar (not plugin_id)
         requires_admin: Whether admin privileges are needed
     """
     

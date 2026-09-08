@@ -58,13 +58,18 @@ class WindowTitleManager:
             plugin_version = None
             
             if not getattr(constants, "SINGLE_PLUGIN_MODE", False) and self.tab_controller:
-                tab_name = self.tab_controller.get_current_tab_name()
-                if tab_name:
-                    tab_info = self.tab_controller.get_tab_info(tab_name)
+                tab_id = self.tab_controller.get_current_tab_name()
+                if tab_id:
+                    tab_info = self.tab_controller.get_tab_info(tab_id)
                     if tab_info:
                         plugin_class = tab_info.get("plugin_class")
                         if plugin_class:
                             plugin_version = getattr(plugin_class, "plugin_version", None)
+                            tab_name = self.tab_controller.tab_label(plugin_class)
+                        else:
+                            tab_name = tab_id
+                    else:
+                        tab_name = tab_id
             
             title = build_title(VERSION_NAME, VERSION, CURRENT_PLATFORM, tab_name, plugin_version)
             self.main_window.setWindowTitle(title)

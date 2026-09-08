@@ -2,6 +2,7 @@
 Plugin system for Basic UI Application
 """
 
+from .identity import plugin_display_name, plugin_identity, plugin_tab_label
 from .base import BaseTabPlugin, CoreTabPlugin
 from .registry import PluginRegistry
 from .interfaces import (
@@ -30,6 +31,9 @@ __all__ = [
     # Base classes
     "BaseTabPlugin",
     "CoreTabPlugin",
+    "plugin_display_name",
+    "plugin_identity",
+    "plugin_tab_label",
     # Registry
     "PluginRegistry",
     # Protocol interfaces

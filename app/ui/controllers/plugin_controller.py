@@ -87,70 +87,60 @@ class PluginController:
                 logger.exception("plugin_state_changed listener failed")
 
     def toggle_plugin(self, plugin_name: str, enabled: bool) -> bool:
-        """Toggle a plugin on or off."""
+        """Toggle a plugin on or off.
+
+        Enablement is committed only after construction and ``on_plugin_enabled``
+        succeed. Disabling a provider also disables enabled dependents.
+        """
         plugin_class = self.plugin_service.get_plugin(plugin_name)
         if not plugin_class:
             logger.warning("Plugin '%s' not found", plugin_name)
             return False
 
+        key = self.plugin_service.resolve_plugin_key(plugin_name) or plugin_name
+
         if enabled:
-            if not self.plugin_service.is_enabled(plugin_name):
-                self.plugin_service.enable_plugin(plugin_name)
-                logger.info("Enabled plugin: %s", plugin_name)
-                try:
-                    instance = self.plugin_service.get_plugin_instance(plugin_name)
-                    if hasattr(instance, "on_plugin_enabled"):
-                        instance.on_plugin_enabled()
-                except Exception as e:
+            if not self.plugin_service.is_enabled(key):
+                if not self.plugin_service.activate_plugin(key):
+                    err = self.plugin_service.get_last_activation_error()
                     logger.error(
-                        "Error calling on_plugin_enabled for '%s': %s", plugin_name, e
+                        "Failed to enable plugin '%s'%s",
+                        key,
+                        f": {err}" if err else "",
                     )
-                self.plugin_service.publish_event(
-                    "plugin_enabled", {"plugin_name": plugin_name}
-                )
+                    return False
+                logger.info("Enabled plugin: %s", key)
 
             if self._host.main_window is not None:
-                if not self._host.has_chrome_for_plugin(plugin_name):
+                if not self._host.has_chrome_for_plugin(key):
                     self._host.integrate_plugin_extensions_dynamic(
-                        plugin_name, plugin_class
+                        key, plugin_class
                     )
                 else:
-                    logger.debug("Extensions already integrated for '%s'", plugin_name)
+                    logger.debug("Extensions already integrated for '%s'", key)
             else:
                 logger.warning(
                     "Cannot dynamically integrate extensions for '%s': MainWindow not set",
-                    plugin_name,
+                    key,
                 )
-        else:
-            if self.plugin_service.is_enabled(plugin_name):
-                try:
-                    if self.plugin_service.has_plugin_instance(plugin_name):
-                        instance = self.plugin_service.get_plugin_instance(plugin_name)
-                        if hasattr(instance, "on_plugin_disabled"):
-                            instance.on_plugin_disabled()
-                except Exception as e:
-                    logger.error(
-                        "Error calling on_plugin_disabled for '%s': %s", plugin_name, e
-                    )
-                self.plugin_service.disable_plugin(plugin_name)
-                logger.info("Disabled plugin: %s", plugin_name)
-                self.plugin_service.publish_event(
-                    "plugin_disabled", {"plugin_name": plugin_name}
-                )
+            self._save_plugin_states()
+            self._notify_plugin_toggled(key, True)
+            self._notify_plugin_state_changed()
+            return True
 
-            if self._host.main_window is not None:
-                self._host.remove_plugin_extensions_dynamic(plugin_name, plugin_class)
+        deactivated = self.plugin_service.deactivate_plugin(key)
+        if self._host.main_window is not None:
+            for did in deactivated:
+                cls = self.plugin_service.get_plugin(did)
+                if cls is not None:
+                    self._host.remove_plugin_extensions_dynamic(did, cls)
 
         self._save_plugin_states()
-        self._notify_plugin_toggled(plugin_name, enabled)
+        for did in deactivated:
+            self._notify_plugin_toggled(did, False)
+        if not deactivated:
+            self._notify_plugin_toggled(key, False)
         self._notify_plugin_state_changed()
-
-        if not enabled:
-            try:
-                self.plugin_service.unload_plugin_instance(plugin_name)
-            except Exception as e:
-                logger.error("Error unloading plugin instance '%s': %s", plugin_name, e)
-
         return True
 
     def is_plugin_enabled(self, plugin_name: str) -> bool:

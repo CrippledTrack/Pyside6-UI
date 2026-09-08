@@ -52,6 +52,7 @@ class ExampleTabPlugin(BaseTabPlugin):
     # Plugin Metadata
     # =========================================================================
     plugin_name = "Example Plugin"
+    plugin_id = "gui.example"
     tab_title = "Example Plugin"
     plugin_description = "A comprehensive example plugin showing all extension points"
     supported_platforms = ["Windows", "Linux", "macOS"]

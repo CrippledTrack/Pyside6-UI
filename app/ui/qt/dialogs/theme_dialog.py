@@ -11,7 +11,12 @@ import json
 import logging
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
-from ..themes.theme_manager import ThemeManager, create_palette_from_data
+from ..themes.theme_manager import (
+    ThemeManager,
+    create_palette_from_data,
+    normalize_theme_stylesheet,
+    theme_data_for_json,
+)
 from ....services.settings_service import SettingsService
 
 from ..bindings import (
@@ -349,7 +354,8 @@ class ThemeDialog(QDialog):
                 
                 if 'name' not in theme_data:
                     raise ValueError("Theme must have a 'name' field")
-                
+
+                normalize_theme_stylesheet(theme_data)
                 theme_name = theme_data['name']
                 
                 # Check if theme already exists
@@ -397,7 +403,7 @@ class ThemeDialog(QDialog):
         if file_path:
             try:
                 with open(file_path, 'w', encoding='utf-8') as f:
-                    json.dump(theme_data, f, indent=2, ensure_ascii=False)
+                    json.dump(theme_data_for_json(theme_data), f, indent=2, ensure_ascii=False)
                 
                 QMessageBox.information(self, "Success", f"Theme '{theme_name}' exported successfully!")
                     

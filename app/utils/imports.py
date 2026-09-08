@@ -29,7 +29,8 @@ def get_platforms_constants() -> Any:
     3. GUI/app/constants (framework defaults)
     
     Constants from higher priority sources override those from lower priority.
-    The result is cached after the first call.
+    The result is cached after the first call for the lifetime of the process
+(a single merged configuration; not per-profile).
     
     Returns:
         SimpleNamespace: A module-like object with merged constants

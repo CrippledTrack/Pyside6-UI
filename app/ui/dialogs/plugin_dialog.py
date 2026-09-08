@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 from .. import definitions as ui
 from ..abstractions.presenters import IDialogPresenter
 from ....plugin_system.base import BaseTabPlugin
+from ....plugin_system.identity import plugin_display_name
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ class PluginManagementDialog:
         settings_service: Optional[Any] = None,
         plugin_controller: Optional[Any] = None,
         dialog_presenter: Optional[IDialogPresenter] = None,
-        on_plugin_toggled: Optional[Callable[[str, bool], None]] = None,
+        on_plugin_toggled: Optional[Callable[[str, bool], Any]] = None,
     ) -> None:
         self._all_plugins = []  # List of (name, plugin_class)
         self._rejected_plugins = {}  # Dict of name -> (plugin_class, reason)
@@ -161,6 +162,7 @@ class PluginManagementDialog:
         # Tab 2: Technical Details
         tech_tab = ui.create_column()
         form = ui.create_form()
+        self.details_plugin_id = ui.create_label("-")
         self.details_type = ui.create_label("-")
         self.details_types = ui.create_label("-")
         self.details_requires_admin = ui.create_label("-")
@@ -169,6 +171,7 @@ class PluginManagementDialog:
         self.details_min_gui_version = ui.create_label("-")
         self.details_required_gui_version = ui.create_label("-")
         for label, value in (
+            ("Plugin ID:", self.details_plugin_id),
             ("Type:", self.details_type),
             ("Supported Interfaces:", self.details_types),
             ("Requires Admin:", self.details_requires_admin),
@@ -229,6 +232,17 @@ class PluginManagementDialog:
         ui.add(root, bottom)
         ui.set_dialog_content(self.dialog, root)
 
+    def _plugin_label(self, plugin_id: str, plugin_class: Optional[Type[Any]] = None) -> str:
+        """Display name for UI copy; *plugin_id* remains the registry key."""
+        cls = plugin_class
+        if cls is None:
+            cls = self.plugin_service.get_plugin(plugin_id)
+        if cls is None and plugin_id in self._rejected_plugins:
+            cls = self._rejected_plugins[plugin_id][0]
+        if cls is not None:
+            return plugin_display_name(cls)
+        return plugin_id
+
     def _get_extension_types(self, plugin_class: type) -> str:
         """Get a string describing which extension interfaces the plugin implements."""
         from ....plugin_system.extensions import EXTENSION_POINTS
@@ -251,12 +265,41 @@ class PluginManagementDialog:
     def toggle_plugin(self, name: str, state: int | bool) -> None:
         """Toggle plugin enabled/disabled state."""
         enabled = bool(state)
-        self._on_plugin_toggled(name, enabled)
-        
+        if not enabled:
+            dependents = self.plugin_service.get_enabled_dependents(name)
+            if dependents:
+                labels = []
+                for dep_id in dependents:
+                    cls = self.plugin_service.get_plugin(dep_id)
+                    labels.append(self._plugin_label(dep_id, cls) if cls else dep_id)
+                confirmed = self._confirm(
+                    "Disable dependent plugins",
+                    "Disabling this plugin will also disable:\n\n"
+                    + "\n".join(f"- {label}" for label in labels)
+                    + "\n\nContinue?",
+                )
+                if not confirmed:
+                    self.apply_filters()
+                    return
+        result = self._on_plugin_toggled(name, enabled)
+        if result is False:
+            err = ""
+            getter = getattr(self.plugin_service, "get_last_activation_error", None)
+            if callable(getter):
+                err = getter() or ""
+            self._warning(
+                "Plugin not enabled",
+                err or f"Failed to enable '{self._plugin_label(name)}'.",
+            )
+            self.apply_filters()
+            return
+
         # If this is the currently selected plugin, refresh the details panel
         # to update the extension checkboxes (grey out if disabled)
         if name == self.get_selected_plugin_name():
             self.on_selection_changed()
+        if not enabled:
+            self.apply_filters()
     
     def _force_enable_plugin(self, name: str, state: bool) -> None:
         """Force-enable a version-incompatible plugin."""
@@ -267,7 +310,7 @@ class PluginManagementDialog:
         # Show warning before force-enabling
         confirmed = self._confirm(
             "Force Enable Incompatible Plugin",
-            f"Plugin '{name}' is marked as incompatible:\n\n"
+            f"Plugin '{self._plugin_label(name)}' is marked as incompatible:\n\n"
             f"{self._rejected_plugins.get(name, ('', 'Unknown reason'))[1]}\n\n"
             "Force-enabling may cause crashes or unexpected behavior.\n"
             "Do you want to continue?",
@@ -439,6 +482,10 @@ class PluginManagementDialog:
         )
         
         ui.set_text(
+            self.details_plugin_id,
+            info.get("plugin_id") or name,
+        )
+        ui.set_text(
             self.details_type,
             "Core" if name in self.plugin_service.get_core_plugins() else "External",
         )
@@ -509,6 +556,7 @@ class PluginManagementDialog:
         for widget in (
             self.details_name,
             self.details_version_author,
+            self.details_plugin_id,
             self.details_type,
             self.details_types,
             self.details_requires_admin,
@@ -648,7 +696,7 @@ class PluginManagementDialog:
             ),
             ui.MenuAction(
                 "Copy Name",
-                lambda: ui.copy_to_clipboard(name),
+                lambda: ui.copy_to_clipboard(self._plugin_label(name, plugin_class)),
                 separator_before=True,
             ),
             ui.MenuAction(
@@ -666,6 +714,7 @@ class PluginManagementDialog:
         """Copy the selected plugin's complete summary."""
         lines = [
             f"Name: {info['name']}",
+            f"Plugin ID: {info.get('plugin_id') or name}",
             f"Version: {info['version']}",
             f"Author: {info['author']}",
             f"Type: {'Core' if name in self.plugin_service.get_core_plugins() else 'External'}",
@@ -685,7 +734,8 @@ class PluginManagementDialog:
         plugin_class = self.plugin_service.get_plugin(name)
         if not plugin_class:
             return
-        
+        label = self._plugin_label(name, plugin_class)
+
         plugin_target: Any = plugin_class
         try:
             plugin_target = self.plugin_service.get_plugin_instance(name)
@@ -707,7 +757,7 @@ class PluginManagementDialog:
                         settings_widget.load_settings(current_settings)
 
                     dialog = ui.create_dialog(
-                        f"Configure {name}",
+                        f"Configure {label}",
                         parent=self.dialog,
                         modal=True,
                     )
@@ -734,7 +784,7 @@ class PluginManagementDialog:
                 widget = plugin_target.get_configuration_widget(self.dialog)
                 if widget:
                     dialog = ui.create_dialog(
-                        f"Configure {name}",
+                        f"Configure {label}",
                         parent=self.dialog,
                         modal=True,
                     )
@@ -753,12 +803,12 @@ class PluginManagementDialog:
             
             self._info(
                 "No Configuration",
-                f"Plugin '{name}' has no configurable settings.",
+                f"Plugin '{label}' has no configurable settings.",
             )
         except Exception as e:
             self._error(
                 "Configuration Error",
-                f"Failed to open configuration for '{name}':\n{e}",
+                f"Failed to open configuration for '{label}':\n{e}",
             )
 
     def _finish_configuration(
@@ -792,7 +842,7 @@ class PluginManagementDialog:
         except Exception as exc:
             self._error(
                 "Configuration Error",
-                f"Failed to save configuration for '{name}':\n{exc}",
+                f"Failed to save configuration for '{self._plugin_label(name)}':\n{exc}",
             )
 
     def _warning(self, title: str, message: str) -> None:

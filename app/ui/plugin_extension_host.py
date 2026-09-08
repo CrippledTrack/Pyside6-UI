@@ -279,10 +279,13 @@ class PluginExtensionHost:
         )
 
     def start_service_extensions(self) -> None:
-        """Start all enabled ServiceExtension plugins."""
+        """Start all enabled ServiceExtension plugins in dependency order."""
         try:
             service_plugins = self.plugin_service.get_service_extensions(enabled_only=True)
-            for name, plugin_class in service_plugins.items():
+            for name in self.plugin_service.get_startup_order():
+                plugin_class = service_plugins.get(name)
+                if plugin_class is None:
+                    continue
                 try:
                     if self.is_extension_enabled(name, "Service"):
                         self._integrate_service_extension(name, plugin_class)
@@ -295,10 +298,18 @@ class PluginExtensionHost:
             logger.error("Error starting service extensions: %s", exc)
 
     def shutdown_service_extensions(self) -> None:
-        """Shutdown all ServiceExtension plugins that have instances."""
+        """Shutdown ServiceExtension plugins (consumers first) while instances exist."""
         try:
             service_plugins = self.plugin_service.get_service_extensions(enabled_only=True)
-            for name, _plugin_class in service_plugins.items():
+            names = [
+                name
+                for name in self.plugin_service.get_shutdown_order()
+                if name in service_plugins
+            ]
+            for leftover in service_plugins:
+                if leftover not in names:
+                    names.append(leftover)
+            for name in names:
                 try:
                     if self.plugin_service.has_plugin_instance(name):
                         instance = self.plugin_service.get_plugin_instance(name)

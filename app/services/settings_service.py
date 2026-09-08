@@ -14,8 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-from ..utils.paths import get_base_path
 from ..utils.imports import get_platforms_constants
+from ..host_config import get_host_config
 
 # PERF: Single call to get_platforms_constants() for both values (was 2 separate calls).
 try:
@@ -34,6 +34,29 @@ except (ImportError, AttributeError):
 logger = logging.getLogger(__name__)
 
 SETTINGS_SCHEMA_VERSION = 1
+
+KNOWN_SETTINGS_KEYS = {
+    "theme",
+    "disabled_plugins",
+    "enabled_plugins",
+    "logging_enabled",
+    "log_to_file",
+    "window_geometry",
+    "show_tooltips",
+    "hide_admin_menu",
+    "shortcuts_enabled",
+    "toast_notifications_enabled",
+    "toast_duration",
+    "new_ui_enabled",
+    "gui_version",
+    "settings_schema_version",
+    "plugin_settings",
+    "dev_mode",
+    "show_all_platforms",
+    "tab_order",
+    "last_active_tab",
+    "favorite_themes",
+}
 
 
 @dataclass
@@ -101,9 +124,19 @@ class AppSettings:
 class SettingsService:
     """Service for managing application settings with JSON persistence"""
     
-    def __init__(self) -> None:
-        self._settings_file = get_base_path() / "settings.json"
+    def __init__(
+        self,
+        settings_file: Optional[Path] = None,
+        host_config: Any = None,
+    ) -> None:
+        config = host_config if host_config is not None else get_host_config()
+        if settings_file is not None:
+            self._settings_file = Path(settings_file)
+        else:
+            self._settings_file = Path(config.settings_file())
         self._settings = AppSettings()
+        self._unknown_fields: Dict[str, Any] = {}
+        self._future_schema = False
         self._load_settings()
     
     def _load_settings(self) -> None:
@@ -116,6 +149,26 @@ class SettingsService:
             with open(self._settings_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             data = self._apply_migrations(data)
+            self._unknown_fields = {
+                key: value
+                for key, value in data.items()
+                if key not in KNOWN_SETTINGS_KEYS
+            }
+            try:
+                file_schema = int(data.get("settings_schema_version", 0))
+            except (TypeError, ValueError):
+                file_schema = 0
+            if file_schema > SETTINGS_SCHEMA_VERSION:
+                self._future_schema = True
+                logger.error(
+                    "Settings file uses unsupported schema version %s "
+                    "(supported %s); saves are disabled so unknown fields "
+                    "are not rewritten.",
+                    file_schema,
+                    SETTINGS_SCHEMA_VERSION,
+                )
+            else:
+                self._future_schema = False
             
             # Load theme with backward compatibility for renamed defaults
             if 'theme' in data:
@@ -206,51 +259,95 @@ class SettingsService:
             logger.error(f"Failed to load settings: {e}")
             # Keep default settings on error
     
+    def _settings_dict(self) -> Dict[str, Any]:
+        return {
+            'theme': self._settings.theme,
+            'disabled_plugins': self._settings.disabled_plugins,
+            'enabled_plugins': self._settings.enabled_plugins,
+            'logging_enabled': self._settings.logging_enabled,
+            'log_to_file': self._settings.log_to_file,
+            'window_geometry': {
+                'x': self._settings.window_geometry.x,
+                'y': self._settings.window_geometry.y,
+                'width': self._settings.window_geometry.width,
+                'height': self._settings.window_geometry.height,
+                'maximized': self._settings.window_geometry.maximized,
+                'fullscreen': self._settings.window_geometry.fullscreen
+            },
+            'show_tooltips': self._settings.show_tooltips,
+            'hide_admin_menu': self._settings.hide_admin_menu,
+            'shortcuts_enabled': self._settings.shortcuts_enabled,
+            'toast_notifications_enabled': self._settings.toast_notifications_enabled,
+            'toast_duration': self._settings.toast_duration,
+            'new_ui_enabled': self._settings.new_ui_enabled,
+            'gui_version': self._settings.gui_version,
+            'settings_schema_version': self._settings.settings_schema_version,
+            'plugin_settings': self._settings.plugin_settings.copy(),
+            'dev_mode': self._settings.dev_mode,
+            'show_all_platforms': self._settings.show_all_platforms,
+            'tab_order': self._settings.tab_order,
+            'last_active_tab': self._settings.last_active_tab,
+            'favorite_themes': self._settings.favorite_themes
+        }
+
+    def _merge_disk_snapshot(self, data: Dict[str, Any], disk: Dict[str, Any]) -> Dict[str, Any]:
+        """Preserve independent plugin_settings keys and unknown fields from disk."""
+        disk_ps = disk.get("plugin_settings")
+        if isinstance(disk_ps, dict):
+            merged = dict(disk_ps)
+            merged.update(data.get("plugin_settings") or {})
+            data["plugin_settings"] = merged
+        for key, value in disk.items():
+            if key not in KNOWN_SETTINGS_KEYS and key not in data:
+                data[key] = value
+        return data
+
     def _save_settings(self) -> None:
         """Save settings to JSON file"""
+        if self._future_schema:
+            logger.error(
+                "Refusing to save settings: file uses unsupported schema version %s",
+                self._settings.settings_schema_version,
+            )
+            return
         try:
-            # Convert settings to dict
-            data = {
-                'theme': self._settings.theme,
-                'disabled_plugins': self._settings.disabled_plugins,
-                'enabled_plugins': self._settings.enabled_plugins,
-                'logging_enabled': self._settings.logging_enabled,
-                'log_to_file': self._settings.log_to_file,
-                'window_geometry': {
-                    'x': self._settings.window_geometry.x,
-                    'y': self._settings.window_geometry.y,
-                    'width': self._settings.window_geometry.width,
-                    'height': self._settings.window_geometry.height,
-                    'maximized': self._settings.window_geometry.maximized,
-                    'fullscreen': self._settings.window_geometry.fullscreen
-                },
-                'show_tooltips': self._settings.show_tooltips,
-                'hide_admin_menu': self._settings.hide_admin_menu,
-                'shortcuts_enabled': self._settings.shortcuts_enabled,
-                'toast_notifications_enabled': self._settings.toast_notifications_enabled,
-                'toast_duration': self._settings.toast_duration,
-                'new_ui_enabled': self._settings.new_ui_enabled,
-                'gui_version': self._settings.gui_version,
-                'settings_schema_version': self._settings.settings_schema_version,
-                'plugin_settings': self._settings.plugin_settings.copy(),
-                'dev_mode': self._settings.dev_mode,
-                'show_all_platforms': self._settings.show_all_platforms,
-                'tab_order': self._settings.tab_order,
-                'last_active_tab': self._settings.last_active_tab,
-                'favorite_themes': self._settings.favorite_themes
-            }
-            
-            # Write to file atomically
+            data = self._settings_dict()
+            data.update(self._unknown_fields)
+
             import os
             import tempfile
-            
+
             settings_dir = os.path.dirname(self._settings_file)
             if settings_dir:
                 os.makedirs(settings_dir, exist_ok=True)
-            
-            temp_fd, temp_path = tempfile.mkstemp(dir=settings_dir or ".", prefix=".settings_json_")
+
+            if self._settings_file.exists():
+                try:
+                    with open(self._settings_file, "r", encoding="utf-8") as fh:
+                        disk = json.load(fh)
+                    if isinstance(disk, dict):
+                        try:
+                            disk_schema = int(disk.get("settings_schema_version", 0))
+                        except (TypeError, ValueError):
+                            disk_schema = 0
+                        if disk_schema > SETTINGS_SCHEMA_VERSION:
+                            logger.error(
+                                "Refusing to overwrite settings: on-disk schema "
+                                "version %s is newer than supported %s",
+                                disk_schema,
+                                SETTINGS_SCHEMA_VERSION,
+                            )
+                            self._future_schema = True
+                            return
+                        data = self._merge_disk_snapshot(data, disk)
+                except Exception as exc:
+                    logger.debug("Could not merge on-disk settings: %s", exc)
+
+            temp_fd, temp_path = tempfile.mkstemp(
+                dir=settings_dir or ".", prefix=".settings_json_"
+            )
             try:
-                with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
+                with os.fdopen(temp_fd, "w", encoding="utf-8") as f:
                     json.dump(data, f, indent=2, ensure_ascii=False)
                 os.replace(temp_path, self._settings_file)
             except Exception as e:
@@ -260,7 +357,7 @@ class SettingsService:
                     except Exception:
                         pass
                 raise e
-            
+
             logger.debug(f"Settings saved to {self._settings_file}")
         except Exception as e:
             logger.error(f"Failed to save settings: {e}")

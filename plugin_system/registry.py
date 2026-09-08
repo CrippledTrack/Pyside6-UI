@@ -10,6 +10,7 @@ from __future__ import annotations
 import inspect
 import logging
 import threading
+from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
 from types import MappingProxyType
 from typing import Any, Optional, List, Dict, Tuple, Type, Callable, TYPE_CHECKING
@@ -32,8 +33,16 @@ from .interfaces import (
     ISettingsService,
 )
 from .version_utils import check_version_compatibility, get_gui_version
+from .identity import plugin_display_name, plugin_identity
+from .dependencies import (
+    resolve_dependency_graph,
+    transitive_dependents,
+)
 
 logger = logging.getLogger(__name__)
+
+# Bound queued async event deliveries per plugin (drop oldest when exceeded).
+MAX_PENDING_EVENTS_PER_PLUGIN = 32
 
 
 def _is_show_all_platforms() -> bool:
@@ -81,12 +90,15 @@ def _create_prefixed_plugin(original_class: Type[Any], platform_prefix: str) -> 
 
     prefixed_name = f"{platform_prefix} {original_name}"
     prefixed_title = f"{platform_prefix} {original_title}"
+    original_id = plugin_identity(original_class)
+    prefixed_id = f"{platform_prefix} {original_id}"
 
     new_class = type(
         f"CrossPlatform_{original_class.__name__}",
         (original_class,),
         {
             'plugin_name': prefixed_name,
+            'plugin_id': prefixed_id,
             'tab_title': prefixed_title,
             '_original_tab_name': original_title,
             '_is_cross_platform': True,
@@ -114,6 +126,8 @@ def _check_implements_interface(plugin_class: Type[Any], interface: Type) -> boo
     except TypeError:
         pass
     return False
+
+
 def _get_platform_prefix(supported_platforms: List[str]) -> str:
     """Determine the platform prefix for display/registration name mapping."""
     if supported_platforms:
@@ -159,13 +173,23 @@ class PluginRegistry:
         self._external_plugins: Dict[str, Type[Any]] = {}
         self._disabled_plugins: set = set()
         
-        # Plugin instances cache
+        # Plugin instances cache (keyed by plugin_id)
         self._plugin_instances: Dict[str, Any] = {}
         self._lock = threading.Lock()
+        self._generations: Dict[str, int] = {}
+        self._in_flight: Dict[str, Future] = {}
+        self._tls = threading.local()
 
         # Optional async event delivery executor (opt-in)
         self._event_executor: Optional[ThreadPoolExecutor] = None
         self._event_executor_lock = threading.Lock()
+        self._pending_events: Dict[str, deque] = {}
+        self._event_pending_lock = threading.Lock()
+
+        # Dependency graph (plugin_id -> provider ids); filled by finalize_dependency_graph
+        self._dependency_edges: Dict[str, List[str]] = {}
+        self._startup_order: List[str] = []
+        self._graph_errors: Dict[str, str] = {}
         
         # Track plugins seen in this runtime
         self._seen_plugins: set = set()
@@ -248,10 +272,7 @@ class PluginRegistry:
         """
         discovered: Optional[str] = None
         with self._lock:
-            # Get plugin name - check for non-default values
-            plugin_name = getattr(plugin_class, 'plugin_name', None)
-            if not plugin_name or plugin_name == "Unnamed Plugin":
-                plugin_name = plugin_class.__name__
+            plugin_name = plugin_identity(plugin_class)
 
             # Check if in single plugin mode and filter
             constants = _get_platforms_constants_cached()
@@ -304,7 +325,7 @@ class PluginRegistry:
                 platform_prefix = _get_platform_prefix(supported_platforms)
 
                 plugin_class = _create_prefixed_plugin(plugin_class, platform_prefix)
-                plugin_name = plugin_class.plugin_name
+                plugin_name = plugin_identity(plugin_class)
                 logger.info(f"Loading cross-platform plugin '{plugin_name}' (supported: {supported_platforms})")
 
             # Check version compatibility
@@ -327,10 +348,8 @@ class PluginRegistry:
             self._notify_plugins_discovered([discovered])
 
     def get_registered_name(self, plugin_class: Type[Any]) -> str:
-        """Get the name this plugin class will be registered under."""
-        name = getattr(plugin_class, 'plugin_name', None)
-        if not name or name == "Unnamed Plugin":
-            name = plugin_class.__name__
+        """Get the identity this plugin class will be registered under."""
+        name = plugin_identity(plugin_class)
 
         show_all = _is_show_all_platforms()
         if hasattr(plugin_class, 'is_compatible'):
@@ -341,49 +360,162 @@ class PluginRegistry:
         if show_all and not is_compatible:
             supported_platforms = getattr(plugin_class, 'supported_platforms', [])
             platform_prefix = _get_platform_prefix(supported_platforms)
-            
             return f"{platform_prefix} {name}"
-        
+
         return name
 
-    def get_plugin_instance(self, name: str) -> Any:
-        """Get or create a plugin instance by name.
-
-        Creates instances on first access, caches them for reuse.
-        Construction runs *outside* the registry lock so plugin constructors
-        (and any registry queries they make) cannot deadlock.
-
-        Args:
-            name: Plugin name
-
-        Returns:
-            Plugin instance
+    def resolve_plugin_key(self, name_or_id: str) -> Optional[str]:
+        """Resolve a plugin_id or unique display name to a registry key.
 
         Raises:
-            ValueError: If plugin not found or container not set
+            ValueError: If *name_or_id* is an ambiguous display name.
         """
         with self._lock:
-            cached = self._plugin_instances.get(name)
-            if cached is not None:
-                return cached
-            plugin_class = self._plugins.get(name)
-            container = self._container
-            if not plugin_class:
-                raise ValueError(f"Plugin '{name}' not found in registry")
-            if not container:
-                raise ValueError("ServiceContainer not set - call set_container() first")
+            return self._resolve_plugin_key_unlocked(name_or_id)
 
-        instance = plugin_class(container)
+    def _resolve_plugin_key_unlocked(self, name_or_id: str) -> Optional[str]:
+        if name_or_id in self._plugins:
+            return name_or_id
+        matches = [
+            pid
+            for pid, cls in self._plugins.items()
+            if plugin_display_name(cls) == name_or_id
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            raise ValueError(
+                f"Ambiguous plugin display name {name_or_id!r}; use plugin_id "
+                f"(matches: {', '.join(sorted(matches))})"
+            )
+        return None
+
+    def _construction_stack(self) -> List[str]:
+        stack = getattr(self._tls, "stack", None)
+        if stack is None:
+            stack = []
+            self._tls.stack = stack
+        return stack
+
+    def _bump_generation(self, name: str) -> int:
+        nxt = self._generations.get(name, 0) + 1
+        self._generations[name] = nxt
+        return nxt
+
+    def _cleanup_instance(self, name: str, instance: Any) -> None:
+        if instance is None:
+            return
+        if hasattr(instance, "_cleanup_plugin_resources"):
+            try:
+                instance._cleanup_plugin_resources()
+            except Exception as e:
+                logger.error(
+                    f"Error cleaning up resources of '{name}': {e}"
+                )
+
+    def get_plugin_instance(self, name: str) -> Any:
+        """Get or create a plugin instance by id or unique display name.
+
+        Construction is single-flight per plugin and runs *outside* the
+        registry lock. Publication is refused if the plugin's generation
+        changed, the class was replaced, or the name was unregistered.
+        Re-entrant or cyclic construction on the same thread raises.
+        """
+        wait_future: Optional[Future] = None
+        should_construct = False
+        construct_future: Optional[Future] = None
+        plugin_class: Optional[Type[Any]] = None
+        container = None
+        generation = 0
+        key = name
 
         with self._lock:
-            existing = self._plugin_instances.get(name)
-            if existing is not None:
-                return existing
-            if name not in self._plugins:
+            resolved = self._resolve_plugin_key_unlocked(name)
+            if not resolved:
                 raise ValueError(f"Plugin '{name}' not found in registry")
-            self._plugin_instances[name] = instance
-            logger.debug(f"Created instance for plugin: {name}")
-            return instance
+            key = resolved
+            cached = self._plugin_instances.get(key)
+            if cached is not None:
+                return cached
+
+            stack = self._construction_stack()
+            if key in stack:
+                path = " -> ".join(stack + [key])
+                raise RuntimeError(
+                    f"Re-entrant or cyclic plugin construction: {path}"
+                )
+
+            inflight = self._in_flight.get(key)
+            if inflight is not None:
+                wait_future = inflight
+            else:
+                plugin_class = self._plugins.get(key)
+                container = self._container
+                if not plugin_class:
+                    raise ValueError(f"Plugin '{key}' not found in registry")
+                if not container:
+                    raise ValueError(
+                        "ServiceContainer not set - call set_container() first"
+                    )
+                generation = self._generations.get(key, 0)
+                construct_future = Future()
+                self._in_flight[key] = construct_future
+                should_construct = True
+
+        if wait_future is not None:
+            return wait_future.result()
+
+        assert construct_future is not None and plugin_class is not None
+        stack = self._construction_stack()
+        stack.append(key)
+        discarded = None
+        published = None
+        error: Optional[BaseException] = None
+        try:
+            instance = plugin_class(container)
+        except BaseException as exc:
+            error = exc
+            instance = None
+        finally:
+            if stack and stack[-1] == key:
+                stack.pop()
+
+        with self._lock:
+            self._in_flight.pop(key, None)
+            if error is not None:
+                if not construct_future.done():
+                    construct_future.set_exception(error)
+            else:
+                existing = self._plugin_instances.get(key)
+                current_gen = self._generations.get(key, 0)
+                registered_class = self._plugins.get(key)
+                if existing is not None:
+                    discarded = instance
+                    published = existing
+                elif (
+                    current_gen != generation
+                    or registered_class is not plugin_class
+                    or key not in self._plugins
+                ):
+                    discarded = instance
+                    error = ValueError(
+                        f"Plugin '{key}' construction was invalidated"
+                    )
+                else:
+                    self._plugin_instances[key] = instance
+                    published = instance
+                    logger.debug(f"Created instance for plugin: {key}")
+                if error is not None:
+                    if not construct_future.done():
+                        construct_future.set_exception(error)
+                elif not construct_future.done():
+                    construct_future.set_result(published)
+
+        if discarded is not None:
+            self._cleanup_instance(key, discarded)
+        if error is not None:
+            raise error
+        return published
     
     def get_plugin_instances(self, enabled_only: bool = True) -> Dict[str, Any]:
         """Get instances for all (or enabled) plugins.
@@ -407,7 +539,11 @@ class PluginRegistry:
     def has_plugin_instance(self, name: str) -> bool:
         """Check if a plugin instance is cached."""
         with self._lock:
-            return name in self._plugin_instances
+            try:
+                key = self._resolve_plugin_key_unlocked(name) or name
+            except ValueError:
+                return False
+            return key in self._plugin_instances
 
     def _validate_extension_plugin(self, plugin_class: Type[Any], plugin_name: str) -> List[str]:
         """Validate an extension plugin."""
@@ -473,20 +609,26 @@ class PluginRegistry:
         return True
 
     def _handle_plugin_conflicts(self, plugin_name: str, is_core: bool) -> bool:
-        """Handle plugin name conflicts."""
+        """Handle plugin_id conflicts with an explicit replacement rule.
+
+        Same identity: core replaces external; a second external is skipped.
+        Distinct identities with the same display name may both register.
+        """
         if plugin_name not in self._plugins:
             return True
         
         existing_is_core = plugin_name in self._core_plugins
         if existing_is_core and not is_core:
-            logger.warning(f"Skipping external plugin '{plugin_name}' - conflicts with core plugin")
+            logger.warning(
+                f"Skipping plugin '{plugin_name}' - identity already used by a core plugin"
+            )
             return False
         
         if not existing_is_core and is_core:
             logger.info(f"Replacing external plugin '{plugin_name}' with core plugin")
             if plugin_name in self._external_plugins:
                 del self._external_plugins[plugin_name]
-            # Clear cached instance
+            self._bump_generation(plugin_name)
             self._plugin_instances.pop(plugin_name, None)
         
         return True
@@ -499,6 +641,8 @@ class PluginRegistry:
         is held (subscribers may query the instance cache).
         """
         self._plugins[plugin_name] = plugin_class
+        if plugin_name not in self._generations:
+            self._generations[plugin_name] = 0
         if is_core:
             self._core_plugins[plugin_name] = plugin_class
         else:
@@ -542,8 +686,14 @@ class PluginRegistry:
         return MappingProxyType(self._external_plugins)
 
     def get_plugin(self, name: str) -> Optional[Type[Any]]:
-        """Get a specific plugin class by name."""
-        return self._plugins.get(name)
+        """Get a specific plugin class by plugin_id or unique display name."""
+        try:
+            key = self.resolve_plugin_key(name)
+        except ValueError:
+            raise
+        if key is None:
+            return None
+        return self._plugins.get(key)
 
     def list_plugin_names(self) -> List[str]:
         """Get list of all plugin names."""
@@ -553,6 +703,13 @@ class PluginRegistry:
         """Clear all registered plugins and cached instances."""
         with self._lock:
             instances = list(self._plugin_instances.items())
+            in_flight_names = list(self._in_flight.keys())
+            for name in set(
+                list(self._generations)
+                + list(self._plugin_instances)
+                + in_flight_names
+            ):
+                self._bump_generation(name)
             self._plugin_instances.clear()
             unloaded_names = [name for name, _ in instances]
             self._plugins.clear()
@@ -564,14 +721,17 @@ class PluginRegistry:
             for category_map in self._extension_category_maps.values():
                 category_map.clear()
             self._rejected_plugins.clear()
+            self._dependency_edges.clear()
+            self._startup_order.clear()
+            self._graph_errors.clear()
+
+        pending_to_cancel = self._take_all_pending_event_futures()
+        for fut in pending_to_cancel:
+            fut.cancel()
 
         # Cleanup outside the lock (may wait on QThreads / touch UI)
         for name, instance in instances:
-            if hasattr(instance, '_cleanup_plugin_resources'):
-                try:
-                    instance._cleanup_plugin_resources()
-                except Exception as e:
-                    logger.error(f"Error cleaning up resources during clear of '{name}': {e}")
+            self._cleanup_instance(name, instance)
 
         self._shutdown_event_executor()
         if unloaded_names:
@@ -637,40 +797,51 @@ class PluginRegistry:
     # Enable/Disable
     # =========================================================================
 
-    def disable_plugin(self, name: str) -> None:
-        """Disable a plugin by name."""
-        self._disabled_plugins.add(name)
-        self._notify_plugin_state_changed(name, False)
-
     def unload_plugin_instance(self, name: str) -> None:
         """Remove a plugin instance from the cache and trigger its framework cleanup.
 
-        Cleanup and lifecycle notify run *outside* the registry lock so
-        subscribers (e.g. TabController.remove_tab) cannot deadlock by
-        re-entering registry methods that also take ``_lock``.
+        Bumps the plugin generation, cancels queued async events, then cleans
+        the object *outside* the registry lock.
         """
+        try:
+            key = self.resolve_plugin_key(name) or name
+        except ValueError:
+            key = name
         with self._lock:
-            instance = self._plugin_instances.pop(name, None)
+            self._bump_generation(key)
+            instance = self._plugin_instances.pop(key, None)
+        pending = self._take_pending_event_futures(key)
+        for fut in pending:
+            fut.cancel()
 
         if instance is None:
             return
 
-        if hasattr(instance, '_cleanup_plugin_resources'):
-            try:
-                instance._cleanup_plugin_resources()
-            except Exception as e:
-                logger.error(f"Error cleaning up resources during unload of '{name}': {e}")
-        logger.debug(f"Unloaded plugin instance: {name}")
-        self._notify_plugins_unloaded([name])
+        self._cleanup_instance(key, instance)
+        logger.debug(f"Unloaded plugin instance: {key}")
+        self._notify_plugins_unloaded([key])
 
     def enable_plugin(self, name: str) -> None:
-        """Enable a plugin by name."""
-        self._disabled_plugins.discard(name)
-        self._notify_plugin_state_changed(name, True)
+        """Enable a plugin by id or unique display name."""
+        key = self.resolve_plugin_key(name) or name
+        self._disabled_plugins.discard(key)
+        self._notify_plugin_state_changed(key, True)
+
+    def disable_plugin(self, name: str) -> None:
+        """Disable a plugin by id or unique display name."""
+        key = self.resolve_plugin_key(name) or name
+        self._disabled_plugins.add(key)
+        self._notify_plugin_state_changed(key, False)
 
     def is_enabled(self, name: str) -> bool:
         """Check if a plugin is enabled."""
-        return name in self._plugins and name not in self._disabled_plugins
+        try:
+            key = self.resolve_plugin_key(name)
+        except ValueError:
+            return False
+        if key is None:
+            return False
+        return key in self._plugins and key not in self._disabled_plugins
 
     def get_enabled_plugins(self) -> Dict[str, Type[Any]]:
         """Get all enabled plugin classes."""
@@ -715,6 +886,118 @@ class PluginRegistry:
         if enabled_only:
             return {k: v for k, v in self._event_subscriber_plugins.items() if self.is_enabled(k)}
         return MappingProxyType(self._event_subscriber_plugins)
+
+    def get_startup_order(self) -> List[str]:
+        """Provider-first plugin ids from the last ``finalize_dependency_graph``."""
+        if self._startup_order:
+            return list(self._startup_order)
+        return self.list_plugin_names()
+
+    def get_shutdown_order(self) -> List[str]:
+        """Consumer-first plugin ids."""
+        return list(reversed(self.get_startup_order()))
+
+    def get_dependency_edges(self) -> Dict[str, List[str]]:
+        return {k: list(v) for k, v in self._dependency_edges.items()}
+
+    def get_graph_errors(self) -> Dict[str, str]:
+        return dict(self._graph_errors)
+
+    def get_enabled_dependents(self, name: str) -> List[str]:
+        """Enabled plugins that transitively depend on *name*, consumers first."""
+        try:
+            key = self.resolve_plugin_key(name)
+        except ValueError:
+            return []
+        if key is None:
+            return []
+        deps = set(transitive_dependents(key, self._dependency_edges))
+        order = [pid for pid in self.get_shutdown_order() if pid in deps and self.is_enabled(pid)]
+        extra = [pid for pid in deps if pid not in order and self.is_enabled(pid)]
+        return order + extra
+
+    def reject_registered_plugin(self, name: str, reason: str) -> None:
+        """Move a registered plugin to the rejected list and drop its maps."""
+        with self._lock:
+            plugin_class = self._plugins.pop(name, None)
+            if plugin_class is None:
+                return
+            self._core_plugins.pop(name, None)
+            self._external_plugins.pop(name, None)
+            self._disabled_plugins.add(name)
+            for category_map in self._extension_category_maps.values():
+                category_map.pop(name, None)
+            self._rejected_plugins[name] = (plugin_class, reason)
+            logger.warning("Rejected plugin '%s': %s", name, reason)
+            instance = self._plugin_instances.pop(name, None)
+            self._bump_generation(name)
+
+        if instance is not None:
+            self._cleanup_instance(name, instance)
+            self._notify_plugins_unloaded([name])
+
+    def finalize_dependency_graph(self) -> Dict[str, str]:
+        """Resolve dependencies after discovery. Reject missing/cyclic plugins.
+
+        Returns the error map (plugin id -> diagnostic).
+        """
+        plugins = dict(self.get_all_plugins())
+        order, errors, edges = resolve_dependency_graph(plugins)
+        self._startup_order = order
+        self._dependency_edges = edges
+        self._graph_errors = dict(errors)
+        for plugin_id, reason in list(errors.items()):
+            if plugin_id in self._plugins:
+                self.reject_registered_plugin(plugin_id, reason)
+        return dict(errors)
+
+    def _take_pending_event_futures(self, name: str) -> List[Future]:
+        with self._event_pending_lock:
+            q = self._pending_events.pop(name, deque())
+            return list(q)
+
+    def _take_all_pending_event_futures(self) -> List[Future]:
+        with self._event_pending_lock:
+            futures: List[Future] = []
+            for q in self._pending_events.values():
+                futures.extend(q)
+            self._pending_events.clear()
+            return futures
+
+    def _track_event_future(self, name: str, fut: Future) -> None:
+        with self._event_pending_lock:
+            q = self._pending_events.setdefault(name, deque())
+            while len(q) >= MAX_PENDING_EVENTS_PER_PLUGIN:
+                old = q.popleft()
+                old.cancel()
+                logger.warning(
+                    "Dropped oldest queued event for '%s' (pending cap %s)",
+                    name,
+                    MAX_PENDING_EVENTS_PER_PLUGIN,
+                )
+            q.append(fut)
+
+        def _done(finished: Future, plugin_id: str = name) -> None:
+            with self._event_pending_lock:
+                pending = self._pending_events.get(plugin_id)
+                if pending is None:
+                    return
+                try:
+                    pending.remove(finished)
+                except ValueError:
+                    pass
+
+        fut.add_done_callback(_done)
+
+    def _event_delivery_allowed(self, name: str, generation: int) -> bool:
+        with self._lock:
+            if self._generations.get(name, 0) != generation:
+                return False
+            if name not in self._plugin_instances:
+                return False
+            if name in self._disabled_plugins:
+                return False
+            return True
     
     # =========================================================================
     # Event Bus
@@ -772,8 +1055,10 @@ class PluginRegistry:
     def publish_event_async(self, event_name: str, event_data: Dict[str, Any] = None) -> List["Future[None]"]:
         """Publish an event asynchronously to subscribed plugins (opt-in).
 
-        This prevents slow subscribers from blocking the caller. Callbacks are
-        executed on a thread pool. Any UI work must marshal back to the Qt thread.
+        Callbacks run on a bounded thread pool. Delivery is dropped if the
+        plugin's generation changed, it was disabled, or its instance was
+        unloaded before the worker ran. UI work must marshal to the main
+        thread via ``IUIEventLoop``.
         """
         if event_data is None:
             event_data = {}
@@ -789,12 +1074,23 @@ class PluginRegistry:
 
             try:
                 callback = subscriptions[event_name]
-    
-                def _run(cb=callback, data=event_data, name=plugin_name, ev=event_name):
+                with self._lock:
+                    generation = self._generations.get(plugin_name, 0)
+
+                def _run(
+                    cb=callback,
+                    data=event_data,
+                    name=plugin_name,
+                    ev=event_name,
+                    gen=generation,
+                ):
+                    if not self._event_delivery_allowed(name, gen):
+                        return
                     try:
-                        # Check if the callback explicitly requests execution on the UI thread
-                        run_on_ui = getattr(cb, "_run_on_ui_thread", False) or getattr(getattr(cb, "__func__", None), "_run_on_ui_thread", False)
-                        
+                        run_on_ui = getattr(cb, "_run_on_ui_thread", False) or getattr(
+                            getattr(cb, "__func__", None), "_run_on_ui_thread", False
+                        )
+
                         if run_on_ui:
                             event_loop = self._get_ui_event_loop()
                             if event_loop is not None:
@@ -804,8 +1100,10 @@ class PluginRegistry:
                         cb(data)
                     except Exception as e:
                         logger.error(f"Error delivering async event '{ev}' to '{name}': {e}")
-    
-                futures.append(executor.submit(_run))
+
+                fut = executor.submit(_run)
+                self._track_event_future(plugin_name, fut)
+                futures.append(fut)
             except Exception as e:
                 logger.error(f"Error scheduling event '{event_name}' to '{plugin_name}': {e}")
 

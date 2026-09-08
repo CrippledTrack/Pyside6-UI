@@ -1,7 +1,10 @@
 """Path utilities for determining application directories.
 
 This module provides functions to locate various application directories
-whether running from source or as a PyInstaller bundle.
+Keep portable mode as the default (settings/logs next to the inferred
+install or source root). Hosts that need a user-data directory should
+inject :class:`~GUI.app.host_config.HostConfig` at bootstrap.
+
 """
 
 from __future__ import annotations

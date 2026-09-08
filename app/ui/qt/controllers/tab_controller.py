@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 from ....services.interfaces import IAdminService, IDaemonService
 from ....services.plugin_service import PluginService
 from .....plugin_system.tab_content import resolve_tab_content
+from .....plugin_system.identity import plugin_tab_label
 from ...active_backend import get_active_ui_backend_id
 
 from ..widgets.admin_required_placeholder import AdminRequiredPlaceholder
@@ -79,21 +80,57 @@ class TabController(QObject):
         """
         self._batch_loading = enabled
         logger.debug(f"Set tab controller batch loading to {enabled}")
+
+    @staticmethod
+    def tab_label(plugin_class: Any) -> str:
+        """Human-readable tab title (not the registry plugin_id)."""
+        return plugin_tab_label(plugin_class)
+
+    def plugin_id_at(self, index: int) -> Optional[str]:
+        """Return the plugin_id stored on the tab at *index*."""
+        if index < 0 or index >= self.tab_widget.count():
+            return None
+        data = self.tab_widget.tabBar().tabData(index)
+        if isinstance(data, str) and data:
+            return data
+        text = self.tab_widget.tabText(index)
+        if text in self.loaded_tabs:
+            return text
+        try:
+            return self.plugin_service.resolve_plugin_key(text)
+        except ValueError:
+            return None
+
+    def index_for_plugin(self, plugin_id: str) -> int:
+        """Find the tab index for a plugin_id (or unique display name)."""
+        bar = self.tab_widget.tabBar()
+        for i in range(self.tab_widget.count()):
+            if bar.tabData(i) == plugin_id:
+                return i
+        for i in range(self.tab_widget.count()):
+            if self.tab_widget.tabText(i) == plugin_id:
+                return i
+        return -1
+
+    def _bind_tab(self, index: int, plugin_id: str, plugin_class: Any) -> None:
+        self.tab_widget.setTabText(index, self.tab_label(plugin_class))
+        self.tab_widget.tabBar().setTabData(index, plugin_id)
     
     def add_tab(self, tab_name: str, plugin_class: Any) -> None:
         """Add a new tab to the tab widget.
         
         Args:
-            tab_name: Name of the tab
+            tab_name: Registry ``plugin_id`` (stored as tab data; not the bar label)
             plugin_class: Plugin class for the tab
         """
-        placeholder = LoadingPlaceholder(tab_name)
+        placeholder = LoadingPlaceholder(self.tab_label(plugin_class))
         self.loaded_tabs[tab_name] = {
             "plugin_class": plugin_class,
             "instance": None,
             "placeholder": placeholder,
         }
-        self.tab_widget.addTab(placeholder, tab_name)
+        index = self.tab_widget.addTab(placeholder, self.tab_label(plugin_class))
+        self.tab_widget.tabBar().setTabData(index, tab_name)
         self.tab_added.emit(tab_name)
         self.title_update_requested.emit()
         logger.debug(f"Added tab: {tab_name}")
@@ -108,17 +145,16 @@ class TabController(QObject):
         Args:
             tab_name: Name of the tab to remove
         """
-        for i in range(self.tab_widget.count()):
-            if self.tab_widget.tabText(i) == tab_name:
-                widget = self.tab_widget.widget(i)
-                self.tab_widget.removeTab(i)
-                if widget:
-                    try:
-                        widget.close()
-                        widget.deleteLater()
-                    except Exception as e:
-                        logger.error(f"Error closing/deleting tab widget '{tab_name}': {e}")
-                break
+        index = self.index_for_plugin(tab_name)
+        if index >= 0:
+            widget = self.tab_widget.widget(index)
+            self.tab_widget.removeTab(index)
+            if widget:
+                try:
+                    widget.close()
+                    widget.deleteLater()
+                except Exception as e:
+                    logger.error(f"Error closing/deleting tab widget '{tab_name}': {e}")
 
         if tab_name in self.loaded_tabs:
             tab_info = self.loaded_tabs[tab_name]
@@ -145,8 +181,11 @@ class TabController(QObject):
             index: Index of the tab to remove
         """
         if 0 <= index < self.tab_widget.count():
-            tab_name = self.tab_widget.tabText(index)
-            self.remove_tab(tab_name)
+            tab_name = self.plugin_id_at(index)
+            if tab_name:
+                self.remove_tab(tab_name)
+            else:
+                self.tab_widget.removeTab(index)
     
     def on_tab_changed(self, index: int) -> None:
         """Handle tab change event.
@@ -164,7 +203,7 @@ class TabController(QObject):
                 self._previous_tab_index = -1
             else:
                 try:
-                    prev_tab_name = self.tab_widget.tabText(self._previous_tab_index)
+                    prev_tab_name = self.plugin_id_at(self._previous_tab_index)
                     prev_instance_info = self.loaded_tabs.get(prev_tab_name)
                     prev_instance = prev_instance_info.get("instance") if prev_instance_info else None
 
@@ -185,8 +224,8 @@ class TabController(QObject):
         
         try:
             self.is_loading_tab = True
-            tab_name = self.tab_widget.tabText(index)
-            tab_info = self.loaded_tabs.get(tab_name)
+            tab_name = self.plugin_id_at(index)
+            tab_info = self.loaded_tabs.get(tab_name) if tab_name else None
             
             if not tab_info:
                 self.is_loading_tab = False
@@ -215,7 +254,7 @@ class TabController(QObject):
                 
                 if self.admin_service.needs_admin_for_plugin(requires_admin):
                     # Show admin required placeholder
-                    admin_widget = self._create_admin_placeholder(tab_name)
+                    admin_widget = self._create_admin_placeholder(self.tab_label(plugin_class))
                     tab_info["instance"] = admin_widget
                 else:
                     # Create the actual plugin content (create_tab_content or create_widget)
@@ -239,7 +278,10 @@ class TabController(QObject):
                             old_widget.deleteLater()
                         except Exception as e:
                             logger.debug(f"Error closing/deleting placeholder widget: {e}")
-                    self.tab_widget.insertTab(current_index, tab_info["instance"], tab_name)
+                    plugin_class = tab_info.get("plugin_class")
+                    label = self.tab_label(plugin_class) if plugin_class else tab_name
+                    self.tab_widget.insertTab(current_index, tab_info["instance"], label)
+                    self.tab_widget.tabBar().setTabData(current_index, tab_name)
                     self.tab_widget.setCurrentIndex(current_index)
                 
                 logger.info(f"Lazy loaded plugin tab: {tab_name}")
@@ -256,13 +298,18 @@ class TabController(QObject):
         
         except Exception as e:
             logger.error(f"Error loading tab {tab_name}: {e}")
-            # Replace current tab content with an error placeholder
             try:
-                error_widget = ErrorPlaceholder(tab_name, str(e))
+                error_label = tab_name or "Plugin"
+                plugin_class = (tab_info or {}).get("plugin_class") if tab_name else None
+                if plugin_class:
+                    error_label = self.tab_label(plugin_class)
+                error_widget = ErrorPlaceholder(error_label, str(e))
                 current_index = self.tab_widget.currentIndex()
                 if current_index >= 0:
                     self.tab_widget.removeTab(current_index)
-                    self.tab_widget.insertTab(current_index, error_widget, tab_name)
+                    self.tab_widget.insertTab(current_index, error_widget, error_label)
+                    if tab_name:
+                        self.tab_widget.tabBar().setTabData(current_index, tab_name)
                     self.tab_widget.setCurrentIndex(current_index)
             except Exception:
                 pass
@@ -286,11 +333,7 @@ class TabController(QObject):
         requires_admin = getattr(plugin_class, 'requires_admin', False)
         
         # Find the tab index
-        index = -1
-        for i in range(self.tab_widget.count()):
-            if self.tab_widget.tabText(i) == tab_name:
-                index = i
-                break
+        index = self.index_for_plugin(tab_name)
         
         if index < 0:
             logger.warning(f"Tab '{tab_name}' not found in tab widget")
@@ -324,7 +367,8 @@ class TabController(QObject):
                     old_widget.deleteLater()
                 except Exception as e:
                     logger.debug(f"Error closing/deleting old widget during tab reload: {e}")
-            self.tab_widget.insertTab(index, widget, tab_name)
+            self.tab_widget.insertTab(index, widget, self.tab_label(plugin_class))
+            self.tab_widget.tabBar().setTabData(index, tab_name)
             
             # If this was the current tab, make sure it's still selected
             current_index = self.tab_widget.currentIndex()
@@ -337,14 +381,10 @@ class TabController(QObject):
             # Keep the placeholder on error
     
     def get_current_tab_name(self) -> Optional[str]:
-        """Get the name of the currently active tab.
-        
-        Returns:
-            Tab name or None if no tab is selected
-        """
+        """Return the active tab's ``plugin_id`` (session identity, not the bar label)."""
         current_index = self.tab_widget.currentIndex()
         if current_index >= 0:
-            return self.tab_widget.tabText(current_index)
+            return self.plugin_id_at(current_index)
         return None
     
     def get_tab_info(self, tab_name: str) -> Optional[Dict[str, Any]]:
@@ -367,14 +407,12 @@ class TabController(QObject):
         return self.tab_widget.count()
     
     def get_tab_order(self) -> List[str]:
-        """Get the current order of tabs.
-        
-        Returns:
-            List of tab names in their current visual order
-        """
+        """Return visual tab order as ``plugin_id`` values for session persistence."""
         order = []
         for i in range(self.tab_widget.count()):
-            order.append(self.tab_widget.tabText(i))
+            plugin_id = self.plugin_id_at(i)
+            if plugin_id:
+                order.append(plugin_id)
         return order
 
     def clear_loaded_tabs(self) -> None:
@@ -422,11 +460,9 @@ class TabController(QObject):
                     except Exception as e:
                         logger.debug(f"Error calling deactivation hook for {tab_name}: {e}")
 
-                # Detach from QTabWidget *before* cleanup deleteLater (avoids Qt abort)
-                for i in range(self.tab_widget.count()):
-                    if self.tab_widget.tabText(i) == tab_name:
-                        self.tab_widget.removeTab(i)
-                        break
+                index = self.index_for_plugin(tab_name)
+                if index >= 0:
+                    self.tab_widget.removeTab(index)
 
                 try:
                     self.plugin_service.unload_plugin_instance(tab_name)
@@ -497,7 +533,7 @@ class TabController(QObject):
         if tab_index < 0:
             return
         
-        tab_name = self.tab_widget.tabText(tab_index)
+        tab_name = self.plugin_id_at(tab_index)
         
         # Create context menu
         context_menu = QMenu(self.tab_widget)
@@ -535,14 +571,14 @@ class TabController(QObject):
             index: Index of the tab to close
         """
         if 0 <= index < self.tab_widget.count():
-            tab_name = self.tab_widget.tabText(index)
+            label = self.tab_widget.tabText(index)
             self.remove_tab_by_index(index)
             self.title_update_requested.emit()
             
             # Show toast notification if parent has toast_manager
             parent = self.parent()
             if parent and hasattr(parent, 'toast_manager'):
-                parent.toast_manager.show_info(f"Closed tab: {tab_name}")
+                parent.toast_manager.show_info(f"Closed tab: {label}")
     
     def close_other_tabs(self, keep_index: int) -> None:
         """Close all tabs except the one at keep_index.
@@ -553,7 +589,7 @@ class TabController(QObject):
         if keep_index < 0 or keep_index >= self.tab_widget.count():
             return
         
-        keep_tab_name = self.tab_widget.tabText(keep_index)
+        keep_tab_id = self.plugin_id_at(keep_index)
         
         self.set_batch_loading(True)
         try:
@@ -565,11 +601,7 @@ class TabController(QObject):
             self.set_batch_loading(False)
             
         # Find the new index of the kept tab
-        new_index = -1
-        for i in range(self.tab_widget.count()):
-            if self.tab_widget.tabText(i) == keep_tab_name:
-                new_index = i
-                break
+        new_index = self.index_for_plugin(keep_tab_id) if keep_tab_id else -1
                 
         if new_index >= 0:
             if self.tab_widget.currentIndex() == new_index:
@@ -614,7 +646,8 @@ Supported Platforms: {', '.join(plugin_info.get('supported_platforms', []))}
 Requires Admin: {'Yes' if plugin_info.get('requires_admin', False) else 'No'}
 Compatible: {'Yes' if plugin_info.get('compatible', False) else 'No'}"""
             
-            QMessageBox.information(self.tab_widget, f"Plugin Info - {tab_name}", info_text)
+            display = plugin_info.get("name") or self.tab_label(plugin_class)
+            QMessageBox.information(self.tab_widget, f"Plugin Info - {display}", info_text)
         else:
             QMessageBox.warning(self.tab_widget, "Plugin Info", f"Plugin '{tab_name}' not found.")
 

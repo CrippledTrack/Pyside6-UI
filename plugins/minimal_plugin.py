@@ -23,6 +23,7 @@ class MinimalTabPlugin(BaseTabPlugin):
     # Plugin Metadata
     # =========================================================================
     plugin_name = "Minimal Plugin"
+    plugin_id = "gui.minimal"
     tab_title = "Minimal Plugin"
     plugin_description = "A minimal plugin with only required components"
     supported_platforms = ["Windows", "Linux", "macOS"]

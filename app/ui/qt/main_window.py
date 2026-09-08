@@ -330,9 +330,9 @@ class MainWindow(QMainWindow):
         if self.settings_service:
             last_active = self.settings_service.get_last_active_tab()
             if last_active:
-                # Find index of this tab
                 for i in range(self.tab_widget.count()):
-                    if self.tab_widget.tabText(i) == last_active:
+                    plugin_id = self.tab_controller.plugin_id_at(i)
+                    if last_active == plugin_id or last_active == self.tab_widget.tabText(i):
                         desired_index = i
                         break
         
@@ -711,11 +711,13 @@ class MainWindow(QMainWindow):
             active_tab = self.tab_controller.get_current_tab_name()
             self.settings_service.save_session_state(tab_order, active_tab)
             
+        # Shutdown ServiceExtension plugins while instances still exist, then
+        # dispose tab views. A plugin that is both Tab and Service must receive
+        # on_application_shutdown before unload_plugin_instance.
+        self.plugin_controller.shutdown_service_extensions()
+
         # Cleanly close and destroy all tabs to trigger their closeEvents and stop threads/timers
         self.tab_controller.clear_all_tabs()
-
-        # Shutdown ServiceExtension plugins
-        self.plugin_controller.shutdown_service_extensions()
         
         # PERF: Explicitly close and release dialog references to free their widget trees
         # immediately, rather than relying on async destroyed signal lambdas.
