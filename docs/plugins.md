@@ -134,6 +134,9 @@ the host rejects missing or cyclic edges, starts providers first, and stops
 consumers first. Disabling a provider also disables enabled dependents
 (Plugin Management warns first).
 
+At startup, consumers whose providers are disabled remain inactive. This
+temporary block does not overwrite their saved enablement preference.
+
 `PluginService.activate_plugin` / `deactivate_plugin` own enablement:
 construction and `on_plugin_enabled` must succeed before the enabled flag is
 kept; disable stops dependents, runs `on_plugin_disabled`, then unloads.

@@ -97,6 +97,8 @@ class MainWindow(QMainWindow):
             raise ValueError("ServiceContainer is required for MainWindow initialization")
         
         self.container = container
+        self._closing = False
+        self._close_complete = False
         self.settings_service = settings_service
         
         # Get ThemeManager from container if not explicitly provided
@@ -286,6 +288,7 @@ class MainWindow(QMainWindow):
                 self.tab_loader.wait(5000)  # Wait up to 5 seconds
                 if self.tab_loader.isRunning():
                     logger.warning("Previous tab loader thread did not finish in time")
+                    return
         
         plugin_service = self.container.get(PluginService)
         self.tab_loader = TabLoaderThread(
@@ -294,7 +297,7 @@ class MainWindow(QMainWindow):
         )
         self.tab_loader.load_complete.connect(self.on_tabs_loaded)
         self.tab_loader.error.connect(self.on_tab_load_error)
-        self.tab_loader.add_tab.connect(self.tab_controller.add_tab)
+        self.tab_loader.add_tab.connect(self._on_discovered_tab)
         
         # Enable batch loading mode in tab controller to prevent premature tab activation/lazy loading
         # when the first tab is added or during bulk addition.
@@ -302,6 +305,10 @@ class MainWindow(QMainWindow):
         
         self.tab_loader.start()
     
+    def _on_discovered_tab(self, name: str, plugin_class: Any) -> None:
+        if not self._closing:
+            self.tab_controller.add_tab(name, plugin_class)
+
     def _update_window_title(self) -> None:
         """Update the window title."""
         if self.title_manager:
@@ -309,6 +316,8 @@ class MainWindow(QMainWindow):
     
     def on_tabs_loaded(self) -> None:
         """Handle tab loading completion."""
+        if self._closing:
+            return
         self.loading_widget.hide()
         self.tab_widget.show()
         
@@ -342,13 +351,15 @@ class MainWindow(QMainWindow):
             else:
                 self.tab_widget.setCurrentIndex(desired_index)
             # Defer extension integration so it does not compete with first-tab create_widget
-            QTimer.singleShot(0, lambda: self.plugin_controller.integrate_extensions(self))
+            QTimer.singleShot(0, lambda: None if self._closing else self.plugin_controller.integrate_extensions(self))
         else:
             # No tabs (extension-only setups) — integrate immediately
             self.plugin_controller.integrate_extensions(self)
     
     def on_tab_load_error(self, error_msg: str) -> None:
         """Handle tab loading error."""
+        if self._closing:
+            return
         self.tab_controller.set_batch_loading(False)
         self.loading_widget.hide()
         self.tab_widget.show()
@@ -608,6 +619,9 @@ class MainWindow(QMainWindow):
         This clears the plugin registry and re-discovers all plugins,
         then reloads the tabs. Used when toggling cross-platform tabs.
         """
+        if self._closing or (self.tab_loader is not None and self.tab_loader.isRunning()):
+            logger.debug("Skipping reload while discovery or close is in progress")
+            return
         logger.info("Reloading all plugins...")
         
         # Clean up all previously integrated extensions before clearing registry
@@ -678,6 +692,29 @@ class MainWindow(QMainWindow):
     
     def closeEvent(self, event: QCloseEvent) -> None:
         """Handle window close event to save settings."""
+        if self._close_complete:
+            event.accept()
+            return
+        loader = getattr(self, 'tab_loader', None)
+        if not self._closing:
+            self._closing = True
+            if loader is not None:
+                loader.cancel()
+                for signal in (loader.add_tab, loader.load_complete, loader.error):
+                    try:
+                        signal.disconnect()
+                    except (RuntimeError, TypeError):
+                        pass
+                # Keep the shell and QThread alive until cooperative discovery
+                # finishes. Already queued UI callbacks are guarded by _closing.
+        if loader is not None and loader.isRunning():
+            self.setEnabled(False)
+            QTimer.singleShot(100, self.close)
+            event.ignore()
+            return
+        if loader is not None:
+            loader.wait()
+
         if self.settings_service:
             # Save window geometry
             geom = self.geometry()
@@ -721,6 +758,7 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         
+        self._close_complete = True
         event.accept()
     
     

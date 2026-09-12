@@ -127,6 +127,9 @@ class PluginController:
             return True
 
         if not self.plugin_service.is_enabled(key) and not self.plugin_service.has_plugin_instance(key):
+            if self.plugin_service._is_requested_enabled(key):
+                self.plugin_service.disable_plugin(key)
+                self._save_plugin_states()
             return True
 
         targets = self.plugin_service.list_deactivation_targets(key)
@@ -186,7 +189,7 @@ class PluginController:
                 if not plugin_class:
                     continue
                 default_off = getattr(plugin_class, "disabled_by_default", False)
-                is_enabled = self.plugin_service.is_enabled(plugin_name)
+                is_enabled = self.plugin_service._is_requested_enabled(plugin_name)
                 if not is_enabled and not default_off:
                     user_disabled.append(plugin_name)
                 elif is_enabled and default_off:

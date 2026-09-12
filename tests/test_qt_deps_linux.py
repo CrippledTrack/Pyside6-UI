@@ -160,7 +160,8 @@ def test_manual_hints_match_managers() -> None:
         assert pkg in dnf_hint
 
     pacman_hint = deps._pacman_manual_hint()
-    assert "pacman -Sy --needed" in pacman_hint
+    assert "pacman -S --needed" in pacman_hint
+    assert "pacman -Syu" in pacman_hint
     for pkg in PACMAN_PACKAGES:
         assert pkg in pacman_hint
 
@@ -324,7 +325,7 @@ def test_pacman_install_command_shape(monkeypatch) -> None:
     assert seen == [
         [
             "pacman",
-            "-Sy",
+            "-S",
             "--needed",
             "--noconfirm",
             "xcb-util-cursor",

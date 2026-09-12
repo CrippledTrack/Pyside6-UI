@@ -13,6 +13,9 @@ python -m pytest tests -q
 ```
 
 These tests cover ServiceContainer DI (interface keys, no raw PluginRegistry),
+final-RC daemon framing and saturated-worker cancellation, deferred close during
+discovery, startup dependency blocks, configuration toggle preservation, local
+stream inactivity timeouts, and tab identity across moves/removals,
 services Qt-import hygiene, daemon protocol serialize/parse, LocalDaemonClient
 ``run_command`` / streaming drain and timeouts, plugin lifecycle (single-flight
 construction, failed activation, post-unload events, identity, dependencies),

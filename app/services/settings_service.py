@@ -551,12 +551,20 @@ class SettingsService:
     def save_plugin_settings(self, plugin_name: str, settings: Dict[str, Any]) -> None:
         """
         Save settings for a specific plugin.
+
+        Existing framework extension toggles are retained when the supplied
+        dictionary omits ``extension_states``.
         
         Args:
             plugin_name: Name of the plugin
             settings: Dictionary containing plugin settings
         """
-        self._settings.plugin_settings[plugin_name] = settings.copy()
+        saved = settings.copy()
+        # Configure widgets own their fields, not the framework extension toggles.
+        existing = self._settings.plugin_settings.get(plugin_name, {})
+        if 'extension_states' not in saved and 'extension_states' in existing:
+            saved['extension_states'] = existing['extension_states'].copy()
+        self._settings.plugin_settings[plugin_name] = saved
         self._save_settings()
         logger.debug(f"Plugin settings saved for '{plugin_name}'")
 

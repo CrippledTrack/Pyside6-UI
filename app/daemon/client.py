@@ -559,7 +559,7 @@ class LocalDaemonClient:
         cmd_timeout = params.get('timeout')
         if cmd_timeout is not None:
             try:
-                cmd_timeout = int(cmd_timeout)
+                cmd_timeout = float(cmd_timeout)
             except ValueError:
                 cmd_timeout = None
 
@@ -623,12 +623,13 @@ class LocalDaemonClient:
                 stdout_done = False
                 stderr_done = False
                 stdout_carry = ''
-                while not (stdout_done and stderr_done):
+                while not (stdout_done and stderr_done and proc.poll() is not None):
                     remaining = None
                     if deadline is not None:
                         remaining = deadline - time.monotonic()
                         if remaining <= 0:
                             proc.kill()
+                            proc.wait()
                             stdout_reader.join(timeout=1)
                             stderr_reader.join(timeout=1)
                             raise subprocess.TimeoutExpired(command, cmd_timeout)
@@ -646,6 +647,8 @@ class LocalDaemonClient:
                         else:
                             stderr_done = True
                         continue
+                    if deadline is not None:
+                        deadline = time.monotonic() + cmd_timeout
                     if label == 'stdout':
                         stdout_parts.append(chunk)
                         if on_chunk is not None:

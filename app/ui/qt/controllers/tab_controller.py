@@ -74,7 +74,7 @@ class TabController(QObject):
         
         self.loaded_tabs: Dict[str, Dict[str, Any]] = {}
         self.is_loading_tab = False
-        self._previous_tab_index = -1
+        self._active_tab_id: Optional[str] = None
         self._batch_loading = False
         
         # Connect tab widget signals
@@ -188,6 +188,8 @@ class TabController(QObject):
             tab_name: Registry ``plugin_id`` of the tab to remove
         """
         tab_info = self.loaded_tabs.get(tab_name)
+        if self._active_tab_id == tab_name:
+            self._deactivate_current_tab()
         widget = None
         index = self.index_for_plugin(tab_name)
         if index < 0 and tab_info:
@@ -203,11 +205,6 @@ class TabController(QObject):
             tab_info = self.loaded_tabs[tab_name]
             plugin_instance = self.plugin_service.peek_plugin_instance(tab_name)
             if plugin_instance is not None:
-                try:
-                    if hasattr(plugin_instance, "on_tab_deactivated"):
-                        plugin_instance.on_tab_deactivated()
-                except Exception as e:
-                    logger.debug(f"Error calling deactivation hook: {e}")
                 if getattr(plugin_instance, "_widget", None) is not None:
                     plugin_instance._widget = None
 
@@ -237,40 +234,39 @@ class TabController(QObject):
             else:
                 self.tab_widget.removeTab(index)
     
+    def _deactivate_current_tab(self) -> None:
+        name = self._active_tab_id
+        self._active_tab_id = None
+        info = self.loaded_tabs.get(name)
+        widget = info.get("widget") if info else None
+        if not widget or isinstance(widget, (LoadingPlaceholder, ErrorPlaceholder, AdminRequiredPlaceholder)):
+            return
+        try:
+            instance = self.plugin_service.peek_plugin_instance(name)
+            if instance is not None and hasattr(instance, "on_tab_deactivated"):
+                instance.on_tab_deactivated()
+        except Exception as e:
+            logger.debug(f"Error calling deactivation hook: {e}")
+        self.tab_deactivated.emit(name)
+
     def on_tab_changed(self, index: int) -> None:
         """Handle tab change event.
         
         Args:
             index: Index of the newly selected tab
         """
-        if self.is_loading_tab or index < 0 or self._batch_loading:
+        if self.is_loading_tab or self._batch_loading:
             return
-        
-        # Call deactivation hook for previously active tab
-        if self._previous_tab_index >= 0 and self._previous_tab_index != index:
-            # Guard against stale index after tabs are removed
-            if self._previous_tab_index >= self.tab_widget.count():
-                self._previous_tab_index = -1
-            else:
-                try:
-                    prev_tab_name = self.plugin_id_at(self._previous_tab_index)
-                    prev_instance_info = self.loaded_tabs.get(prev_tab_name)
-                    prev_widget = prev_instance_info.get("widget") if prev_instance_info else None
-
-                    # Only deactivate/emit for a real plugin tab widget (not placeholders)
-                    if prev_widget and not isinstance(
-                        prev_widget, (LoadingPlaceholder, ErrorPlaceholder, AdminRequiredPlaceholder)
-                    ):
-                        try:
-                            plugin_instance = self.plugin_service.get_plugin_instance(prev_tab_name)
-                            if hasattr(plugin_instance, 'on_tab_deactivated'):
-                                plugin_instance.on_tab_deactivated()
-                        except Exception as e:
-                            logger.debug(f"Error calling deactivation hook: {e}")
-
-                        self.tab_deactivated.emit(prev_tab_name)
-                except Exception as e:
-                    logger.debug(f"Error calling deactivation hook: {e}")
+        tab_name = self.plugin_id_at(index) if index >= 0 else None
+        if self._active_tab_id != tab_name:
+            self._deactivate_current_tab()
+        elif tab_name is not None:
+            info = self.loaded_tabs.get(tab_name)
+            widget = info.get("widget") if info else None
+            if widget and not isinstance(widget, (LoadingPlaceholder, ErrorPlaceholder, AdminRequiredPlaceholder)):
+                return
+        if index < 0:
+            return
         
         try:
             self.is_loading_tab = True
@@ -279,7 +275,6 @@ class TabController(QObject):
             
             if not tab_info:
                 self.is_loading_tab = False
-                self._previous_tab_index = index
                 return
             
             # Check if tab is showing AdminRequiredPlaceholder and admin privileges or daemon are now available
@@ -292,7 +287,12 @@ class TabController(QObject):
                         # Privileges or daemon are available, reload the tab
                         logger.info(f"Admin requirements met, reloading tab '{self.tab_label(plugin_class)}'")
                         self._reload_tab(tab_name)
-                        self._previous_tab_index = index
+                        widget = tab_info.get("widget")
+                        if widget and not isinstance(widget, AdminRequiredPlaceholder):
+                            instance = self.plugin_service.get_plugin_instance(tab_name)
+                            if hasattr(instance, 'on_tab_activated'):
+                                instance.on_tab_activated()
+                            self.tab_activated.emit(tab_name)
                         self.is_loading_tab = False
                         self.title_update_requested.emit()
                         return
@@ -366,7 +366,7 @@ class TabController(QObject):
                 pass
         finally:
             self.is_loading_tab = False
-            self._previous_tab_index = index
+            self._active_tab_id = tab_name
             self.title_update_requested.emit()
     
     def _reload_tab(self, tab_name: str) -> None:
@@ -472,7 +472,7 @@ class TabController(QObject):
         This only drops bookkeeping after instances were already unloaded.
         """
         self.loaded_tabs.clear()
-        self._previous_tab_index = -1
+        self._active_tab_id = None
         logger.info("Cleared all loaded tab state")
 
     def on_plugins_unloaded(self, plugin_names: List[str]) -> None:
@@ -500,15 +500,11 @@ class TabController(QObject):
         """Clear all tabs: detach from tab bar, then unload instances safely."""
         self.set_batch_loading(True)
         try:
+            self._deactivate_current_tab()
             for tab_name in list(self.loaded_tabs.keys()):
                 tab_info = self.loaded_tabs.pop(tab_name, {})
                 plugin_instance = self.plugin_service.peek_plugin_instance(tab_name)
                 if plugin_instance is not None:
-                    try:
-                        if hasattr(plugin_instance, "on_tab_deactivated"):
-                            plugin_instance.on_tab_deactivated()
-                    except Exception as e:
-                        logger.debug(f"Error calling deactivation hook for {tab_name}: {e}")
                     if getattr(plugin_instance, "_widget", None) is not None:
                         plugin_instance._widget = None
 
@@ -539,7 +535,7 @@ class TabController(QObject):
                             pass
                     self._dispose_view(widget)
 
-            self._previous_tab_index = -1
+            self._active_tab_id = None
         finally:
             self.set_batch_loading(False)
         logger.info("Cleared and destroyed all tab widgets and state")

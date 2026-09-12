@@ -106,7 +106,8 @@ def _pacman_manual_hint(packages: Sequence[str] | None = None) -> str:
     pkgs = list(packages) if packages is not None else list(PACMAN_PACKAGES)
     return (
         "Missing Qt dependencies. Please install with: "
-        "sudo pacman -Sy --needed "
+        "After completing a full system update with sudo pacman -Syu, install with: "
+        "sudo pacman -S --needed "
         + " ".join(pkgs)
     )
 
@@ -254,7 +255,7 @@ def _install_pacman_packages(packages: list[str]) -> bool:
         return True
     cmd = [
         "pacman",
-        "-Sy",
+        "-S",
         "--needed",
         "--noconfirm",
         *packages,

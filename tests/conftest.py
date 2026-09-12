@@ -18,12 +18,12 @@ from pathlib import Path
 
 import pytest
 
-from GUI.app.host_config import HostConfig, set_host_config
-
 # Ensure repo root is importable when pytest is invoked from elsewhere
 _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
+
+from GUI.app.host_config import HostConfig, set_host_config
 
 
 @pytest.fixture(autouse=True)
@@ -36,4 +36,3 @@ def _isolate_host_paths():
     yield data_dir
     set_host_config(None)
     shutil.rmtree(data_dir, ignore_errors=True)
-

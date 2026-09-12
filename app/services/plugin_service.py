@@ -80,6 +80,7 @@ class PluginService:
         self.settings_service = settings_service
         self._registry = registry or PluginRegistry()
         self._discovery_complete = False
+        self._startup_dependency_blocks: set[str] = set()
         self._last_activation_error: Optional[str] = None
         if container is not None:
             self.bind_container(container)
@@ -152,6 +153,7 @@ class PluginService:
     def clear(self) -> None:
         """Clear all registered plugins."""
         self._registry.clear()
+        self._startup_dependency_blocks.clear()
         self._discovery_complete = False
 
         self._invalidate_core_plugin_modules()
@@ -163,11 +165,17 @@ class PluginService:
 
     def disable_plugin(self, name: str) -> None:
         """Disable a plugin by name."""
+        self._startup_dependency_blocks.discard(self.resolve_plugin_key(name) or name)
         self._registry.disable_plugin(name)
 
     def enable_plugin(self, name: str) -> None:
         """Enable a plugin by name."""
+        self._startup_dependency_blocks.discard(self.resolve_plugin_key(name) or name)
         self._registry.enable_plugin(name)
+
+    def _is_requested_enabled(self, name: str) -> bool:
+        """Keep temporary startup dependency blocks out of saved user overrides."""
+        return name in self._startup_dependency_blocks or self.is_enabled(name)
 
     def is_enabled(self, name: str) -> bool:
         """Check if a plugin is enabled."""
@@ -689,9 +697,12 @@ class PluginService:
         This is the main entry point for loading plugin states after discovery.
         It handles both first-run scenarios and loading saved user preferences.
         Default-off plugins the user enabled are restored from ``enabled_plugins``.
+        Consumers with disabled providers are blocked for this startup without
+        recording that temporary block as a user-disabled override.
         """
         if not self.settings_service:
             logger.debug("No settings service, skipping plugin state loading")
+            self._block_unavailable_startup_dependencies()
             return
 
         try:
@@ -709,6 +720,14 @@ class PluginService:
                 self._handle_first_run()
         except Exception as e:
             logger.warning(f"Failed to load saved plugin states: {e}")
+        self._block_unavailable_startup_dependencies()
+
+    def _block_unavailable_startup_dependencies(self) -> None:
+        for name in self.get_startup_order():
+            if self.is_enabled(name) and self._unsatisfied_dependencies(name):
+                self._registry.disable_plugin(name)
+                self._startup_dependency_blocks.add(name)
+                logger.warning("Disabled '%s' for this startup: required provider is disabled", name)
     
     def _apply_user_disabled_plugins(self, disabled_plugins: List[str]) -> None:
         """Apply user-disabled plugins from settings.
@@ -794,4 +813,3 @@ class PluginService:
 
 
 __all__ = ['PluginService']
-

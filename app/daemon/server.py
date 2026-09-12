@@ -43,6 +43,7 @@ class PrivilegedDaemon:
         self._jobs_lock = threading.Lock()
         self._pipe_stdout = None
         self._stdout_lock = threading.Lock()
+        self._stopping = False
 
     def _get_original_uid(self) -> Optional[int]:
         """Get the original user's UID from environment variables."""
@@ -69,7 +70,6 @@ class PrivilegedDaemon:
         def signal_handler(signum, frame):
             logger.info(f"Received signal {signum}, shutting down...")
             SHUTDOWN_REQUESTED.set()
-            self.shutdown()
 
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
@@ -129,15 +129,7 @@ class PrivilegedDaemon:
             if cmd_timeout is not None:
                 cmd_timeout = int(cmd_timeout)
 
-            proc = subprocess.Popen(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-
-            with self._jobs_lock:
-                self._active_jobs[request_id] = proc
+            proc = self._start_command(request_id, command, subprocess.PIPE)
 
             try:
                 stdout, stderr = proc.communicate(timeout=cmd_timeout)
@@ -188,15 +180,7 @@ class PrivilegedDaemon:
         logger.info(f"Executing streaming command: {' '.join(command)}")
 
         try:
-            proc = subprocess.Popen(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True
-            )
-
-            with self._jobs_lock:
-                self._active_jobs[request_id] = proc
+            proc = self._start_command(request_id, command, subprocess.STDOUT)
 
             aggregated_output = []
             try:
@@ -228,6 +212,19 @@ class PrivilegedDaemon:
                 'stderr': str(e),
                 'success': False
             }
+
+    def _start_command(self, request_id: str, command: List[str], stderr: Any):
+        # Admission and registration share the shutdown lock: a worker cannot
+        # create an untracked child after shutdown snapshots active jobs.
+        with self._jobs_lock:
+            if self._stopping or SHUTDOWN_REQUESTED.is_set():
+                raise RuntimeError("Daemon is shutting down")
+            proc = subprocess.Popen(
+                command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                stderr=stderr, text=True,
+            )
+            self._active_jobs[request_id] = proc
+            return proc
 
     def _handle_cancel(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Cancel a running job by terminating its subprocess.
@@ -337,29 +334,51 @@ class PrivilegedDaemon:
         logger.info("Pipe daemon started and ready")
         print("[Daemon] Pipe daemon started and ready", file=sys.stderr, flush=True)
 
+        self._serve_pipe(sys.stdin.buffer.fileno())
+        self.shutdown()
+
+    def _dispatch_pipe_request(self, request: Dict[str, Any]) -> None:
+        if request.get('operation') in (OPERATION_CANCEL, OPERATION_SHUTDOWN, 'ping'):
+            self._handle_async_pipe_request(request)
+        else:
+            self.executor.submit(self._handle_async_pipe_request, request)
+
+    def _serve_pipe(self, fd: int) -> None:
+        """Read OS bytes directly and dispatch every complete JSON line."""
+        pending = b''
         while not SHUTDOWN_REQUESTED.is_set():
             try:
-                r, _, _ = select.select([sys.stdin.buffer], [], [], 1.0)
+                r, _, _ = select.select([fd], [], [], 1.0)
                 if not r:
                     continue
 
-                line = sys.stdin.buffer.readline()
-                if not line:
+                chunk = os.read(fd, 65536)
+                if not chunk:
                     logger.info("Pipe EOF reached, shutting down")
                     break
 
-                request = deserialize_message(line)
-                self.executor.submit(self._handle_async_pipe_request, request)
+                pending += chunk
+                while b'\n' in pending:
+                    line, pending = pending.split(b'\n', 1)
+                    self._dispatch_pipe_request(deserialize_message(line))
+                    if SHUTDOWN_REQUESTED.is_set():
+                        break
 
             except Exception as e:
                 logger.error(f"Error in pipe mode loop: {e}", exc_info=True)
                 break
 
-        self.shutdown()
-
     def shutdown(self):
         """Shutdown the daemon gracefully."""
         logger.info("Shutting down daemon...")
+
+        with self._jobs_lock:
+            self._stopping = True
+            active_ids = list(self._active_jobs)
+        # Cancel queued commands before stopping running children.
+        self.executor.shutdown(wait=False, cancel_futures=True)
+        for request_id in active_ids:
+            self._handle_cancel({'target_id': request_id})
 
         try:
             self.executor.shutdown(wait=True, cancel_futures=True)
