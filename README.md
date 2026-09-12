@@ -31,7 +31,7 @@ cd GUI
 python3 run.py    # Windows: py run.py
 ```
 
-`run.py` adds the parent of `GUI/` to the path so the package imports. Optional: `run.py --dev` (enables runtime dev mode, which loads sample plugins under `GUI/plugins/`).
+`run.py` adds the parent of `GUI/` to the path so the package imports. Optional: `run.py --dev` (enables runtime dev mode, which loads sample plugins under `GUI/plugins/`). On Linux, only the explicit `run.py --skip-qt-deps` flag skips the Qt xcb system-package check/install (`--dev` alone never bypasses it; you may chain both, e.g. `run.py --dev --skip-qt-deps`).
 
 ### Minimal `main.py` (option 1)
 

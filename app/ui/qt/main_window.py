@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any, Dict, List, Optional, TYPE_CHECKING, Set
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 # PERF: We use TYPE_CHECKING to hide these imports from the runtime. This provides full
 # IDE autocompletion and static analysis support without paying the 100ms+ startup
@@ -113,7 +113,6 @@ class MainWindow(QMainWindow):
         self._menu_handle_map: Dict[MenuItemHandle, tuple] = {}
         self._toolbar_handle_map: Dict[ToolbarActionHandle, QAction] = {}
         self._status_handle_map: Dict[StatusWidgetHandle, QWidget] = {}
-        self._created_menu_titles: Set[str] = set()
         
         # Get services from container
         self.admin_service = container.get(IAdminService)
@@ -149,7 +148,6 @@ class MainWindow(QMainWindow):
         self.setup_shortcuts()
         self._setup_menu_bar()
         self._update_window_title()
-        self._setup_tooltips()
         self._start_tab_loader()
     
     def _setup_window_geometry(self) -> None:
@@ -274,7 +272,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'tab_loader') and self.tab_loader is not None:
             try:
                 # Disconnect signals to prevent duplicate callbacks
-                self.tab_loader.finished.disconnect()
+                self.tab_loader.load_complete.disconnect()
                 self.tab_loader.error.disconnect()
                 self.tab_loader.add_tab.disconnect()
             except (RuntimeError, TypeError):
@@ -294,7 +292,7 @@ class MainWindow(QMainWindow):
             plugin_service=plugin_service,
             settings_service=self.settings_service
         )
-        self.tab_loader.finished.connect(self.on_tabs_loaded)
+        self.tab_loader.load_complete.connect(self.on_tabs_loaded)
         self.tab_loader.error.connect(self.on_tab_load_error)
         self.tab_loader.add_tab.connect(self.tab_controller.add_tab)
         
@@ -434,10 +432,10 @@ class MainWindow(QMainWindow):
             theme_manager=self.theme_manager,
             settings_service=self.settings_service,
             parent=self,
+            apply_callback=self._apply_theme_and_refresh,
         )
         dialog.setWindowModality(Qt.WindowModality.NonModal)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dialog.theme_selected.connect(self.on_theme_selected)
         dialog.ui_toggle_changed.connect(self._on_ui_toggle_from_dialog)
         dialog.destroyed.connect(lambda: setattr(self, "_theme_dialog", None))
 
@@ -445,22 +443,6 @@ class MainWindow(QMainWindow):
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
-    
-    def _on_ui_toggle_from_dialog(self, enabled: bool) -> None:
-        """Handle UI toggle change from theme dialog."""
-        # Reapply current theme with new UI flag setting
-        if self.theme_manager:
-            current_theme = self.theme_manager.get_current_theme()
-            if current_theme:
-                self.theme_manager.apply_theme(current_theme, new_ui_enabled=enabled)
-        
-        # Show notification
-        state_text = "enabled" if enabled else "disabled"
-        self.toast_manager.show_info(
-            f"New UI {state_text}. Some changes may require restart to take full effect."
-        )
-        
-        logger.info(f"New UI toggled from theme dialog: {enabled}")
     
     def open_log_viewer_dialog(self) -> None:
         """Open the log viewer dialog (non-modal)."""
@@ -511,36 +493,43 @@ class MainWindow(QMainWindow):
         self._about_dialog = controller
         ui.open_dialog(controller.dialog, on_closed=clear_controller)
     
-    def on_theme_selected(self, theme_name: str) -> None:
-        """Handle theme selection.
-        
-        Args:
-            theme_name: Name of the selected theme
-        """
+    def on_theme_selected(self, theme_name: str) -> bool:
+        """Apply a theme chosen from the theme dialog. Returns apply success."""
         logger.info(f"Theme selected: {theme_name}")
-        # Reapply theme with current UI flag setting
-        if self.settings_service:
+        return self._apply_theme_and_refresh(theme_name)
+
+    def _on_ui_toggle_from_dialog(self, enabled: bool) -> None:
+        """Handle UI toggle change from theme dialog."""
+        current_theme = self.theme_manager.get_current_theme() if self.theme_manager else None
+        if current_theme:
+            self._apply_theme_and_refresh(current_theme, new_ui_enabled=enabled)
+        self.toast_manager.show_info(
+            f"New UI {'enabled' if enabled else 'disabled'}. "
+            "Some changes may require restart to take full effect."
+        )
+        logger.info("New UI toggled from theme dialog: %s", enabled)
+
+    def _apply_theme_and_refresh(
+        self, theme_name: str, new_ui_enabled: Optional[bool] = None
+    ) -> bool:
+        """Apply a theme once, persist, and refresh dependent chrome."""
+        if self.settings_service and new_ui_enabled is None:
             new_ui_enabled = self.settings_service.get_new_ui_enabled()
-            self.theme_manager.apply_theme(theme_name, new_ui_enabled=new_ui_enabled)
-        else:
-            self.theme_manager.apply_theme(theme_name)
-        # Refresh toast notifications with new theme
-        if hasattr(self, 'toast_manager'):
+        if not self.theme_manager.apply_theme(theme_name, new_ui_enabled=new_ui_enabled):
+            return False
+        self._refresh_theme_dependents(theme_name)
+        return True
+
+    def _refresh_theme_dependents(self, theme_name: str) -> None:
+        if hasattr(self, "toast_manager") and self.toast_manager:
             self.toast_manager.update_theme_manager(self.theme_manager)
             self.toast_manager.refresh_theme()
-        
-        # Refresh status bar notifications with new theme
-        if hasattr(self, 'status_bar_manager') and self.status_bar_manager:
+        if hasattr(self, "status_bar_manager") and self.status_bar_manager:
             self.status_bar_manager.refresh_theme()
-
-        # Refresh menu bar styling (especially for blank/default stylesheets)
         if self.menu_controller:
             self.menu_controller.refresh_for_theme_change()
-        
-        # Publish event for subscribers
         self.plugin_service.publish_event("theme_changed", {"theme": theme_name})
 
-    
     def restart_as_admin(self) -> None:
         """Restart the application with administrator/root privileges.
         
@@ -661,11 +650,6 @@ class MainWindow(QMainWindow):
         self.shortcut_manager.nextTab.connect(self.next_tab)
         self.shortcut_manager.prevTab.connect(self.previous_tab)
         self.shortcut_manager.toggleFullscreen.connect(self.toggle_fullscreen)
-    
-    def _setup_tooltips(self) -> None:
-        """Setup tooltips for UI elements."""
-        # Tooltips are handled by MenuBarController
-        pass
     
     def next_tab(self) -> None:
         """Switch to next tab."""
@@ -821,8 +805,6 @@ class MainWindow(QMainWindow):
             separator_after=spec.separator_after,
         )
         self._menu_handle_map[handle] = (action, target_menu, sep_before, sep_after)
-        if was_created:
-            self._created_menu_titles.add(spec.menu)
         return handle
 
     def remove_menu_item(self, handle: MenuItemHandle) -> None:

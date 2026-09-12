@@ -82,18 +82,33 @@ def _load_constants() -> dict[str, object]:
 
     Falls back to GUI/app/constants.py when running standalone.
     """
-    consts: dict[str, object] = {}
+    import sys
 
-    # 1. GUI defaults (always available)
+    parent = str(PROJECT_ROOT)
+    if parent not in sys.path:
+        sys.path.insert(0, parent)
+    try:
+        from GUI.app.utils.imports import merge_constants
+        return merge_constants(apply_launch_overrides=False)
+    except Exception as exc:
+        print(f"  Warning: could not import merge_constants: {exc}", file=sys.stderr)
+
+    consts: dict[str, object] = {}
     gui_const_path = GUI_ROOT / "app" / "constants.py"
     consts.update(_exec_constants_file(gui_const_path))
-
     if not IS_STANDALONE:
-        # 2. app_plugins overrides (parent project)
+        platforms_const = PROJECT_ROOT / "platforms" / "constants.py"
+        if platforms_const.exists():
+            consts.update(_exec_constants_file(platforms_const))
         app_const_path = PROJECT_ROOT / "app_plugins" / "constants.py"
         if app_const_path.exists():
             consts.update(_exec_constants_file(app_const_path))
-
+    try:
+        from GUI.app import constants as gui_constants
+        consts["GUI_API_VERSION"] = gui_constants.GUI_API_VERSION
+        consts["CURRENT_PLATFORM"] = gui_constants.CURRENT_PLATFORM
+    except Exception:
+        pass
     return consts
 
 

@@ -230,21 +230,38 @@ def is_daemon_running() -> bool:
     return _daemon_process is not None and _daemon_process.poll() is None
 
 
-def start_daemon() -> Optional[object]:
-    """Start the privileged pipe daemon process.
+def _replace_unusable_daemon_process() -> None:
+    """Drop a live process whose stdout is closed so a replacement can spawn."""
+    global _daemon_process
+    old = _daemon_process
+    _daemon_process = None
+    if old is None or old.poll() is not None:
+        return
+    try:
+        old.terminate()
+        old.wait(timeout=DAEMON_SHUTDOWN_TIMEOUT)
+    except Exception:
+        try:
+            old.kill()
+        except Exception:
+            pass
 
-    Returns:
-        DaemonClient instance if successful, None otherwise
+
+def spawn_daemon_process() -> Optional[subprocess.Popen]:
+    """Spawn and verify a privileged daemon process without wrapping a client.
+
+    Returns the process after a successful ping. The caller owns the pipes
+    and must attach at most one reader.
     """
     global _daemon_process
+    from ..daemon.pipe_io import ping_daemon_process, process_stdout_usable
 
     if is_daemon_running():
-        logger.info("Daemon already running")
-        from ..daemon import get_daemon_client, is_daemon_available
-        if is_daemon_available():
-            return get_daemon_client()
-        from ..daemon.client import DaemonClient
-        return DaemonClient(process=_daemon_process)
+        if process_stdout_usable(_daemon_process):
+            logger.info("Daemon already running")
+            return _daemon_process
+        logger.warning("Existing daemon stdout is unusable; replacing the process")
+        _replace_unusable_daemon_process()
 
     if hasattr(sys, 'frozen') and sys.frozen:
         exe_path = sys.executable
@@ -358,19 +375,15 @@ def start_daemon() -> Optional[object]:
         return None
 
     logger.info("Verifying pipe daemon connection via ping...")
-    from ..daemon.client import DaemonClient
-    client = DaemonClient(process=process)
-
     for i in range(120):
         if process.poll() is not None:
             logger.error(f"Pipe daemon process exited with return code {process.returncode}")
             _daemon_process = None
             return None
         try:
-            response = client.request('ping', {}, timeout=1.0)
-            if response.get('success') and response.get('result') == 'pong':
+            if ping_daemon_process(process, timeout=1.0):
                 logger.info("Successfully connected to pipe daemon via ping")
-                return client
+                return process
         except Exception as e:
             logger.debug(f"Ping attempt {i} failed: {e}")
         time.sleep(0.5)
@@ -386,6 +399,19 @@ def start_daemon() -> Optional[object]:
             pass
     _daemon_process = None
     return None
+
+
+def start_daemon() -> Optional[object]:
+    """Start the privileged pipe daemon process.
+
+    Returns:
+        DaemonClient instance if successful, None otherwise
+    """
+    process = spawn_daemon_process()
+    if process is None:
+        return None
+    from ..daemon import client_for_process
+    return client_for_process(process)
 
 
 def stop_daemon():
@@ -436,6 +462,7 @@ __all__ = [
     'run_command_as_admin',
     'get_sudo_status',
     'start_daemon',
+    'spawn_daemon_process',
     'stop_daemon',
     'is_daemon_running',
     'clear_daemon_process',

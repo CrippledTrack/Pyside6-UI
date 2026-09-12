@@ -178,6 +178,21 @@ class NotificationCenterWidget(QWidget):
         
         # Connect signals
         self._unsub_added = self.notification_service.subscribe_added(self.on_notification_added)
+        self.destroyed.connect(self._unsubscribe)
+
+    def _unsubscribe(self, *_args: object) -> None:
+        unsub = getattr(self, "_unsub_added", None)
+        if unsub is None:
+            return
+        self._unsub_added = None
+        try:
+            unsub()
+        except Exception:
+            pass
+
+    def closeEvent(self, event) -> None:
+        self._unsubscribe()
+        super().closeEvent(event)
         
     def setup_ui(self):
         layout = QVBoxLayout(self)

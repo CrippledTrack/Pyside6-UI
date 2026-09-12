@@ -92,6 +92,7 @@ class PluginController:
 
         Enablement is committed only after construction and ``on_plugin_enabled``
         succeed. Disabling a provider also disables enabled dependents.
+        Unchanged requests are no-ops (no persist, notify, or integrate).
         """
         plugin_class = self.plugin_service.get_plugin(plugin_name)
         if not plugin_class:
@@ -101,24 +102,20 @@ class PluginController:
         key = self.plugin_service.resolve_plugin_key(plugin_name) or plugin_name
 
         if enabled:
-            if not self.plugin_service.is_enabled(key):
-                if not self.plugin_service.activate_plugin(key):
-                    err = self.plugin_service.get_last_activation_error()
-                    logger.error(
-                        "Failed to enable plugin '%s'%s",
-                        key,
-                        f": {err}" if err else "",
-                    )
-                    return False
-                logger.info("Enabled plugin: %s", plugin_ui_label(plugin_class))
+            if self.plugin_service.is_enabled(key):
+                return True
+            if not self.plugin_service.activate_plugin(key):
+                err = self.plugin_service.get_last_activation_error()
+                logger.error(
+                    "Failed to enable plugin '%s'%s",
+                    key,
+                    f": {err}" if err else "",
+                )
+                return False
+            logger.info("Enabled plugin: %s", plugin_ui_label(plugin_class))
 
             if self._host.main_window is not None:
-                if not self._host.has_chrome_for_plugin(key):
-                    self._host.integrate_plugin_extensions_dynamic(
-                        key, plugin_class
-                    )
-                else:
-                    logger.debug("Extensions already integrated for '%s'", key)
+                self._host.integrate_plugin_extensions_dynamic(key, plugin_class)
             else:
                 logger.warning(
                     "Cannot dynamically integrate extensions for '%s': MainWindow not set",
@@ -129,12 +126,15 @@ class PluginController:
             self._notify_plugin_state_changed()
             return True
 
+        if not self.plugin_service.is_enabled(key) and not self.plugin_service.has_plugin_instance(key):
+            return True
+
+        targets = self.plugin_service.list_deactivation_targets(key)
+        for did in targets:
+            cls = self.plugin_service.get_plugin(did)
+            self._host.teardown_plugin(did, cls)
+
         deactivated = self.plugin_service.deactivate_plugin(key)
-        if self._host.main_window is not None:
-            for did in deactivated:
-                cls = self.plugin_service.get_plugin(did)
-                if cls is not None:
-                    self._host.remove_plugin_extensions_dynamic(did, cls)
 
         self._save_plugin_states()
         for did in deactivated:
@@ -147,8 +147,10 @@ class PluginController:
     def is_plugin_enabled(self, plugin_name: str) -> bool:
         return self.plugin_service.is_enabled(plugin_name)
 
-    def refresh_plugin_extensions(self, plugin_name: str) -> None:
-        self._host.refresh_plugin_extensions(plugin_name)
+    def refresh_plugin_extensions(
+        self, plugin_name: str, extension_type: Optional[str] = None
+    ) -> None:
+        self._host.refresh_plugin_extensions(plugin_name, extension_type)
 
     def get_plugin(self, plugin_name: str) -> Optional[Any]:
         return self.plugin_service.get_plugin(plugin_name)
@@ -195,8 +197,12 @@ class PluginController:
                 user_disabled,
                 user_enabled,
             )
-            self.settings_service.save_disabled_plugins(user_disabled)
-            self.settings_service.save_enabled_plugins(user_enabled)
+            saver = getattr(self.settings_service, "save_plugin_overrides", None)
+            if callable(saver):
+                saver(user_disabled, user_enabled)
+            else:
+                self.settings_service.save_disabled_plugins(user_disabled)
+                self.settings_service.save_enabled_plugins(user_enabled)
         except Exception as e:
             logger.warning("Failed to save plugin states: %s", e)
 

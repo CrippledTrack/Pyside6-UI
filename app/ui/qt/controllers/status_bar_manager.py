@@ -7,7 +7,6 @@ and timers.
 
 from __future__ import annotations
 
-import logging
 from typing import Optional, TYPE_CHECKING
 
 from ..bindings import (
@@ -27,8 +26,6 @@ from ....services.notification_service import NotificationService
 
 if TYPE_CHECKING:
     from ..widgets.notification_center import NotificationCenterWidget
-
-logger = logging.getLogger(__name__)
 
 
 class StatusBarManager(QObject):
@@ -71,17 +68,16 @@ class StatusBarManager(QObject):
         self.notif_btn = QPushButton("🔔")
         self.notif_btn.setFlat(True)
         self.notif_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._apply_notification_button_style(0)  # Initial style with 0 unread
+        self._apply_notification_button_style(
+            self.notification_service.get_unread_count()
+        )
         self.notif_btn.clicked.connect(self._toggle_notification_center)
         layout.addWidget(self.notif_btn)
         
         # Add container to status bar (permanent widget stays on right)
         self.status_bar.addPermanentWidget(container)
         
-        # Connect signals
-        self.notification_service.subscribe_unread_changed(self._update_unread_count)
-        
-        # Initial update
+        # Initial count; unread updates are delivered by NotificationShellBridge
         self._update_unread_count(self.notification_service.get_unread_count())
     
     def _apply_notification_button_style(self, unread_count: int) -> None:
@@ -186,8 +182,7 @@ class StatusBarManager(QObject):
         
         # Show the message
         if timeout > 0:
-            self.status_bar.showMessage(message, timeout)
-            # Set up timer to clear after timeout
+            self.status_bar.showMessage(message)
             self._status_timer = QTimer(self)
             self._status_timer.setSingleShot(True)
             self._status_timer.timeout.connect(self.clear_status)
@@ -213,41 +208,12 @@ class StatusBarManager(QObject):
         return self.status_bar.currentMessage()
     
     def refresh_theme(self) -> None:
-        """Refresh notification UI elements with current theme."""
-        # Refresh notification button styling
-        if hasattr(self, 'notif_btn') and self.notification_service:
+        """Refresh the status bell and, if already created, the popup."""
+        if hasattr(self, "notif_btn") and self.notification_service:
             count = self.notification_service.get_unread_count()
             self._apply_notification_button_style(count)
-        
-        # Always destroy notification widget on theme refresh so it gets recreated
-        # with correct UI mode (new UI vs classic) on next open
-        if self._notification_widget:
-            from ..themes.ui_mode import is_classic_ui
-            is_legacy = is_classic_ui(self.theme_manager)
-            widget_uses_new_ui = getattr(self._notification_widget, '_use_new_ui', False)
-            
-            logger.debug(f"refresh_theme: is_legacy={is_legacy}, widget_uses_new_ui={widget_uses_new_ui}")
-            
-            # Check if UI mode changed
-            ui_mode_changed = widget_uses_new_ui == is_legacy  # Should be opposite
-            
-            if ui_mode_changed:
-                logger.debug("UI mode changed, destroying notification widget")
-                was_visible = self._notification_widget.isVisible()
-                self._notification_widget.hide()
-                self._notification_widget.deleteLater()
-                self._notification_widget = None
-                
-                # Recreate immediately if it was visible
-                if was_visible:
-                    self._toggle_notification_center()
-            else:
-                # Just refresh theme colors (no UI mode change)
-                logger.debug("Refreshing notification widget theme colors")
-                if hasattr(self._notification_widget, 'apply_theme'):
-                    self._notification_widget.apply_theme()
-        else:
-            logger.debug("refresh_theme: notification widget does not exist yet")
+        if self._notification_widget is not None:
+            self._notification_widget.apply_theme()
 
 
 __all__ = ['StatusBarManager']

@@ -313,3 +313,59 @@ def test_same_plugin_id_second_external_skipped() -> None:
     svc.register_plugin(first)
     svc.register_plugin(second)
     assert svc.get_plugin("shared.id") is first
+
+
+def test_force_register_enables_immediately() -> None:
+    svc = _service()
+    rejected = _probe(
+        "Incompatible",
+        plugin_id="gui.incompatible",
+        required_gui_version=">=99.0.0",
+    )
+    svc.register_plugin(rejected)
+    assert svc.get_plugin("gui.incompatible") is None
+    rejected_map = svc.get_rejected_plugins()
+    assert "gui.incompatible" in rejected_map
+    svc.register_plugin_force("gui.incompatible", rejected)
+    assert svc.get_plugin("gui.incompatible") is rejected
+    assert svc.is_enabled("gui.incompatible") is True
+    assert "gui.incompatible" not in svc.get_rejected_plugins()
+
+
+def test_register_rejected_plugin_does_not_enable() -> None:
+    svc = _service()
+    rejected = _probe(
+        "Incompatible",
+        plugin_id="gui.incompatible.off",
+        required_gui_version=">=99.0.0",
+    )
+    svc.register_plugin(rejected)
+    svc.register_rejected_plugin("gui.incompatible.off", rejected)
+    assert svc.get_plugin("gui.incompatible.off") is rejected
+    assert svc.is_enabled("gui.incompatible.off") is False
+    assert "gui.incompatible.off" not in svc.get_rejected_plugins()
+
+
+def test_core_replaces_external_drops_old_extension_categories() -> None:
+    cleaned: List[Any] = []
+
+    class External(_probe("Same", plugin_id="gui.replace")):
+        def get_menu_items(self) -> list:
+            return []
+
+        def _cleanup_plugin_resources(self) -> None:
+            cleaned.append(self)
+
+    class Core(_probe("Same", plugin_id="gui.replace")):
+        is_core_plugin = True
+
+    svc = _service()
+    svc.register_plugin(External)
+    instance = svc.get_plugin_instance("gui.replace")
+    assert "gui.replace" in svc.get_menu_extensions(enabled_only=False)
+    svc.register_plugin(Core, is_core=True)
+    assert svc.get_plugin("gui.replace") is Core
+    assert "gui.replace" not in dict(svc.get_menu_extensions(enabled_only=False))
+    assert "gui.replace" in dict(svc.get_tab_extensions(enabled_only=False))
+    assert svc.peek_plugin_instance("gui.replace") is None
+    assert cleaned == [instance]

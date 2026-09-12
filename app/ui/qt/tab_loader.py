@@ -37,7 +37,7 @@ class TabLoaderThread(QThread):
     - Emitting signals to update the UI
     """
     
-    finished = Signal()
+    load_complete = Signal()
     error = Signal(str)
     add_tab = Signal(str, object)  # (tab_name, plugin_class)
 
@@ -95,7 +95,7 @@ class TabLoaderThread(QThread):
             
             if self._should_cancel():
                 return
-            self.finished.emit()
+            self.load_complete.emit()
         except Exception as e:  # pragma: no cover - runtime error path
             logger.error(f"Error in TabLoaderThread: {e}")
             self.error.emit(str(e))

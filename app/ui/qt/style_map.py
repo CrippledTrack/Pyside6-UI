@@ -554,6 +554,28 @@ def stop_interval(handle: Any) -> None:
         handle.stop()
 
 
+_role_color_cache: dict[tuple[int, str], Any] = {}
+
+
+def invalidate_text_role_colors() -> None:
+    """Drop cached semantic text colors after a theme or palette change."""
+    _role_color_cache.clear()
+
+
+def _color_for_role(widget: Any, role: str) -> Any:
+    key = (id(widget), role)
+    cached = _role_color_cache.get(key)
+    if cached is not None:
+        return cached
+    probe = QLabel("", widget)
+    apply_label_role(probe, role)
+    probe.ensurePolished()
+    color = probe.palette().color(QPalette.ColorRole.WindowText)
+    probe.deleteLater()
+    _role_color_cache[key] = color
+    return color
+
+
 def append_text(
     widget: Any,
     text: str,
@@ -564,11 +586,7 @@ def append_text(
     if not isinstance(widget, QTextEdit):
         raise TypeError(f"Cannot append text to {type(widget)!r}")
 
-    probe = QLabel("", widget)
-    apply_label_role(probe, role or "body")
-    probe.ensurePolished()
-    color = probe.palette().color(QPalette.ColorRole.WindowText)
-    probe.deleteLater()
+    color = _color_for_role(widget, role or "body")
 
     text_format = QTextCharFormat()
     text_format.setForeground(color)

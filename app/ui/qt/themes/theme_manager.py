@@ -222,6 +222,7 @@ class ThemeManager:
                         raise ValueError("theme JSON must be an object")
                     normalize_theme_stylesheet(theme_data)
                     theme_name = theme_file.stem
+                    self._theme_factories.pop(theme_name, None)
                     self._themes[theme_name] = theme_data
                     logger.info(f"Loaded custom theme: {theme_name}")
             except Exception as e:
@@ -234,11 +235,18 @@ class ThemeManager:
         Returns the theme data dict, or None if the theme does not exist.
         """
         if theme_name in self._themes:
+            self._theme_factories.pop(theme_name, None)
             return self._themes[theme_name]
         if theme_name in self._theme_factories:
-            self._themes[theme_name] = self._theme_factories.pop(theme_name)()
+            data = self._theme_factories.pop(theme_name)()
+            if theme_name not in self._themes:
+                self._themes[theme_name] = data
             return self._themes[theme_name]
         return None
+
+    def has_theme(self, theme_name: str) -> bool:
+        """Return True if a theme is registered (materialized or pending factory)."""
+        return self._has_theme(theme_name)
 
     def _has_theme(self, theme_name: str) -> bool:
         """Check if a theme is registered (materialized or pending lazy factory)."""
@@ -246,20 +254,15 @@ class ThemeManager:
 
     @property
     def themes(self) -> MappingProxyType:
-        """Get a read-only view of all themes.
-        
-        PERF: Returns a MappingProxyType instead of a full copy.
-        Lazy-factory themes are materialized on access to ensure the
-        view is complete for callers that iterate all themes (e.g. theme dialog).
+        """Read-only view of currently materialized themes.
+
+        Does not materialize pending lazy factories. Use ``get_theme_names``,
+        ``has_theme``, or ``get_theme_data`` instead of iterating this for
+        membership or a single theme.
         """
-        # Ensure themes are loaded
         if not self._themes and not self._theme_factories:
             self.load_builtin_themes()
             self.load_custom_themes()
-        # Materialize any remaining lazy factories so the view is complete
-        if self._theme_factories:
-            for name in list(self._theme_factories):
-                self._themes[name] = self._theme_factories.pop(name)()
         return MappingProxyType(self._themes)
     
     def save_custom_theme(self, theme_name: str, theme_data: Dict[str, Any]) -> bool:
@@ -285,6 +288,7 @@ class ThemeManager:
                     except Exception:
                         pass
                 raise e
+            self._theme_factories.pop(theme_name, None)
             self._themes[theme_name] = stored
             self._sorted_names_cache = None  # Invalidate name cache
             logger.info(f"Saved custom theme: {theme_name}")
@@ -503,6 +507,13 @@ class ThemeManager:
         if not normalized and not was_empty:
             self._refresh_menus_after_stylesheet_clear(app)
         self._last_stylesheet = normalized
+        try:
+            from .. import style_map
+            invalidate = getattr(style_map, "invalidate_text_role_colors", None)
+            if callable(invalidate):
+                invalidate()
+        except Exception:
+            pass
 
     def _refresh_menus_after_stylesheet_clear(self, app: QApplication) -> None:
         """Force menu bars to re-polish after clearing stylesheet."""

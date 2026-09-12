@@ -38,6 +38,7 @@ from .dependencies import (
     resolve_dependency_graph,
     transitive_dependents,
 )
+from ..app.utils.imports import get_platforms_constants
 
 logger = logging.getLogger(__name__)
 
@@ -64,20 +65,8 @@ def _is_show_all_platforms() -> bool:
 
 def clear_registration_caches() -> None:
     """Clear per-discovery-pass caches used during plugin registration."""
-    for fn in (_is_show_all_platforms, _get_platforms_constants_cached):
-        if hasattr(fn, "_cache"):
-            delattr(fn, "_cache")
-
-
-def _get_platforms_constants_cached() -> Any:
-    """Load platform/GUI constants once per discovery pass."""
-    cached = getattr(_get_platforms_constants_cached, "_cache", None)
-    if cached is not None:
-        return cached
-    from ..app.utils.imports import get_platforms_constants
-    constants = get_platforms_constants()
-    _get_platforms_constants_cached._cache = constants  # type: ignore[attr-defined]
-    return constants
+    if hasattr(_is_show_all_platforms, "_cache"):
+        delattr(_is_show_all_platforms, "_cache")
 
 
 def _create_prefixed_plugin(original_class: Type[Any], platform_prefix: str) -> Type[Any]:
@@ -208,6 +197,7 @@ class PluginRegistry:
         
         # Rejected plugins tracking
         self._rejected_plugins: Dict[str, Tuple[Type[Any], str]] = {}
+        self._pending_replaced_instances: List[Tuple[str, Any]] = []
 
         # Lifecycle subscribers (IPluginLifecycle)
         self._lifecycle_subscribers: List[Any] = []
@@ -268,7 +258,7 @@ class PluginRegistry:
             plugin_name = plugin_identity(plugin_class)
 
             # Check if in single plugin mode and filter
-            constants = _get_platforms_constants_cached()
+            constants = get_platforms_constants()
             if getattr(constants, "SINGLE_PLUGIN_MODE", False):
                 single_name = getattr(constants, "SINGLE_PLUGIN_NAME", "")
                 if single_name:
@@ -343,6 +333,7 @@ class PluginRegistry:
 
             logger.debug(f"Registered plugin: {plugin_name} (core={is_core})")
 
+        self._flush_replaced_instances()
         if discovered is not None:
             self._notify_plugins_discovered([discovered])
 
@@ -407,7 +398,6 @@ class PluginRegistry:
         Re-entrant or cyclic construction on the same thread raises.
         """
         wait_future: Optional[Future] = None
-        should_construct = False
         construct_future: Optional[Future] = None
         plugin_class: Optional[Type[Any]] = None
         container = None
@@ -445,7 +435,6 @@ class PluginRegistry:
                 generation = self._generations.get(key, 0)
                 construct_future = Future()
                 self._in_flight[key] = construct_future
-                should_construct = True
 
         if wait_future is not None:
             return wait_future.result()
@@ -523,12 +512,16 @@ class PluginRegistry:
 
     def has_plugin_instance(self, name: str) -> bool:
         """Check if a plugin instance is cached."""
+        return self.peek_plugin_instance(name) is not None
+
+    def peek_plugin_instance(self, name: str) -> Optional[Any]:
+        """Return a cached instance without constructing a replacement."""
         with self._lock:
             try:
                 key = self._resolve_plugin_key_unlocked(name) or name
             except ValueError:
-                return False
-            return key in self._plugin_instances
+                return None
+            return self._plugin_instances.get(key)
 
     def _validate_extension_plugin(self, plugin_class: Type[Any], plugin_name: str) -> List[str]:
         """Validate an extension plugin."""
@@ -615,8 +608,11 @@ class PluginRegistry:
             logger.info(f"Replacing external plugin '{label}' with core plugin")
             if plugin_name in self._external_plugins:
                 del self._external_plugins[plugin_name]
+            self._uncategorize_plugin(plugin_name)
             self._bump_generation(plugin_name)
-            self._plugin_instances.pop(plugin_name, None)
+            dropped = self._plugin_instances.pop(plugin_name, None)
+            if dropped is not None:
+                self._pending_replaced_instances.append((plugin_name, dropped))
             return True
 
         logger.warning(
@@ -640,13 +636,24 @@ class PluginRegistry:
             self._external_plugins[plugin_name] = plugin_class
 
         self._categorize_plugin_by_interface(plugin_name, plugin_class)
-    
+
     def _categorize_plugin_by_interface(self, plugin_name: str, plugin_class: Type[Any]) -> None:
         """Categorize a plugin by which interfaces it implements."""
         from .extensions import EXTENSION_POINTS
         for ep in EXTENSION_POINTS:
             if ep.name in self._extension_category_maps and ep.check_implements(plugin_class):
                 self._extension_category_maps[ep.name][plugin_name] = plugin_class
+
+    def _uncategorize_plugin(self, plugin_name: str) -> None:
+        """Remove a plugin from every extension category map."""
+        for mapping in self._extension_category_maps.values():
+            mapping.pop(plugin_name, None)
+
+    def _flush_replaced_instances(self) -> None:
+        pending = self._pending_replaced_instances
+        self._pending_replaced_instances = []
+        for name, instance in pending:
+            self._cleanup_instance(name, instance)
 
     def _apply_default_disabled_state(self, plugin_class: Type[Any], plugin_name: str) -> None:
         """Apply default disabled state if plugin has disabled_by_default flag."""
@@ -771,12 +778,24 @@ class PluginRegistry:
         Raises:
             KeyError: If *name* is not in the rejected plugins list.
         """
+        self._register_rejected_plugin(name, plugin_class, enable=True)
+
+    def register_rejected_plugin(self, name: str, plugin_class: Type[Any]) -> None:
+        """Bypass version checks without enabling. Activation is the caller's job."""
+        self._register_rejected_plugin(name, plugin_class, enable=False)
+
+    def _register_rejected_plugin(
+        self, name: str, plugin_class: Type[Any], *, enable: bool
+    ) -> None:
         with self._lock:
             if name not in self._rejected_plugins:
                 raise KeyError(f"Plugin '{name}' is not in the rejected plugins list")
 
             self._add_plugin_to_registry(name, plugin_class, is_core=False)
-            self._disabled_plugins.discard(name)
+            if enable:
+                self._disabled_plugins.discard(name)
+            else:
+                self._disabled_plugins.add(name)
             del self._rejected_plugins[name]
             self._version_incompatibilities.pop(name, None)
             logger.info(
@@ -784,7 +803,8 @@ class PluginRegistry:
             )
 
         self._notify_plugins_discovered([name])
-        self._notify_plugin_state_changed(name, True)
+        if enable:
+            self._notify_plugin_state_changed(name, True)
 
     # =========================================================================
     # Enable/Disable

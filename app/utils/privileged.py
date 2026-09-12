@@ -24,6 +24,23 @@ class PrivilegedStreamResult:
     request_id: Optional[str] = None
 
 
+def _format_command(command: Union[str, List[str]]) -> str:
+    if isinstance(command, str):
+        return command
+    return " ".join(str(part) for part in command)
+
+
+def _dev_log_daemon(message: str) -> None:
+    """Log daemon traffic in runtime dev mode only (production stays quiet)."""
+    try:
+        from .admin import is_dev_mode
+
+        if is_dev_mode():
+            logger.info(message)
+    except Exception:
+        pass
+
+
 def run_privileged_command(command: Union[str, List[str]], timeout: int = 300):
     """Run a command with root privileges via daemon.
     
@@ -55,6 +72,9 @@ def run_privileged_command(command: Union[str, List[str]], timeout: int = 300):
             timeout_for_request = None
         else:
             timeout_for_request = int(timeout) if timeout else 300
+
+        cmd_display = _format_command(cmd_to_send)
+        _dev_log_daemon(f"[daemon] run_command: {cmd_display}")
         
         response = daemon.request('run_command', {
             'command': cmd_to_send,
@@ -66,6 +86,9 @@ def run_privileged_command(command: Union[str, List[str]], timeout: int = 300):
             error_msg = str(response.get('error', 'Unknown error'))
             result = response.get('result', {})
             stderr_msg = str(result.get('stderr', '')) or error_msg
+            _dev_log_daemon(
+                f"[daemon] run_command failed rc={result.get('returncode', -1)}: {cmd_display}"
+            )
             raise subprocess.CalledProcessError(
                 result.get('returncode', -1),
                 command,
@@ -75,10 +98,12 @@ def run_privileged_command(command: Union[str, List[str]], timeout: int = 300):
         
         # Extract result from response
         result = response.get('result', {})
+        rc = result.get('returncode', 0)
+        _dev_log_daemon(f"[daemon] run_command finished rc={rc}: {cmd_display}")
         
         return subprocess.CompletedProcess(
             command,
-            result.get('returncode', 0),
+            rc,
             str(result.get('stdout', '')),
             str(result.get('stderr', ''))
         )
@@ -132,9 +157,14 @@ def run_privileged_command_stream(
             timeout_for_request = int(timeout) if timeout else 300
 
         handle_box: dict[str, Optional[StreamRequestHandle]] = {'handle': None}
+        cmd_display = _format_command(cmd_to_send)
+        _dev_log_daemon(f"[daemon] run_command_stream: {cmd_display}")
 
         def _on_started(handle: StreamRequestHandle) -> None:
             handle_box['handle'] = handle
+            _dev_log_daemon(
+                f"[daemon] run_command_stream started id={handle.request_id}: {cmd_display}"
+            )
             if on_started is not None:
                 on_started(handle)
 
@@ -159,6 +189,9 @@ def run_privileged_command_stream(
             error_msg = str(response.get('error', 'Unknown error'))
             result = response.get('result', {}) or {}
             stderr_msg = str(result.get('stderr', '')) or error_msg
+            _dev_log_daemon(
+                f"[daemon] run_command_stream failed rc={result.get('returncode', -1)}: {cmd_display}"
+            )
             raise subprocess.CalledProcessError(
                 result.get('returncode', -1),
                 command,
@@ -167,9 +200,11 @@ def run_privileged_command_stream(
             )
 
         result = response.get('result', {}) or {}
+        rc = result.get('returncode', 0)
+        _dev_log_daemon(f"[daemon] run_command_stream finished rc={rc}: {cmd_display}")
         completed = subprocess.CompletedProcess(
             command,
-            result.get('returncode', 0),
+            rc,
             str(result.get('stdout', '')),
             str(result.get('stderr', '')),
         )
@@ -197,11 +232,15 @@ def cancel_privileged_request(target_id: str, timeout: float = 5.0) -> bool:
         from ..daemon import get_daemon_client
 
         daemon = get_daemon_client()
+        _dev_log_daemon(f"[daemon] cancel: {target_id}")
         response = daemon.cancel_request(target_id, timeout=timeout)
         if not response.get('success', False):
+            _dev_log_daemon(f"[daemon] cancel failed: {target_id}")
             return False
         result = response.get('result', {}) or {}
-        return bool(result.get('cancelled'))
+        cancelled = bool(result.get('cancelled'))
+        _dev_log_daemon(f"[daemon] cancel result cancelled={cancelled}: {target_id}")
+        return cancelled
     except Exception as e:
         logger.error(f"Error cancelling privileged request {target_id}: {e}", exc_info=True)
         return False

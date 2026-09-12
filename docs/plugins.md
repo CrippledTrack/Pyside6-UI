@@ -140,3 +140,8 @@ kept; disable stops dependents, runs `on_plugin_disabled`, then unloads.
 Queued async events are dropped after unload. Application close shuts service
 extensions down before disposing tab views.
 
+Public `register_plugin_force` still bypasses version checks and enables
+immediately. Plugin Management uses `register_rejected_plugin` (register
+without enable) and then a single True `toggle_plugin` so enablement is not
+applied twice.
+

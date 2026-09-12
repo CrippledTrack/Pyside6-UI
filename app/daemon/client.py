@@ -53,6 +53,24 @@ class DaemonClient:
         self._stream_activity: Dict[str, float] = {}
         self._stream_callbacks_lock = threading.Lock()
         self._start_reader_thread()
+
+    def _stop_reader(self, timeout: float = 2.0) -> bool:
+        """Stop the pipe reader. Closes stdout so a blocking readline() can return."""
+        self._reader_running = False
+        stdout = getattr(self._process, "stdout", None) if self._process else None
+        if stdout is not None:
+            try:
+                stdout.close()
+            except Exception:
+                pass
+        if self._reader_thread is not None:
+            self._reader_thread.join(timeout=timeout)
+            alive = self._reader_thread.is_alive()
+            if not alive:
+                self._reader_thread = None
+            return not alive
+        return True
+
     def is_connected(self) -> bool:
         """Check if client is connected to daemon."""
         return self._connected and self._process.poll() is None
@@ -134,7 +152,6 @@ class DaemonClient:
     def disconnect(self):
         """Disconnect from daemon and terminate the process."""
         with self._lock:
-            self._reader_running = False
             if self._process.poll() is None:
                 try:
                     self._process.terminate()
@@ -144,9 +161,7 @@ class DaemonClient:
                         self._process.kill()
                     except Exception:
                         pass
-            if self._reader_thread is not None:
-                self._reader_thread.join(timeout=2.0)
-                self._reader_thread = None
+            self._stop_reader(timeout=2.0)
             self._connected = False
             logger.info("Disconnected from pipe daemon")
 
@@ -358,7 +373,7 @@ class DaemonClient:
         """Restart the pipe daemon after a crash or disconnection.
 
         Kills the old process (if still alive), spawns a new daemon via
-        elevation_linux.start_daemon(), and re-establishes the reader loop.
+        elevation_linux.spawn_daemon_process(), and re-establishes the reader loop.
         """
         logger.info("Attempting to restart pipe daemon...")
 
@@ -372,31 +387,24 @@ class DaemonClient:
                 except Exception:
                     pass
 
-        # Clear elevation global so start_daemon() will spawn a fresh process
+        # Clear elevation global so spawn_daemon_process() will spawn a fresh process
         try:
             from ..utils.elevation_linux import clear_daemon_process
             clear_daemon_process()
         except Exception as e:
             logger.debug(f"clear_daemon_process failed: {e}")
 
-        self._reader_running = False
-        if self._reader_thread is not None:
-            self._reader_thread.join(timeout=2.0)
-            self._reader_thread = None
+        if not self._stop_reader(timeout=2.0):
+            logger.warning("Previous pipe reader did not exit before restart")
 
         try:
-            from ..utils.elevation_linux import start_daemon
-            new_client = start_daemon()
-            if new_client is None:
-                logger.error("Failed to restart pipe daemon: start_daemon returned None")
+            from ..utils.elevation_linux import spawn_daemon_process
+            new_process = spawn_daemon_process()
+            if new_process is None:
+                logger.error("Failed to restart pipe daemon: spawn_daemon_process returned None")
                 return False
 
-            if isinstance(new_client, DaemonClient) and new_client is not self:
-                new_client._reader_running = False
-                if new_client._reader_thread:
-                    new_client._reader_thread.join(timeout=2.0)
-                self._process = new_client._process
-
+            self._process = new_process
             try:
                 from ..utils.elevation_linux import set_daemon_process
                 set_daemon_process(self._process)

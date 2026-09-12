@@ -44,10 +44,11 @@ class QtApplicationBackend:
         self._notification_bridge: Optional[NotificationShellBridge] = None
 
     def run(self) -> int:
-        from .deps_service import QtDepsService
+        from .deps_service import QtDepsService, should_skip_qt_deps
 
+        skip_deps = should_skip_qt_deps(self._argv)
         qt_deps = QtDepsService()
-        deps_ok, deps_message = qt_deps.ensure_dependencies()
+        deps_ok, deps_message = qt_deps.ensure_dependencies(skip=skip_deps)
         if not deps_ok:
             logger.error("Required Qt xcb dependencies are missing.")
             if deps_message:
@@ -56,7 +57,9 @@ class QtApplicationBackend:
 
         save_gui_version(self._container)
 
-        self._app = QApplication(self._argv)
+        # Drop only our own flag so Qt does not warn about an unknown option.
+        qt_argv = [arg for arg in self._argv if arg != "--skip-qt-deps"]
+        self._app = QApplication(qt_argv)
 
         dispatcher = QtEventDispatcher.get_instance()
         register_event_loop(self._container, dispatcher)

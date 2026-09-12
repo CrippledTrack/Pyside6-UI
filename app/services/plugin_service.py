@@ -137,6 +137,10 @@ class PluginService:
         """Check if a plugin instance is cached."""
         return self._registry.has_plugin_instance(name)
 
+    def peek_plugin_instance(self, name: str) -> Optional[Any]:
+        """Return a cached instance without constructing a replacement."""
+        return self._registry.peek_plugin_instance(name)
+
     def list_plugin_names(self) -> List[str]:
         """Return registry keys (``plugin_id`` values) for all registered plugins."""
         return self._registry.list_plugin_names()
@@ -266,12 +270,7 @@ class PluginService:
         ``on_plugin_disabled``, is marked disabled, then unloaded.
         Returns the plugin ids that were deactivated.
         """
-        key = self.resolve_plugin_key(name) or name
-        targets: List[str] = []
-        if cascade:
-            targets.extend(self.get_enabled_dependents(key))
-        if self.is_enabled(key) or self.has_plugin_instance(key):
-            targets.append(key)
+        targets = self.list_deactivation_targets(name, cascade=cascade)
         deactivated: List[str] = []
         for tid in targets:
             try:
@@ -298,6 +297,16 @@ class PluginService:
             deactivated.append(tid)
         return deactivated
 
+    def list_deactivation_targets(self, name: str, *, cascade: bool = True) -> List[str]:
+        """Return plugin ids that ``deactivate_plugin`` would stop, without unloading."""
+        key = self.resolve_plugin_key(name) or name
+        targets: List[str] = []
+        if cascade:
+            targets.extend(self.get_enabled_dependents(key))
+        if self.is_enabled(key) or self.has_plugin_instance(key):
+            targets.append(key)
+        return targets
+
     def publish_event_async(
         self, event_name: str, event_data: Dict[str, Any] | None = None
     ) -> Any:
@@ -313,8 +322,12 @@ class PluginService:
         return self._registry.get_rejected_plugins()
 
     def register_plugin_force(self, name: str, plugin_class: Type[Any]) -> None:
-        """Force register a version-incompatible plugin."""
+        """Force register a version-incompatible plugin and enable it immediately."""
         self._registry.register_plugin_force(name, plugin_class)
+
+    def register_rejected_plugin(self, name: str, plugin_class: Type[Any]) -> None:
+        """Bypass version checks without enabling. Activation is the caller's job."""
+        self._registry.register_rejected_plugin(name, plugin_class)
 
     def publish_event(self, event_name: str, event_data: Dict[str, Any] | None = None) -> None:
         """Publish a plugin event to subscribers."""
@@ -684,11 +697,15 @@ class PluginService:
         try:
             saved_disabled = self.settings_service.get_disabled_plugins()
             saved_enabled = self.settings_service.get_enabled_plugins()
+            has_override_keys = True
+            present = getattr(self.settings_service, "has_plugin_override_keys", None)
+            if callable(present):
+                has_override_keys = present()
             if saved_disabled:
                 self._apply_user_disabled_plugins(saved_disabled)
             if saved_enabled:
                 self._apply_user_enabled_plugins(saved_enabled)
-            if not saved_disabled and not saved_enabled:
+            if not saved_disabled and not saved_enabled and not has_override_keys:
                 self._handle_first_run()
         except Exception as e:
             logger.warning(f"Failed to load saved plugin states: {e}")
@@ -762,8 +779,12 @@ class PluginService:
             )
         
         if self.settings_service:
-            self.settings_service.save_disabled_plugins([])
-            self.settings_service.save_enabled_plugins([])
+            saver = getattr(self.settings_service, "save_plugin_overrides", None)
+            if callable(saver):
+                saver([], [])
+            else:
+                self.settings_service.save_disabled_plugins([])
+                self.settings_service.save_enabled_plugins([])
     
     @property
     def is_discovery_complete(self) -> bool:

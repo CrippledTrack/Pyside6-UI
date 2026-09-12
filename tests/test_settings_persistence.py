@@ -74,3 +74,40 @@ def test_host_config_explicit_user_data_dir(_isolate_host_paths: Path) -> None:
     svc = SettingsService(host_config=cfg)
     svc.save_dev_mode(True)
     assert (nested / "settings.json").exists()
+
+
+def test_skip_unchanged_theme_and_plugin_override_writes(_isolate_host_paths: Path) -> None:
+    path = _isolate_host_paths / "skip.json"
+    svc = SettingsService(settings_file=path)
+    svc.save_theme_preference("dark")
+    first_mtime = path.stat().st_mtime_ns
+    svc.save_theme_preference("dark")
+    assert path.stat().st_mtime_ns == first_mtime
+
+    assert svc.has_plugin_override_keys() is False
+    svc.save_plugin_overrides([], [])
+    assert svc.has_plugin_override_keys() is True
+    after_first = path.read_text(encoding="utf-8")
+    mtime = path.stat().st_mtime_ns
+    svc.save_plugin_overrides([], [])
+    assert path.stat().st_mtime_ns == mtime
+    assert path.read_text(encoding="utf-8") == after_first
+
+
+def test_missing_override_keys_are_not_treated_as_empty_lists(
+    _isolate_host_paths: Path,
+) -> None:
+    path = _isolate_host_paths / "no-overrides.json"
+    path.write_text(
+        json.dumps(
+            {
+                "settings_schema_version": SETTINGS_SCHEMA_VERSION,
+                "theme": "dark",
+            }
+        ),
+        encoding="utf-8",
+    )
+    svc = SettingsService(settings_file=path)
+    assert svc.has_plugin_override_keys() is False
+    assert svc.get_disabled_plugins() == []
+    assert svc.get_enabled_plugins() == []

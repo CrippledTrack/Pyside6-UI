@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 
 from ..themes.theme_manager import (
     ThemeManager,
@@ -112,7 +112,7 @@ class ThemePreviewWidget(QFrame):
                 # If there's no custom stylesheet, use a clean fallback to prevent
                 # the active global application theme from leaking into the preview
                 if self._theme_manager is not None:
-                    light_theme = self._theme_manager.themes.get("light", {})
+                    light_theme = self._theme_manager.get_theme_data("light") or {}
                     stylesheet = light_theme.get("stylesheet", "")
 
             if stylesheet:
@@ -141,12 +141,14 @@ class ThemeDialog(QDialog):
         self, 
         theme_manager: ThemeManager,
         settings_service: SettingsService,
-        parent: Optional[QWidget] = None
+        parent: Optional[QWidget] = None,
+        apply_callback: Optional[Callable[[str], bool]] = None,
     ) -> None:
         super().__init__(parent)
         
         self.theme_manager = theme_manager
         self.settings_service = settings_service
+        self._apply_callback = apply_callback
         self.current_theme = self.theme_manager.get_current_theme()
         self.favorite_themes = set()  # Set of favorite theme names
         if self.settings_service and hasattr(self.settings_service, 'get_favorite_themes'):
@@ -275,10 +277,11 @@ class ThemeDialog(QDialog):
         self.theme_list.clear()
         theme_names = self.theme_manager.get_theme_names()
         
-        for theme_name in sorted(theme_names):
+        for theme_name in theme_names:
             if self.show_favorites_only and theme_name not in self.favorite_themes:
                 continue
             item = QListWidgetItem(theme_name)
+            item.setData(Qt.ItemDataRole.UserRole, theme_name)
             if theme_name == self.current_theme:
                 item.setText(f"{theme_name} (Current)")
                 item.setFont(QFont("Arial", 9, QFont.Weight.Bold))
@@ -286,13 +289,21 @@ class ThemeDialog(QDialog):
                 item.setText(f"⭐ {theme_name}")
                 item.setFont(QFont("Arial", 9, QFont.Weight.Bold))
             self.theme_list.addItem(item)
+
+    def _theme_key(self, item: Optional[QListWidgetItem]) -> Optional[str]:
+        if item is None:
+            return None
+        key = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(key, str) and key:
+            return key
+        return item.text().replace(" (Current)", "").replace("⭐ ", "")
     
     def on_theme_selected(self, current: Optional[QListWidgetItem], previous: Optional[QListWidgetItem]) -> None:
         """Handle theme selection"""
         if not current:
             return
         
-        theme_name = current.text().replace(" (Current)", "").replace("⭐ ", "")
+        theme_name = self._theme_key(current)
         theme_data = self.theme_manager.get_theme_data(theme_name)
         
         if theme_data:
@@ -320,12 +331,18 @@ class ThemeDialog(QDialog):
         if not current_item:
             return
         
-        theme_name = current_item.text().replace(" (Current)", "").replace("⭐ ", "")
+        theme_name = self._theme_key(current_item)
+        if not theme_name:
+            return
         
-        if self.theme_manager.apply_theme(theme_name):
+        if self._apply_callback is not None:
+            applied = bool(self._apply_callback(theme_name))
+        else:
+            applied = bool(self.theme_manager.apply_theme(theme_name))
+        if applied:
             self.current_theme = theme_name
+            self.load_themes()
             self.theme_selected.emit(theme_name)
-            self.load_themes()  # Refresh the list to show current theme
             QMessageBox.information(self, "Success", f"Theme '{theme_name}' applied successfully!")
         else:
             QMessageBox.critical(self, "Error", f"Failed to apply theme '{theme_name}'")
@@ -355,7 +372,7 @@ class ThemeDialog(QDialog):
                 theme_name = theme_data['name']
                 
                 # Check if theme already exists
-                if theme_name in self.theme_manager.themes:
+                if self.theme_manager.has_theme(theme_name):
                     reply = QMessageBox.question(
                         self,
                         "Theme Exists",
@@ -382,7 +399,7 @@ class ThemeDialog(QDialog):
         if not current_item:
             return
         
-        theme_name = current_item.text().replace(" (Current)", "").replace("⭐ ", "")
+        theme_name = self._theme_key(current_item)
         theme_data = self.theme_manager.get_theme_data(theme_name)
         
         if not theme_data:
@@ -413,7 +430,7 @@ class ThemeDialog(QDialog):
         if not item:
             return
         
-        theme_name = item.text().replace(" (Current)", "").replace("⭐ ", "")
+        theme_name = self._theme_key(item)
         
         context_menu = QMenu(self)
         

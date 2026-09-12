@@ -137,6 +137,7 @@ class SettingsService:
         self._settings = AppSettings()
         self._unknown_fields: Dict[str, Any] = {}
         self._future_schema = False
+        self._plugin_override_keys_present = False
         self._load_settings()
     
     def _load_settings(self) -> None:
@@ -181,9 +182,11 @@ class SettingsService:
             # Load disabled plugins (user-disabled, not including disabled_by_default)
             if 'disabled_plugins' in data and isinstance(data['disabled_plugins'], list):
                 self._settings.disabled_plugins = data['disabled_plugins']
+                self._plugin_override_keys_present = True
 
             if 'enabled_plugins' in data and isinstance(data['enabled_plugins'], list):
                 self._settings.enabled_plugins = data['enabled_plugins']
+                self._plugin_override_keys_present = True
             
             # Load logging settings
             if 'logging_enabled' in data:
@@ -368,6 +371,8 @@ class SettingsService:
     
     def save_theme_preference(self, theme_name: str) -> None:
         """Save theme preference"""
+        if self._settings.theme == theme_name:
+            return
         self._settings.theme = theme_name
         self._save_settings()
         logger.info(f"Theme preference saved: {theme_name}")
@@ -378,7 +383,11 @@ class SettingsService:
     
     def save_disabled_plugins(self, plugin_names: List[str]) -> None:
         """Save user-disabled plugin ids (excludes disabled_by_default)"""
-        self._settings.disabled_plugins = plugin_names
+        names = list(plugin_names)
+        if self._settings.disabled_plugins == names and self._plugin_override_keys_present:
+            return
+        self._settings.disabled_plugins = names
+        self._plugin_override_keys_present = True
         self._save_settings()
         logger.debug(f"Disabled plugins saved: {plugin_names}")
     
@@ -388,9 +397,37 @@ class SettingsService:
 
     def save_enabled_plugins(self, plugin_names: List[str]) -> None:
         """Save user-enabled plugin ids (overrides for disabled_by_default)."""
-        self._settings.enabled_plugins = plugin_names
+        names = list(plugin_names)
+        if self._settings.enabled_plugins == names and self._plugin_override_keys_present:
+            return
+        self._settings.enabled_plugins = names
+        self._plugin_override_keys_present = True
         self._save_settings()
         logger.debug(f"Enabled plugins saved: {plugin_names}")
+
+    def save_plugin_overrides(
+        self, disabled_plugins: List[str], enabled_plugins: List[str]
+    ) -> None:
+        """Persist both plugin override lists in one write."""
+        disabled = list(disabled_plugins)
+        enabled = list(enabled_plugins)
+        if (
+            self._settings.disabled_plugins == disabled
+            and self._settings.enabled_plugins == enabled
+            and self._plugin_override_keys_present
+        ):
+            return
+        self._settings.disabled_plugins = disabled
+        self._settings.enabled_plugins = enabled
+        self._plugin_override_keys_present = True
+        self._save_settings()
+        logger.debug(
+            "Plugin overrides saved: disabled=%s enabled=%s", disabled, enabled
+        )
+
+    def has_plugin_override_keys(self) -> bool:
+        """Return True if override lists were loaded from disk or saved this session."""
+        return self._plugin_override_keys_present
 
     def get_enabled_plugins(self) -> List[str]:
         """Get saved user-enabled plugin ids (overrides for disabled_by_default)."""
@@ -476,6 +513,8 @@ class SettingsService:
     # UI overhaul flag methods
     def save_new_ui_enabled(self, enabled: bool) -> None:
         """Save new UI enabled setting"""
+        if self._settings.new_ui_enabled == enabled:
+            return
         self._settings.new_ui_enabled = enabled
         self._save_settings()
         logger.debug(f"New UI enabled saved: {enabled}")
@@ -523,6 +562,8 @@ class SettingsService:
 
     def save_dev_mode(self, enabled: bool) -> None:
         """Persist dev mode flag."""
+        if self._settings.dev_mode == enabled:
+            return
         self._settings.dev_mode = enabled
         self._save_settings()
         logger.debug(f"Dev mode saved: {enabled}")
@@ -533,6 +574,8 @@ class SettingsService:
 
     def save_show_all_platforms(self, enabled: bool) -> None:
         """Persist show-all-platforms flag."""
+        if self._settings.show_all_platforms == enabled:
+            return
         self._settings.show_all_platforms = enabled
         self._save_settings()
         logger.debug(f"Show all platforms saved: {enabled}")

@@ -323,8 +323,7 @@ class PluginManagementDialog:
         
         if name in self._rejected_plugins:
             plugin_class, reason = self._rejected_plugins[name]
-            self.plugin_service.register_plugin_force(name, plugin_class)
-            self.plugin_service.disable_plugin(name)  # Temporarily disable so toggle_plugin executes a full enable cycle
+            self.plugin_service.register_rejected_plugin(name, plugin_class)
             self.toggle_plugin(name, True)
             self.load_plugins()
 
@@ -594,7 +593,7 @@ class PluginManagementDialog:
         
         # Refresh extensions to apply the change
         if self.plugin_controller:
-            self.plugin_controller.refresh_plugin_extensions(name)
+            self.plugin_controller.refresh_plugin_extensions(name, extension_type)
 
     def update_status_label(self) -> None:
         total = len(self._all_plugins)
@@ -636,7 +635,8 @@ class PluginManagementDialog:
             
         try:
             for name, _ in self._all_plugins:
-                self.toggle_plugin(name, True)
+                if not self.plugin_service.is_enabled(name):
+                    self.toggle_plugin(name, True)
         finally:
             if tab_controller:
                 tab_controller.set_batch_loading(False)
@@ -658,7 +658,8 @@ class PluginManagementDialog:
             
         try:
             for name, _ in self._all_plugins:
-                self.toggle_plugin(name, False)
+                if self.plugin_service.is_enabled(name):
+                    self.toggle_plugin(name, False)
         finally:
             if tab_controller:
                 tab_controller.set_batch_loading(False)
