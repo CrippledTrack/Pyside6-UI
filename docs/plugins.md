@@ -7,7 +7,7 @@ Plugins extend the shell through protocol-based extension points in `GUI.plugin_
 Plugins may implement any combination of:
 
 - **Tab** — `create_tab_content(context)` (preferred) or legacy `create_widget`
-- **Menu** / **Toolbar** / **Status**
+- **Menu** / **Toolbar** / **Status** — menu items stay in the declared menu (Help, Tools, …). On macOS they do not replace the application About / Preferences / Quit items, even if a label starts with ``About``.
 - **Service** — background work via the container
 - **Event subscriber** / **Settings**
 - **Lifecycle / cleanup** — `IPluginLifecycle`, `IPluginResourceCleanup`

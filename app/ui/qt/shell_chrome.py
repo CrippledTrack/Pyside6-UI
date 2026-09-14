@@ -52,6 +52,9 @@ def add_menu_action(
         sep_before_action = target_menu.addSeparator()
 
     action = QAction(label, window)
+    # Qt's macOS heuristics map labels such as "About …" to AboutRole and
+    # would otherwise replace the host About item in the application menu.
+    action.setMenuRole(QAction.MenuRole.NoRole)
     action.triggered.connect(callback)
     if shortcut:
         action.setShortcut(shortcut)

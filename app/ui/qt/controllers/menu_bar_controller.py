@@ -268,8 +268,11 @@ class MenuBarController(QObject):
         
         help_menu.addSeparator()
         
-        # About action
+        # About action. AboutRole must be set before addAction so macOS keeps
+        # this item in the application menu even if a plugin later adds
+        # "About …" to Help (those plugin actions use NoRole).
         self.about_action = QAction("About...", self.parent_widget)
+        self.about_action.setMenuRole(QAction.MenuRole.AboutRole)
         self.about_action.setToolTip("Show information about this application")
 
         if on_about:
