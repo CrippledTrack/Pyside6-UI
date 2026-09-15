@@ -1,0 +1,707 @@
+"""
+Tab management controller.
+
+This module provides TabController to handle tab creation, loading,
+activation/deactivation, and lifecycle management, extracted from MainWindow.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any, Dict, Optional, Callable, TYPE_CHECKING, List
+
+from ..bindings import (
+    Signal,
+    QObject,
+    QTabWidget,
+    QWidget,
+    QMenu,
+    QAction,
+    QKeySequence,
+    QMessageBox,
+    QPoint,
+    is_valid,
+)
+
+if TYPE_CHECKING:
+    from ....services.container import ServiceContainer
+
+from ....services.interfaces import IAdminService, IDaemonService
+from ....services.plugin_service import PluginService
+from .....plugin_system.tab_content import resolve_tab_content
+from .....plugin_system.identity import plugin_tab_label
+from ...active_backend import get_active_ui_backend_id
+
+from ..widgets.admin_required_placeholder import AdminRequiredPlaceholder
+from ..widgets.error_placeholder import ErrorPlaceholder
+from ..widgets.loading_placeholder import LoadingPlaceholder
+
+logger = logging.getLogger(__name__)
+
+
+class TabController(QObject):
+    """Controller for managing tabs and their lifecycle."""
+    
+    # Signals
+    tab_added = Signal(str)  # Emitted when a tab is added
+    tab_removed = Signal(str)  # Emitted when a tab is removed
+    tab_activated = Signal(str)  # Emitted when a tab is activated
+    tab_deactivated = Signal(str)  # Emitted when a tab is deactivated
+    title_update_requested = Signal()  # Emitted when window title should be updated
+    
+    def __init__(
+        self,
+        tab_widget: QTabWidget,
+        admin_service: IAdminService,
+        daemon_service: Optional[IDaemonService],
+        plugin_service: PluginService,
+        parent: Optional[QObject] = None
+    ) -> None:
+        """Initialize the tab controller.
+        
+        Args:
+            tab_widget: The tab widget to manage
+            admin_service: The admin service
+            daemon_service: The daemon service
+            plugin_service: The plugin service
+            parent: Optional parent object
+        """
+        super().__init__(parent)
+        self.tab_widget = tab_widget
+        self.admin_service = admin_service
+        self.daemon_service = daemon_service
+        self.plugin_service = plugin_service
+        
+        self.loaded_tabs: Dict[str, Dict[str, Any]] = {}
+        self.is_loading_tab = False
+        self._active_tab_id: Optional[str] = None
+        self._batch_loading = False
+        
+        # Connect tab widget signals
+        self.tab_widget.currentChanged.connect(self.on_tab_changed)
+    
+    def set_batch_loading(self, enabled: bool) -> None:
+        """Set whether the controller is in batch loading mode.
+        
+        When in batch loading mode, tab activation and lazy loading
+        are suppressed to avoid loading tabs during initialization.
+        
+        Args:
+            enabled: True to enable batch loading, False to disable
+        """
+        self._batch_loading = enabled
+        logger.debug(f"Set tab controller batch loading to {enabled}")
+
+    @staticmethod
+    def tab_label(plugin_class: Any) -> str:
+        """Human-readable tab title (not the registry plugin_id)."""
+        return plugin_tab_label(plugin_class)
+
+    def plugin_id_at(self, index: int) -> Optional[str]:
+        """Return the plugin_id stored on the tab at *index*."""
+        if index < 0 or index >= self.tab_widget.count():
+            return None
+        data = self.tab_widget.tabBar().tabData(index)
+        if isinstance(data, str) and data:
+            return data
+        return None
+
+    def index_for_plugin(self, plugin_id: str) -> int:
+        """Find the tab index for a plugin_id."""
+        bar = self.tab_widget.tabBar()
+        for i in range(self.tab_widget.count()):
+            if bar.tabData(i) == plugin_id:
+                return i
+        return -1
+
+    def _index_for_view(self, *views: Any) -> int:
+        """Find a tab page by widget identity when tabData lookup misses."""
+        for view in views:
+            if view is None:
+                continue
+            for i in range(self.tab_widget.count()):
+                if self.tab_widget.widget(i) is view:
+                    return i
+        return -1
+
+    def add_tab(self, tab_name: str, plugin_class: Any) -> None:
+        """Add a new tab to the tab widget.
+        
+        Args:
+            tab_name: Registry ``plugin_id`` (stored as tab data; not the bar label)
+            plugin_class: Plugin class for the tab
+        """
+        if tab_name in self.loaded_tabs:
+            logger.debug("Tab already present for plugin '%s'", tab_name)
+            return
+        placeholder = LoadingPlaceholder(self.tab_label(plugin_class))
+        self.loaded_tabs[tab_name] = {
+            "plugin_class": plugin_class,
+            "widget": None,
+            "placeholder": placeholder,
+        }
+        index = self.tab_widget.addTab(placeholder, self.tab_label(plugin_class))
+        self.tab_widget.tabBar().setTabData(index, tab_name)
+        self.tab_added.emit(tab_name)
+        self.title_update_requested.emit()
+        logger.debug(f"Added tab: {tab_name}")
+
+    @staticmethod
+    def _unique_views(*views: Any) -> List[Any]:
+        unique: List[Any] = []
+        for view in views:
+            if view is None:
+                continue
+            if any(view is existing for existing in unique):
+                continue
+            unique.append(view)
+        return unique
+
+    @staticmethod
+    def _dispose_view(widget: Any) -> None:
+        """Close and delete a tab page, ignoring wrappers whose C++ object is gone."""
+        if widget is None or not is_valid(widget):
+            return
+        try:
+            widget.close()
+            widget.deleteLater()
+        except RuntimeError:
+            pass
+
+    @staticmethod
+    def _forget_replaced_view(tab_info: Dict[str, Any], old_widget: Any) -> None:
+        if old_widget is None:
+            return
+        if tab_info.get("placeholder") is old_widget:
+            tab_info["placeholder"] = None
+        if tab_info.get("widget") is old_widget:
+            tab_info["widget"] = None
+
+    def remove_tab(self, tab_name: str) -> None:
+        """Remove a tab view from the tab widget.
+
+        Closes the tab widget only. The plugin instance stays cached while the
+        plugin remains enabled so Menu/Service extensions keep running. Whole-
+        plugin teardown is owned by disable/reload/``clear_all_tabs``.
+
+        Args:
+            tab_name: Registry ``plugin_id`` of the tab to remove
+        """
+        tab_info = self.loaded_tabs.get(tab_name)
+        if self._active_tab_id == tab_name:
+            self._deactivate_current_tab()
+        widget = None
+        index = self.index_for_plugin(tab_name)
+        if index < 0 and tab_info:
+            index = self._index_for_view(
+                tab_info.get("widget"), tab_info.get("placeholder")
+            )
+        if index >= 0:
+            widget = self.tab_widget.widget(index)
+            self.tab_widget.removeTab(index)
+            self._dispose_view(widget)
+
+        if tab_name in self.loaded_tabs:
+            tab_info = self.loaded_tabs[tab_name]
+            plugin_instance = self.plugin_service.peek_plugin_instance(tab_name)
+            if plugin_instance is not None:
+                if getattr(plugin_instance, "_widget", None) is not None:
+                    plugin_instance._widget = None
+
+            for extra in self._unique_views(
+                tab_info.get("widget"), tab_info.get("placeholder")
+            ):
+                if extra is widget:
+                    continue
+                self._dispose_view(extra)
+
+            del self.loaded_tabs[tab_name]
+
+            self.tab_removed.emit(tab_name)
+            self.title_update_requested.emit()
+            logger.debug(f"Removed tab: {tab_name}")
+    
+    def remove_tab_by_index(self, index: int) -> None:
+        """Remove a tab by index.
+        
+        Args:
+            index: Index of the tab to remove
+        """
+        if 0 <= index < self.tab_widget.count():
+            tab_name = self.plugin_id_at(index)
+            if tab_name:
+                self.remove_tab(tab_name)
+            else:
+                self.tab_widget.removeTab(index)
+    
+    def _deactivate_current_tab(self) -> None:
+        name = self._active_tab_id
+        self._active_tab_id = None
+        info = self.loaded_tabs.get(name)
+        widget = info.get("widget") if info else None
+        if not widget or isinstance(widget, (LoadingPlaceholder, ErrorPlaceholder, AdminRequiredPlaceholder)):
+            return
+        try:
+            instance = self.plugin_service.peek_plugin_instance(name)
+            if instance is not None and hasattr(instance, "on_tab_deactivated"):
+                instance.on_tab_deactivated()
+        except Exception as e:
+            logger.debug(f"Error calling deactivation hook: {e}")
+        self.tab_deactivated.emit(name)
+
+    def on_tab_changed(self, index: int) -> None:
+        """Handle tab change event.
+        
+        Args:
+            index: Index of the newly selected tab
+        """
+        if self.is_loading_tab or self._batch_loading:
+            return
+        tab_name = self.plugin_id_at(index) if index >= 0 else None
+        if self._active_tab_id != tab_name:
+            self._deactivate_current_tab()
+        elif tab_name is not None:
+            info = self.loaded_tabs.get(tab_name)
+            widget = info.get("widget") if info else None
+            if widget and not isinstance(widget, (LoadingPlaceholder, ErrorPlaceholder, AdminRequiredPlaceholder)):
+                return
+        if index < 0:
+            return
+        
+        try:
+            self.is_loading_tab = True
+            tab_name = self.plugin_id_at(index)
+            tab_info = self.loaded_tabs.get(tab_name) if tab_name else None
+            
+            if not tab_info:
+                self.is_loading_tab = False
+                return
+            
+            # Check if tab is showing AdminRequiredPlaceholder and admin privileges or daemon are now available
+            if tab_info.get("widget"):
+                if isinstance(tab_info["widget"], AdminRequiredPlaceholder):
+                    plugin_class = tab_info["plugin_class"]
+                    requires_admin = getattr(plugin_class, 'requires_admin', False)
+                    
+                    if not self.admin_service.needs_admin_for_plugin(requires_admin):
+                        # Privileges or daemon are available, reload the tab
+                        logger.info(f"Admin requirements met, reloading tab '{self.tab_label(plugin_class)}'")
+                        self._reload_tab(tab_name)
+                        widget = tab_info.get("widget")
+                        if widget and not isinstance(widget, AdminRequiredPlaceholder):
+                            instance = self.plugin_service.get_plugin_instance(tab_name)
+                            if hasattr(instance, 'on_tab_activated'):
+                                instance.on_tab_activated()
+                            self.tab_activated.emit(tab_name)
+                        self.is_loading_tab = False
+                        self.title_update_requested.emit()
+                        return
+            
+            # Lazy load tab content if not already loaded
+            if not tab_info["widget"]:
+                plugin_class = tab_info["plugin_class"]
+                requires_admin = bool(getattr(plugin_class, "requires_admin", False))
+                
+                if self.admin_service.needs_admin_for_plugin(requires_admin):
+                    # Show admin required placeholder
+                    admin_widget = self._create_admin_placeholder(self.tab_label(plugin_class))
+                    tab_info["widget"] = admin_widget
+                else:
+                    # Create the actual plugin content (create_tab_content or create_widget)
+                    plugin_instance = self.plugin_service.get_plugin_instance(tab_name)
+                    tab_info["widget"] = resolve_tab_content(
+                        plugin_instance,
+                        parent=self.tab_widget,
+                        backend_id=get_active_ui_backend_id(),
+                    )
+                    # Store reference on plugin so cleanup can find it
+                    plugin_instance._widget = tab_info["widget"]
+                
+                # Replace placeholder with actual widget
+                current_index = self.tab_widget.currentIndex()
+                if current_index >= 0:
+                    old_widget = self.tab_widget.widget(current_index)
+                    self.tab_widget.removeTab(current_index)
+                    self._forget_replaced_view(tab_info, old_widget)
+                    self._dispose_view(old_widget)
+                    plugin_class = tab_info.get("plugin_class")
+                    label = self.tab_label(plugin_class) if plugin_class else tab_name
+                    self.tab_widget.insertTab(current_index, tab_info["widget"], label)
+                    self.tab_widget.tabBar().setTabData(current_index, tab_name)
+                    self.tab_widget.setCurrentIndex(current_index)
+                
+                logger.info(f"Lazy loaded plugin tab: {self.tab_label(plugin_class)}")
+            
+            # Call activation hook for newly active tab
+            if tab_info["widget"] and not isinstance(tab_info["widget"], (LoadingPlaceholder, ErrorPlaceholder, AdminRequiredPlaceholder)):
+                try:
+                    plugin_instance = self.plugin_service.get_plugin_instance(tab_name)
+                    if hasattr(plugin_instance, 'on_tab_activated'):
+                        plugin_instance.on_tab_activated()
+                except Exception as e:
+                    logger.debug(f"Error calling activation hook for {tab_name}: {e}")
+                self.tab_activated.emit(tab_name)
+        
+        except Exception as e:
+            logger.error(f"Error loading tab {tab_name}: {e}")
+            try:
+                error_label = tab_name or "Plugin"
+                plugin_class = (tab_info or {}).get("plugin_class") if tab_name else None
+                if plugin_class:
+                    error_label = self.tab_label(plugin_class)
+                error_widget = ErrorPlaceholder(error_label, str(e))
+                current_index = self.tab_widget.currentIndex()
+                if current_index >= 0:
+                    old_widget = self.tab_widget.widget(current_index)
+                    self.tab_widget.removeTab(current_index)
+                    if tab_info:
+                        self._forget_replaced_view(tab_info, old_widget)
+                        tab_info["widget"] = error_widget
+                    self._dispose_view(old_widget)
+                    self.tab_widget.insertTab(current_index, error_widget, error_label)
+                    if tab_name:
+                        self.tab_widget.tabBar().setTabData(current_index, tab_name)
+                    self.tab_widget.setCurrentIndex(current_index)
+            except Exception:
+                pass
+        finally:
+            self.is_loading_tab = False
+            self._active_tab_id = tab_name
+            self.title_update_requested.emit()
+    
+    def _reload_tab(self, tab_name: str) -> None:
+        """Reload a specific tab by replacing its widget.
+        
+        Args:
+            tab_name: Registry ``plugin_id`` of the tab to reload
+        """
+        tab_info = self.loaded_tabs.get(tab_name)
+        if not tab_info:
+            logger.warning(f"Tab info not found for '{tab_name}'")
+            return
+        
+        plugin_class = tab_info["plugin_class"]
+        requires_admin = getattr(plugin_class, 'requires_admin', False)
+        
+        # Find the tab index
+        index = self.index_for_plugin(tab_name)
+        
+        if index < 0:
+            logger.warning(f"Tab '{tab_name}' not found in tab widget")
+            return
+        
+        try:
+            # Check if admin is still needed
+            if self.admin_service.needs_admin_for_plugin(requires_admin):
+                # Still needs admin, keep placeholder
+                logger.debug(f"Tab '{tab_name}' still needs admin, keeping placeholder")
+                return
+            
+            logger.info(
+                f"Creating widget for tab '{self.tab_label(plugin_class)}' "
+                "(daemon/privilege available)"
+            )
+            # Create the actual content using dual-path resolver
+            plugin_instance = self.plugin_service.get_plugin_instance(tab_name)
+            widget = resolve_tab_content(
+                plugin_instance,
+                parent=self.tab_widget,
+                backend_id=get_active_ui_backend_id(),
+            )
+            tab_info["widget"] = widget
+            # Store reference on plugin so cleanup can find it
+            plugin_instance._widget = widget
+            
+            # Replace the tab widget
+            old_widget = self.tab_widget.widget(index)
+            self.tab_widget.removeTab(index)
+            self._forget_replaced_view(tab_info, old_widget)
+            self._dispose_view(old_widget)
+            self.tab_widget.insertTab(index, widget, self.tab_label(plugin_class))
+            self.tab_widget.tabBar().setTabData(index, tab_name)
+            
+            # If this was the current tab, make sure it's still selected
+            current_index = self.tab_widget.currentIndex()
+            if current_index != index:
+                self.tab_widget.setCurrentIndex(index)
+            
+            logger.info(f"Successfully reloaded tab '{self.tab_label(plugin_class)}'")
+        except Exception as e:
+            logger.error(f"Error reloading tab '{tab_name}': {e}", exc_info=True)
+            # Keep the placeholder on error
+    
+    def get_current_tab_name(self) -> Optional[str]:
+        """Return the active tab's ``plugin_id`` (session identity, not the bar label)."""
+        current_index = self.tab_widget.currentIndex()
+        if current_index >= 0:
+            return self.plugin_id_at(current_index)
+        return None
+    
+    def get_tab_info(self, tab_name: str) -> Optional[Dict[str, Any]]:
+        """Get information about a tab.
+        
+        Args:
+            tab_name: Registry ``plugin_id`` of the tab
+            
+        Returns:
+            Tab info dictionary or None if tab not found
+        """
+        return self.loaded_tabs.get(tab_name)
+    
+    def get_tab_count(self) -> int:
+        """Get the number of tabs.
+        
+        Returns:
+            Number of tabs
+        """
+        return self.tab_widget.count()
+    
+    def get_tab_order(self) -> List[str]:
+        """Return visual tab order as ``plugin_id`` values for session persistence."""
+        order = []
+        for i in range(self.tab_widget.count()):
+            plugin_id = self.plugin_id_at(i)
+            if plugin_id:
+                order.append(plugin_id)
+        return order
+
+    def clear_loaded_tabs(self) -> None:
+        """Clear loaded-tab tracking without touching the tab bar.
+
+        Prefer :meth:`clear_all_tabs` for full teardown (close / reload).
+        This only drops bookkeeping after instances were already unloaded.
+        """
+        self.loaded_tabs.clear()
+        self._active_tab_id = None
+        logger.info("Cleared all loaded tab state")
+
+    def on_plugins_unloaded(self, plugin_names: List[str]) -> None:
+        """IPluginLifecycle: clear tab state when plugins are unloaded."""
+        if self._batch_loading:
+            # Bulk teardown (clear_all_tabs) owns tab removal; avoid re-entrant remove_tab.
+            return
+        self.clear_tabs_for_plugins(plugin_names)
+
+    def on_plugins_discovered(self, plugin_names: List[str]) -> None:
+        """IPluginLifecycle: no action needed on discovery."""
+        pass
+
+    def on_plugin_state_changed(self, plugin_name: str, enabled: bool) -> None:
+        """IPluginLifecycle: no action needed here (handled by plugin controller)."""
+        pass
+
+    def clear_tabs_for_plugins(self, plugin_names: List[str]) -> None:
+        """Remove tabs and clear stale references for unloaded plugins."""
+        for name in list(plugin_names):
+            if name in self.loaded_tabs:
+                self.remove_tab(name)
+
+    def clear_all_tabs(self) -> None:
+        """Clear all tabs: detach from tab bar, then unload instances safely."""
+        self.set_batch_loading(True)
+        try:
+            self._deactivate_current_tab()
+            for tab_name in list(self.loaded_tabs.keys()):
+                tab_info = self.loaded_tabs.pop(tab_name, {})
+                plugin_instance = self.plugin_service.peek_plugin_instance(tab_name)
+                if plugin_instance is not None:
+                    if getattr(plugin_instance, "_widget", None) is not None:
+                        plugin_instance._widget = None
+
+                index = self.index_for_plugin(tab_name)
+                bar_widget = self.tab_widget.widget(index) if index >= 0 else None
+                if index >= 0:
+                    self.tab_widget.removeTab(index)
+
+                for extra in self._unique_views(
+                    tab_info.get("widget"), tab_info.get("placeholder"), bar_widget
+                ):
+                    self._dispose_view(extra)
+
+                try:
+                    self.plugin_service.unload_plugin_instance(tab_name)
+                except Exception as e:
+                    logger.debug(f"Error unloading plugin instance '{tab_name}': {e}")
+
+            # Leftover placeholders / tabs without loaded_tabs entries
+            while self.tab_widget.count() > 0:
+                widget = self.tab_widget.widget(0)
+                self.tab_widget.removeTab(0)
+                if widget:
+                    if is_valid(widget):
+                        try:
+                            widget.setParent(None)
+                        except RuntimeError:
+                            pass
+                    self._dispose_view(widget)
+
+            self._active_tab_id = None
+        finally:
+            self.set_batch_loading(False)
+        logger.info("Cleared and destroyed all tab widgets and state")
+    
+    def set_restart_admin_callback(self, callback: Callable[[], None]) -> None:
+        """Set callback for restart as admin action.
+        
+        Args:
+            callback: Callback function to call when restart is requested
+        """
+        # Store callback for future use
+        self._restart_admin_callback = callback
+        
+        # Update all existing AdminRequiredPlaceholder widgets to use this callback
+        for tab_info in self.loaded_tabs.values():
+            if tab_info.get("widget") and isinstance(tab_info["widget"], AdminRequiredPlaceholder):
+                # Disconnect existing connections (if any)
+                try:
+                    tab_info["widget"].restartRequested.disconnect()
+                except Exception:
+                    pass
+                # Connect new callback
+                tab_info["widget"].restartRequested.connect(callback)
+    
+    def _create_admin_placeholder(self, tab_name: str) -> AdminRequiredPlaceholder:
+        """Create an admin required placeholder widget.
+        
+        Args:
+            tab_name: Display label shown in the placeholder
+            
+        Returns:
+            AdminRequiredPlaceholder widget
+        """
+        admin_widget = AdminRequiredPlaceholder(tab_name)
+        if hasattr(self, '_restart_admin_callback') and self._restart_admin_callback:
+            admin_widget.restartRequested.connect(self._restart_admin_callback)
+        return admin_widget
+
+    def show_tab_context_menu(self, position: QPoint) -> None:
+        """Show context menu for tabs.
+        
+        Args:
+            position: Position where menu was requested
+        """
+        # Find the tab at the position
+        tab_index = self.tab_widget.tabBar().tabAt(position)
+        if tab_index < 0:
+            return
+        
+        tab_name = self.plugin_id_at(tab_index)
+        
+        # Create context menu
+        context_menu = QMenu(self.tab_widget)
+        
+        # Close tab action
+        close_action = QAction("Close Tab", context_menu)
+        close_action.setShortcut(QKeySequence("Ctrl+W"))
+        close_action.triggered.connect(lambda: self.close_tab_by_index(tab_index))
+        context_menu.addAction(close_action)
+        
+        # Close other tabs action
+        close_others_action = QAction("Close Other Tabs", context_menu)
+        close_others_action.triggered.connect(lambda: self.close_other_tabs(tab_index))
+        context_menu.addAction(close_others_action)
+        
+        # Close all tabs action
+        close_all_action = QAction("Close All Tabs", context_menu)
+        close_all_action.triggered.connect(self.close_all_tabs)
+        context_menu.addAction(close_all_action)
+        
+        context_menu.addSeparator()
+        
+        # Plugin info action
+        info_action = QAction("Plugin Info", context_menu)
+        info_action.triggered.connect(lambda: self.show_plugin_info(tab_name))
+        context_menu.addAction(info_action)
+        
+        # Show the context menu
+        context_menu.exec(self.tab_widget.mapToGlobal(position))
+    
+    def close_tab_by_index(self, index: int) -> None:
+        """Close tab by index.
+        
+        Args:
+            index: Index of the tab to close
+        """
+        if 0 <= index < self.tab_widget.count():
+            label = self.tab_widget.tabText(index)
+            self.remove_tab_by_index(index)
+            self.title_update_requested.emit()
+            
+            # Show toast notification if parent has toast_manager
+            parent = self.parent()
+            if parent and hasattr(parent, 'toast_manager'):
+                parent.toast_manager.show_info(f"Closed tab: {label}")
+    
+    def close_other_tabs(self, keep_index: int) -> None:
+        """Close all tabs except the one at keep_index.
+        
+        Args:
+            keep_index: Index of the tab to keep
+        """
+        if keep_index < 0 or keep_index >= self.tab_widget.count():
+            return
+        
+        keep_tab_id = self.plugin_id_at(keep_index)
+        
+        self.set_batch_loading(True)
+        try:
+            # Close tabs from right to left to avoid index shifting
+            for i in range(self.tab_widget.count() - 1, -1, -1):
+                if i != keep_index:
+                    self.close_tab_by_index(i)
+        finally:
+            self.set_batch_loading(False)
+            
+        # Find the new index of the kept tab
+        new_index = self.index_for_plugin(keep_tab_id) if keep_tab_id else -1
+                
+        if new_index >= 0:
+            if self.tab_widget.currentIndex() == new_index:
+                self.on_tab_changed(new_index)
+            else:
+                self.tab_widget.setCurrentIndex(new_index)
+    
+    def close_all_tabs(self) -> None:
+        """Close all tabs."""
+        reply = QMessageBox.question(
+            self.tab_widget, "Close All Tabs",
+            "Are you sure you want to close all tabs?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            self.set_batch_loading(True)
+            try:
+                while self.tab_widget.count() > 0:
+                    self.close_tab_by_index(0)
+            finally:
+                self.set_batch_loading(False)
+    
+    def show_plugin_info(self, tab_name: str) -> None:
+        """Show information about the plugin in the tab.
+        
+        Args:
+            tab_name: Registry ``plugin_id`` of the tab plugin to query
+        """
+        plugin_class = self.plugin_service.get_plugin(tab_name)
+        
+        if plugin_class:
+            plugin_info = plugin_class.get_plugin_info()
+            info_text = f"""Plugin Information:
+
+Name: {plugin_info.get('name', 'Unknown')}
+Description: {plugin_info.get('description', 'No description')}
+Version: {plugin_info.get('version', 'Unknown')}
+Author: {plugin_info.get('author', 'Unknown')}
+Supported Platforms: {', '.join(plugin_info.get('supported_platforms', []))}
+Requires Admin: {'Yes' if plugin_info.get('requires_admin', False) else 'No'}
+Compatible: {'Yes' if plugin_info.get('compatible', False) else 'No'}"""
+            
+            display = plugin_info.get("name") or self.tab_label(plugin_class)
+            QMessageBox.information(self.tab_widget, f"Plugin Info - {display}", info_text)
+        else:
+            QMessageBox.warning(self.tab_widget, "Plugin Info", f"Plugin '{tab_name}' not found.")
+
+
+__all__ = ['TabController']

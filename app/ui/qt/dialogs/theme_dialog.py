@@ -1,0 +1,484 @@
+"""
+Theme selection and management dialog.
+
+This module provides a dialog for selecting, previewing, importing, and exporting
+themes. It includes a preview widget and theme management functionality.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
+
+from ..themes.theme_manager import (
+    ThemeManager,
+    create_palette_from_data,
+    normalize_theme_stylesheet,
+    theme_data_for_json,
+)
+from ....services.settings_service import SettingsService
+
+from ..bindings import (
+    Qt,
+    Signal,
+    QAction,
+    QCheckBox,
+    QColor,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QFont,
+    QFormLayout,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QMenu,
+    QMessageBox,
+    QPalette,
+    QPoint,
+    QPushButton,
+    QSplitter,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+
+if TYPE_CHECKING:
+    from ....services.interfaces import ISettingsService
+
+logger = logging.getLogger(__name__)
+
+
+class ThemePreviewWidget(QFrame):
+    """Widget for previewing themes"""
+    
+    def __init__(self, parent: Optional[QWidget] = None, theme_manager=None) -> None:
+        super().__init__(parent)
+        self.setMinimumSize(300, 200)
+        self.setFrameStyle(QFrame.Shape.Box)
+        self._theme_manager = theme_manager
+        self.setup_ui()
+    
+    def setup_ui(self) -> None:
+        """Setup the preview UI"""
+        layout = QVBoxLayout(self)
+        
+        # Title
+        title = QLabel("Theme Preview")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        layout.addWidget(title)
+        
+        # Sample content
+        sample_text = QLabel("This is a sample text to preview the theme colors and styling.")
+        sample_text.setWordWrap(True)
+        layout.addWidget(sample_text)
+        
+        # Sample button
+        sample_button = QPushButton("Sample Button")
+        layout.addWidget(sample_button)
+        
+        # Sample input
+        sample_input = QTextEdit()
+        sample_input.setMaximumHeight(60)
+        sample_input.setPlainText("Sample input field\nwith multiple lines")
+        layout.addWidget(sample_input)
+        
+        layout.addStretch()
+    
+    def apply_theme(self, theme_data: Dict[str, Any]) -> None:
+        """Apply theme to the preview widget"""
+        try:
+            # Reset stylesheet first to clear any previous overrides
+            self.setStyleSheet("")
+            
+            # Create a copy of theme data to avoid modifying the original
+            preview_data = theme_data.copy()
+            
+            # Use classic stylesheet when the app is in legacy/classic UI mode,
+            # matching what ThemeManager.apply_theme() does for the full application.
+            from ..themes.ui_mode import classic_stylesheet_for, is_classic_ui
+
+            if is_classic_ui(self._theme_manager):
+                stylesheet = classic_stylesheet_for(self._theme_manager, preview_data)
+            else:
+                stylesheet = preview_data.get('stylesheet', '')
+
+            if not stylesheet:
+                # If there's no custom stylesheet, use a clean fallback to prevent
+                # the active global application theme from leaking into the preview
+                if self._theme_manager is not None:
+                    light_theme = self._theme_manager.get_theme_data("light") or {}
+                    stylesheet = light_theme.get("stylesheet", "")
+
+            if stylesheet:
+                self.setStyleSheet(stylesheet)
+            
+            # Apply palette if available
+            palette_data = preview_data.get('palette', {})
+            if palette_data:
+                self._apply_palette(palette_data)
+                
+        except Exception as e:
+            logger.error(f"Failed to apply theme to preview: {e}")
+    
+    def _apply_palette(self, palette_data: Dict[str, Any]) -> None:
+        """Apply color palette to the preview widget"""
+        palette = create_palette_from_data(palette_data)
+        self.setPalette(palette)
+
+class ThemeDialog(QDialog):
+    """Dialog for selecting and managing themes"""
+    
+    theme_selected = Signal(str)  # Signal emitted when a theme is selected
+    ui_toggle_changed = Signal(bool)  # Signal emitted when UI toggle changes
+    
+    def __init__(
+        self, 
+        theme_manager: ThemeManager,
+        settings_service: SettingsService,
+        parent: Optional[QWidget] = None,
+        apply_callback: Optional[Callable[[str], bool]] = None,
+    ) -> None:
+        super().__init__(parent)
+        
+        self.theme_manager = theme_manager
+        self.settings_service = settings_service
+        self._apply_callback = apply_callback
+        self.current_theme = self.theme_manager.get_current_theme()
+        self.favorite_themes = set()  # Set of favorite theme names
+        if self.settings_service and hasattr(self.settings_service, 'get_favorite_themes'):
+            try:
+                self.favorite_themes = set(self.settings_service.get_favorite_themes())
+            except Exception as e:
+                logger.error(f"Failed to load favorite themes: {e}")
+        self.show_favorites_only = False  # Track if show favorites only is enabled
+        self.setup_ui()
+        self.load_themes()
+    
+    def setup_ui(self) -> None:
+        """Setup the dialog UI"""
+        self.setWindowTitle("Theme Selection")
+        self.setMinimumSize(800, 600)
+        
+        layout = QVBoxLayout(self)
+        
+        # Create splitter for theme list and preview
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        layout.addWidget(splitter)
+        
+        # Left side - Theme list
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        
+        # Theme list
+        theme_label = QLabel("Available Themes:")
+        theme_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        left_layout.addWidget(theme_label)
+        
+        self.theme_list = QListWidget()
+        self.theme_list.currentItemChanged.connect(self.on_theme_selected)
+        # Enable context menu for favorites
+        self.theme_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.theme_list.customContextMenuRequested.connect(self.show_theme_context_menu)
+        left_layout.addWidget(self.theme_list)
+        
+        # Theme info
+        self.theme_info = QTextEdit()
+        self.theme_info.setMaximumHeight(100)
+        self.theme_info.setReadOnly(True)
+        left_layout.addWidget(self.theme_info)
+        
+        splitter.addWidget(left_widget)
+        
+        # Right side - Preview
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        
+        preview_label = QLabel("Theme Preview:")
+        preview_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        right_layout.addWidget(preview_label)
+        
+        self.preview_widget = ThemePreviewWidget(theme_manager=self.theme_manager)
+        right_layout.addWidget(self.preview_widget)
+        
+        splitter.addWidget(right_widget)
+        
+        # Set splitter proportions
+        splitter.setSizes([300, 500])
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        self.apply_button = QPushButton("Apply Theme")
+        self.apply_button.clicked.connect(self.apply_selected_theme)
+        self.apply_button.setEnabled(False)
+        
+        self.import_button = QPushButton("Import Theme")
+        self.import_button.clicked.connect(self.import_theme)
+        
+        self.export_button = QPushButton("Export Theme")
+        self.export_button.clicked.connect(self.export_theme)
+        self.export_button.setEnabled(False)
+        
+        # UI Mode Toggle Checkbox (next to Export Theme button)
+        # Initialize checkbox with current state
+        if self.settings_service:
+            try:
+                is_enabled = self.settings_service.get_new_ui_enabled()
+                checkbox_text = "Disable New UI" if is_enabled else "Enable New UI"
+                self.ui_toggle_checkbox = QCheckBox(checkbox_text)
+                self.ui_toggle_checkbox.setChecked(is_enabled)
+            except Exception:
+                self.ui_toggle_checkbox = QCheckBox("Enable New UI")
+                self.ui_toggle_checkbox.setChecked(True)
+        else:
+            self.ui_toggle_checkbox = QCheckBox("Enable New UI")
+            self.ui_toggle_checkbox.setChecked(True)
+        
+        self.ui_toggle_checkbox.setToolTip(
+            "Toggle between the new UI overhaul and legacy UI. "
+            "Some changes may require application restart to take full effect."
+        )
+        self.ui_toggle_checkbox.toggled.connect(self._on_ui_toggle_changed)
+        
+        self.close_button = QPushButton("Close")
+        self.close_button.clicked.connect(self.close)
+        
+        button_layout.addWidget(self.apply_button)
+        button_layout.addWidget(self.import_button)
+        button_layout.addWidget(self.export_button)
+        button_layout.addWidget(self.ui_toggle_checkbox)
+        button_layout.addStretch()
+        button_layout.addWidget(self.close_button)
+        
+        layout.addLayout(button_layout)
+    
+    def _on_ui_toggle_changed(self, checked: bool) -> None:
+        """Handle UI toggle checkbox change"""
+        if self.settings_service:
+            try:
+                self.settings_service.save_new_ui_enabled(checked)
+                # Update checkbox text to reflect current state
+                # When checked=True, it means "New UI is enabled", so show "Disable New UI"
+                # When checked=False, it means "New UI is disabled", so show "Enable New UI"
+                self.ui_toggle_checkbox.setText("Disable New UI" if checked else "Enable New UI")
+                # Emit signal to notify main window
+                self.ui_toggle_changed.emit(checked)
+            except Exception as e:
+                logger.error(f"Failed to save UI toggle setting: {e}")
+    
+    def load_themes(self) -> None:
+        """Load available themes into the list"""
+        self.theme_list.clear()
+        theme_names = self.theme_manager.get_theme_names()
+        
+        for theme_name in theme_names:
+            if self.show_favorites_only and theme_name not in self.favorite_themes:
+                continue
+            item = QListWidgetItem(theme_name)
+            item.setData(Qt.ItemDataRole.UserRole, theme_name)
+            if theme_name == self.current_theme:
+                item.setText(f"{theme_name} (Current)")
+                item.setFont(QFont("Arial", 9, QFont.Weight.Bold))
+            elif theme_name in self.favorite_themes:
+                item.setText(f"⭐ {theme_name}")
+                item.setFont(QFont("Arial", 9, QFont.Weight.Bold))
+            self.theme_list.addItem(item)
+
+    def _theme_key(self, item: Optional[QListWidgetItem]) -> Optional[str]:
+        if item is None:
+            return None
+        key = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(key, str) and key:
+            return key
+        return item.text().replace(" (Current)", "").replace("⭐ ", "")
+    
+    def on_theme_selected(self, current: Optional[QListWidgetItem], previous: Optional[QListWidgetItem]) -> None:
+        """Handle theme selection"""
+        if not current:
+            return
+        
+        theme_name = self._theme_key(current)
+        theme_data = self.theme_manager.get_theme_data(theme_name)
+        
+        if theme_data:
+            # Update preview
+            self.preview_widget.apply_theme(theme_data)
+            
+            # Update info
+            info_text = f"Name: {theme_data.get('name', theme_name)}\n"
+            info_text += f"Description: {theme_data.get('description', 'No description')}\n"
+            info_text += f"Type: {'Built-in' if self.theme_manager.is_builtin_theme(theme_name) else 'Custom'}"
+            
+            self.theme_info.setPlainText(info_text)
+            
+            # Enable buttons
+            self.apply_button.setEnabled(True)
+            self.export_button.setEnabled(True)
+        else:
+            self.theme_info.setPlainText("Theme data not available")
+            self.apply_button.setEnabled(False)
+            self.export_button.setEnabled(False)
+    
+    def apply_selected_theme(self) -> None:
+        """Apply the selected theme"""
+        current_item = self.theme_list.currentItem()
+        if not current_item:
+            return
+        
+        theme_name = self._theme_key(current_item)
+        if not theme_name:
+            return
+        
+        if self._apply_callback is not None:
+            applied = bool(self._apply_callback(theme_name))
+        else:
+            applied = bool(self.theme_manager.apply_theme(theme_name))
+        if applied:
+            self.current_theme = theme_name
+            self.load_themes()
+            self.theme_selected.emit(theme_name)
+            QMessageBox.information(self, "Success", f"Theme '{theme_name}' applied successfully!")
+        else:
+            QMessageBox.critical(self, "Error", f"Failed to apply theme '{theme_name}'")
+    
+    def import_theme(self) -> None:
+        """Import a custom theme from file"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Theme",
+            "",
+            "JSON Files (*.json);;All Files (*)"
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    theme_data = json.load(f)
+                
+                # Validate theme data
+                if not isinstance(theme_data, dict):
+                    raise ValueError("Invalid theme data format")
+                
+                if 'name' not in theme_data:
+                    raise ValueError("Theme must have a 'name' field")
+
+                normalize_theme_stylesheet(theme_data)
+                theme_name = theme_data['name']
+                
+                # Check if theme already exists
+                if self.theme_manager.has_theme(theme_name):
+                    reply = QMessageBox.question(
+                        self,
+                        "Theme Exists",
+                        f"Theme '{theme_name}' already exists. Do you want to overwrite it?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                    )
+                    if reply == QMessageBox.StandardButton.No:
+                        return
+                
+                # Save the theme
+                if self.theme_manager.save_custom_theme(theme_name, theme_data):
+                    self.load_themes()
+                    QMessageBox.information(self, "Success", f"Theme '{theme_name}' imported successfully!")
+                else:
+                    QMessageBox.critical(self, "Error", f"Failed to import theme '{theme_name}'")
+                    
+            except Exception as e:
+                logger.error(f"Failed to import theme: {e}")
+                QMessageBox.critical(self, "Error", f"Failed to import theme: {str(e)}")
+    
+    def export_theme(self) -> None:
+        """Export the selected theme to file"""
+        current_item = self.theme_list.currentItem()
+        if not current_item:
+            return
+        
+        theme_name = self._theme_key(current_item)
+        theme_data = self.theme_manager.get_theme_data(theme_name)
+        
+        if not theme_data:
+            QMessageBox.warning(self, "Warning", "No theme data to export")
+            return
+        
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Theme",
+            f"{theme_name}.json",
+            "JSON Files (*.json);;All Files (*)"
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(theme_data_for_json(theme_data), f, indent=2, ensure_ascii=False)
+                
+                QMessageBox.information(self, "Success", f"Theme '{theme_name}' exported successfully!")
+                    
+            except Exception as e:
+                logger.error(f"Failed to export theme: {e}")
+                QMessageBox.critical(self, "Error", f"Failed to export theme: {str(e)}")
+    
+    def show_theme_context_menu(self, position: QPoint) -> None:
+        """Show context menu for theme list items."""
+        item = self.theme_list.itemAt(position)
+        if not item:
+            return
+        
+        theme_name = self._theme_key(item)
+        
+        context_menu = QMenu(self)
+        
+        # Toggle favorite action
+        if theme_name in self.favorite_themes:
+            favorite_action = QAction("Remove from Favorites", self)
+            favorite_action.triggered.connect(lambda: self.toggle_favorite(theme_name))
+        else:
+            favorite_action = QAction("Add to Favorites", self)
+            favorite_action.triggered.connect(lambda: self.toggle_favorite(theme_name))
+        
+        context_menu.addAction(favorite_action)
+        
+        # Show favorites only action
+        show_favorites_action = QAction("Show Favorites Only", self)
+        show_favorites_action.setCheckable(True)
+        show_favorites_action.setChecked(self.show_favorites_only)
+        show_favorites_action.setEnabled(bool(self.favorite_themes))
+        show_favorites_action.triggered.connect(self.toggle_favorites_filter)
+        context_menu.addAction(show_favorites_action)
+        
+        context_menu.exec(self.theme_list.mapToGlobal(position))
+    
+    def toggle_favorite(self, theme_name: str) -> None:
+        """Toggle favorite status of a theme."""
+        if theme_name in self.favorite_themes:
+            self.favorite_themes.remove(theme_name)
+            if not self.favorite_themes:
+                self.show_favorites_only = False
+        else:
+            self.favorite_themes.add(theme_name)
+        
+        # Save to settings service if available
+        if self.settings_service and hasattr(self.settings_service, 'save_favorite_themes'):
+            try:
+                self.settings_service.save_favorite_themes(list(self.favorite_themes))
+            except Exception as e:
+                logger.error(f"Failed to save favorite themes: {e}")
+        
+        # Refresh the theme list
+        self.load_themes()
+        logger.debug(f"Toggled favorite for theme: {theme_name}")
+    
+    def toggle_favorites_filter(self, checked: bool) -> None:
+        """Toggle showing only favorite themes."""
+        self.show_favorites_only = checked
+        self.load_themes()
+
+
+__all__ = ['ThemePreviewWidget', 'ThemeDialog']
+

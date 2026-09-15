@@ -6,18 +6,17 @@ for plugin operations on different platforms.
 Note: Dev mode state is now managed by DevModeService. The functions in
 this module delegate to the service when available, or fall back to a
 module-level flag for early bootstrap (before the container is ready).
+Use set_dev_mode_service to wire the service once the container is ready.
 """
 
 from __future__ import annotations
 
 import logging
-import platform
 from typing import Optional, TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from ..services.settings_service import SettingsService
     from ..services.dev_mode_service import DevModeService
 
 # ---------------------------------------------------------------------------
@@ -25,7 +24,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # During early bootstrap (before the ServiceContainer is initialized) the
 # caller (app.py) sets dev mode via set_dev_mode().  Once the container is
-# ready, configure_settings_service() wires the DevModeService and all
+# ready, set_dev_mode_service() wires the DevModeService and all
 # subsequent calls delegate there.
 
 _dev_mode_service: Optional["DevModeService"] = None
@@ -37,22 +36,6 @@ _early_dev_mode: bool = False
 def _get_service() -> Optional["DevModeService"]:
     """Return the DevModeService if it has been wired, else None."""
     return _dev_mode_service
-
-
-def configure_settings_service(settings_service: "SettingsService") -> None:
-    """Attach settings service for persisting dev/admin flags.
-
-    This also creates the DevModeService if it hasn't been wired yet,
-    transferring any early-bootstrap dev mode flag into the service.
-    """
-    global _dev_mode_service, _early_dev_mode
-    if _dev_mode_service is None:
-        from ..services.dev_mode_service import DevModeService
-        _dev_mode_service = DevModeService()
-    # Transfer any early flag that was set before the service existed
-    if _early_dev_mode and not _dev_mode_service.is_dev_mode():
-        _dev_mode_service.set_dev_mode(True)
-    _dev_mode_service.configure_settings_service(settings_service)
 
 
 def set_dev_mode_service(service: "DevModeService") -> None:
@@ -124,51 +107,8 @@ def is_show_all_platforms() -> bool:
     return False
 
 
-def needs_admin_for_plugin(is_windows: bool, requires_admin: bool, is_admin: bool) -> bool:
-    """Determine whether admin privileges are required for a plugin tab creation.
-    
-    Args:
-        is_windows: True if running on Windows, False otherwise
-        requires_admin: True if the plugin requires admin privileges
-        is_admin: True if the application is currently running with admin privileges
-        
-    Returns:
-        True if admin privileges are required, False otherwise
-        
-    Note:
-        On Windows: admin is required if plugin requires it and app is not running as admin.
-        On Linux: admin is required if plugin requires it and daemon is not available.
-        In dev mode: admin requirements are always bypassed.
-    """
-    # Dev mode bypasses all admin requirements for tab loading
-    if is_dev_mode():
-        return False
-    
-    if not requires_admin:
-        return False
-        
-    if is_admin:
-        return False
-    
-    if is_windows:
-        return requires_admin and not is_admin
-    
-    # Linux: check daemon availability
-    if platform.system().lower() == "linux":
-        try:
-            from ..daemon import is_daemon_available
-            return not is_daemon_available()
-        except Exception:
-            # If daemon module not available, assume admin required
-            return True
-    
-    return False
-
-
 __all__ = [
-    'configure_settings_service',
     'set_dev_mode_service',
-    'needs_admin_for_plugin',
     'set_dev_mode',
     'is_dev_mode',
     'set_show_all_platforms',

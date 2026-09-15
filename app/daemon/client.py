@@ -1,15 +1,15 @@
-"""Daemon client for communicating with privileged daemon."""
+"""Daemon client for communicating with the privileged pipe daemon."""
 
 from __future__ import annotations
 
 import queue
-import socket
 import logging
 import threading
-import time
 import subprocess
+import time
+from dataclasses import dataclass
 from typing import Callable, Dict, Any, Optional
-from .protocol import create_request, serialize_message, deserialize_message, get_socket_path
+from .protocol import create_request, serialize_message, deserialize_message
 
 logger = logging.getLogger(__name__)
 
@@ -24,65 +24,57 @@ class DaemonTimeoutError(Exception):
     pass
 
 
+@dataclass
+class StreamRequestHandle:
+    """Handle for a streaming request (exposes request_id for cancel)."""
+
+    request_id: str
+
+
 class DaemonClient:
-    """Client for communicating with privileged daemon."""
-    
+    """Client for communicating with the privileged pipe daemon over stdin/stdout."""
+
     CONNECT_TIMEOUT = 5.0
     OPERATION_TIMEOUT = 30.0
-    RECONNECT_RETRIES = 3
-    RECONNECT_DELAY = 1.0
-    
-    def __init__(self, socket_path: Optional[str] = None, process: Optional[subprocess.Popen] = None):
+
+    def __init__(self, process: subprocess.Popen):
+        if process is None:
+            raise ValueError("DaemonClient requires a subprocess.Popen process")
+
         self._process = process
         self._lock = threading.Lock()
-        
-        # =====================================================================
-        # Pipe Mode Setup
-        # =====================================================================
-        if self._process is not None:
-            self.socket_path = None
-            self._connected = True
-            # Multiplexed pipe infrastructure
-            self._pending_requests: Dict[str, queue.Queue] = {}
-            self._pending_lock = threading.Lock()
-            self._write_lock = threading.Lock()
-            self._reader_running = False
-            self._reader_thread: Optional[threading.Thread] = None
-            # Streaming callback dispatch
-            self._stream_callbacks: Dict[str, Callable[[str], None]] = {}
-            self._stream_callbacks_lock = threading.Lock()
-            # Start reader thread immediately — callers may skip connect()
-            # because _connected is already True from above.
-            self._start_reader_thread()
-        # =====================================================================
-        # Legacy Socket Mode Setup (To be removed after 5.x)
-        # =====================================================================
-        else:
-            if socket_path is None:
-                # Get UID from environment to determine correct socket path
-                # When running normally (not via sudo/pkexec), get current user's UID directly
-                import os
-                uid_str = os.environ.get('SUDO_UID') or os.environ.get('PKEXEC_UID')
-                if not uid_str:
-                    # Not running via sudo/pkexec, get current user's UID directly
-                    try:
-                        uid = os.getuid()
-                    except (AttributeError, OSError):
-                        uid = None
-                else:
-                    uid = int(uid_str) if uid_str else None
-                self.socket_path = get_socket_path(uid)
-            else:
-                self.socket_path = socket_path
-            self._socket: Optional[socket.socket] = None
-            self._connected = False
-    
+        self._connected = True
+        self._pending_requests: Dict[str, queue.Queue] = {}
+        self._pending_lock = threading.Lock()
+        self._write_lock = threading.Lock()
+        self._reader_running = False
+        self._reader_thread: Optional[threading.Thread] = None
+        self._stream_callbacks: Dict[str, Callable[[str], None]] = {}
+        self._stream_activity: Dict[str, float] = {}
+        self._stream_callbacks_lock = threading.Lock()
+        self._start_reader_thread()
+
+    def _stop_reader(self, timeout: float = 2.0) -> bool:
+        """Stop the pipe reader. Closes stdout so a blocking readline() can return."""
+        self._reader_running = False
+        stdout = getattr(self._process, "stdout", None) if self._process else None
+        if stdout is not None:
+            try:
+                stdout.close()
+            except Exception:
+                pass
+        if self._reader_thread is not None:
+            self._reader_thread.join(timeout=timeout)
+            alive = self._reader_thread.is_alive()
+            if not alive:
+                self._reader_thread = None
+            return not alive
+        return True
+
     def is_connected(self) -> bool:
         """Check if client is connected to daemon."""
-        if self._process is not None:
-            return self._connected and self._process.poll() is None
-        return self._connected and self._socket is not None
-    
+        return self._connected and self._process.poll() is None
+
     def _start_reader_thread(self):
         """Start the background pipe reader thread if not already running."""
         if self._reader_thread is not None and self._reader_thread.is_alive():
@@ -98,7 +90,7 @@ class DaemonClient:
 
     def _pipe_reader_loop(self):
         """Dedicated reader loop that dispatches responses to per-request queues.
-        
+
         For streaming responses (status == 'running'), invokes the registered
         stream callback instead of putting the response in the queue.
         """
@@ -114,10 +106,11 @@ class DaemonClient:
                     continue
                 resp_id = response.get('id')
                 if resp_id:
-                    # Check if this is a streaming chunk
                     if response.get('status') == 'running':
                         with self._stream_callbacks_lock:
                             callback = self._stream_callbacks.get(resp_id)
+                            if resp_id in self._stream_activity:
+                                self._stream_activity[resp_id] = time.monotonic()
                         if callback:
                             try:
                                 callback(response.get('chunk', ''))
@@ -126,8 +119,7 @@ class DaemonClient:
                         else:
                             logger.debug(f"Streaming chunk for {resp_id} but no callback registered, discarding")
                         continue
-                    
-                    # Final response — route to pending queue
+
                     with self._pending_lock:
                         q = self._pending_requests.get(resp_id)
                     if q:
@@ -141,307 +133,250 @@ class DaemonClient:
         finally:
             self._reader_running = False
             self._connected = False
-            # Drain all pending queues with None sentinel so waiting threads unblock
             with self._pending_lock:
                 for rid, q in self._pending_requests.items():
                     q.put(None)
                 self._pending_requests.clear()
-            # Clear stream callbacks
             with self._stream_callbacks_lock:
                 self._stream_callbacks.clear()
             logger.info("Pipe reader loop exited")
 
     def connect(self, timeout: float = None) -> bool:
-        """Connect to daemon."""
-        if self._process is not None:
-            with self._lock:
-                self._connected = self._process.poll() is None
-                if self._connected:
-                    self._start_reader_thread()
-                return self._connected
-        
-        timeout = timeout or self.CONNECT_TIMEOUT
-        
+        """Verify the daemon process is still alive and ensure the reader is running."""
         with self._lock:
+            self._connected = self._process.poll() is None
             if self._connected:
-                return True
-            
-            try:
-                sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                sock.settimeout(timeout)
-                sock.connect(self.socket_path)
-                
-                self._socket = sock
-                self._connected = True
-                logger.info(f"Connected to daemon at {self.socket_path}")
-                return True
-                
-            except (socket.error, OSError) as e:
-                logger.error(f"Failed to connect to daemon: {e}")
-                if self._socket:
+                self._start_reader_thread()
+            return self._connected
+
+    def disconnect(self):
+        """Disconnect from daemon and terminate the process."""
+        with self._lock:
+            if self._process.poll() is None:
+                try:
+                    self._process.terminate()
+                    self._process.wait(timeout=2.0)
+                except Exception:
                     try:
-                        self._socket.close()
+                        self._process.kill()
                     except Exception:
                         pass
-                self._socket = None
-                self._connected = False
-                return False
-    
-    def disconnect(self):
-        """Disconnect from daemon."""
-        with self._lock:
-            if self._process is not None:
-                self._reader_running = False
-                if self._process.poll() is None:
-                    try:
-                        self._process.terminate()
-                        self._process.wait(timeout=2.0)
-                    except Exception:
-                        try:
-                            self._process.kill()
-                        except Exception:
-                            pass
-                # Reader thread will exit on EOF/poll; join briefly
-                if self._reader_thread is not None:
-                    self._reader_thread.join(timeout=2.0)
-                    self._reader_thread = None
-                self._connected = False
-                logger.info("Disconnected from pipe daemon")
-                return
-            
-            if self._socket:
-                try:
-                    self._socket.close()
-                except Exception:
-                    pass
-                self._socket = None
+            self._stop_reader(timeout=2.0)
             self._connected = False
-            logger.info("Disconnected from daemon")
-    
-    def _send_recv(self, message: bytes, expected_id: Optional[str] = None, timeout: float = None) -> Dict[str, Any]:
-        """Send message and receive response."""
-        # If timeout is None, use a very large timeout (effectively unlimited)
-        # Socket timeout of None blocks indefinitely, which we want for long operations
-        if timeout is not None:
-            timeout = timeout or self.OPERATION_TIMEOUT
-        
+            logger.info("Disconnected from pipe daemon")
+
+    def _send_recv(
+        self,
+        message: bytes,
+        expected_id: Optional[str] = None,
+        timeout: float = None,
+        *,
+        idle_timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Send message and receive response.
+
+        Args:
+            message: Serialized request bytes.
+            expected_id: Request id used to match the response.
+            timeout: Absolute wait for a non-streaming response (defaults to OPERATION_TIMEOUT).
+            idle_timeout: When set, wait for the final response using an idle timeout
+                that resets whenever streaming activity is recorded for ``expected_id``.
+        """
+        if timeout is None and idle_timeout is None:
+            timeout = self.OPERATION_TIMEOUT
+
         if not self.is_connected():
             raise DaemonConnectionError("Not connected to daemon")
-        
-        # =================================================================
-        # Pipe Mode Send/Receive (Multiplexed)
-        # =================================================================
-        if self._process is not None:
-            q: queue.Queue = queue.Queue()
-            # Register this request's queue so the reader thread can route the response
-            with self._pending_lock:
-                self._pending_requests[expected_id] = q
 
-            try:
-                # Write under write lock (prevents line interleaving between threads)
-                with self._write_lock:
-                    self._process.stdin.write(message)
-                    self._process.stdin.flush()
+        q: queue.Queue = queue.Queue()
+        with self._pending_lock:
+            self._pending_requests[expected_id] = q
 
-                # Wait for OUR specific response (reader thread routes it)
+        try:
+            with self._write_lock:
+                self._process.stdin.write(message)
+                self._process.stdin.flush()
+
+            if idle_timeout is None:
                 try:
                     response = q.get(timeout=timeout)
                 except queue.Empty:
                     raise DaemonTimeoutError(
                         f"Operation timed out after {timeout} seconds"
                     )
-                if response is None:
-                    raise DaemonConnectionError(
-                        "Connection closed by daemon (pipe EOF)"
-                    )
-                return response
-            finally:
-                # Always clean up the pending entry
-                with self._pending_lock:
-                    self._pending_requests.pop(expected_id, None)
-
-        # =================================================================
-        # Legacy Socket Mode Send/Receive (To be removed after 5.x)
-        # =================================================================
-        with self._lock:
-            try:
-                self._socket.settimeout(timeout)
-                
-                # Send request
-                self._socket.sendall(message)
-                
-                start_time = time.time()
+            else:
+                poll = min(1.0, max(0.1, idle_timeout / 10.0))
                 while True:
-                    if timeout is not None:
-                        elapsed = time.time() - start_time
-                        remaining = max(0.1, timeout - elapsed)
-                        self._socket.settimeout(remaining)
-                        
-                    # Receive response (read until newline)
-                    response_data = b''
-                    while b'\n' not in response_data:
-                        chunk = self._socket.recv(4096)
-                        if not chunk:
-                            raise DaemonConnectionError("Connection closed by daemon")
-                        response_data += chunk
-                    
-                    # Parse response
-                    response = deserialize_message(response_data.split(b'\n', 1)[0])
-                    
-                    # If we have an expected ID and this response doesn't match it, discard and keep reading.
-                    # WARNING: Discarding stray responses is only safe because the server handles requests 
-                    # synchronously and sequentially (one at a time). If the server were async, discarding non-matching
-                    # IDs here would cause other waiting threads to miss their responses, leading to timeouts.
-                    if expected_id is not None and response.get('id') != expected_id:
-                        logger.debug(f"Discarding stray/out-of-order socket response (expected ID {expected_id}, got {response.get('id')})")
+                    with self._stream_callbacks_lock:
+                        last = self._stream_activity.get(expected_id, time.monotonic())
+                    elapsed_idle = time.monotonic() - last
+                    if elapsed_idle >= idle_timeout:
+                        raise DaemonTimeoutError(
+                            f"Stream idle timed out after {idle_timeout} seconds"
+                        )
+                    try:
+                        response = q.get(timeout=min(poll, idle_timeout - elapsed_idle))
+                        break
+                    except queue.Empty:
                         continue
-                        
-                    return response
-                
-            except socket.timeout:
-                raise DaemonTimeoutError(f"Operation timed out after {timeout} seconds")
-            except (socket.error, OSError) as e:
-                self._connected = False
-                raise DaemonConnectionError(f"Socket error: {e}")
-    
-    def request(self, operation: str, params: Dict[str, Any], 
+
+            if response is None:
+                raise DaemonConnectionError(
+                    "Connection closed by daemon (pipe EOF)"
+                )
+            return response
+        finally:
+            with self._pending_lock:
+                self._pending_requests.pop(expected_id, None)
+
+    def request(self, operation: str, params: Dict[str, Any],
                 timeout: float = None) -> Dict[str, Any]:
         """Send a request to daemon and return response."""
-        # Try to connect if not connected
         if not self.is_connected():
             if not self.connect():
                 raise DaemonConnectionError("Could not connect to daemon")
-        
-        # Create and send request
+
         request = create_request(operation, params)
         message = serialize_message(request)
-        
-        # Retry on connection errors (only in socket mode)
+
         last_error = None
-        retries = 2 if self._process is not None else self.RECONNECT_RETRIES
+        retries = 2
         for attempt in range(retries):
             try:
                 response = self._send_recv(message, expected_id=request['id'], timeout=timeout)
-                
-                # Validate response ID matches request
+
                 if response.get('id') != request['id']:
                     logger.warning(f"Response ID mismatch: {request['id']} != {response.get('id')}")
-                
+
                 return response
-                
+
             except DaemonConnectionError as e:
                 last_error = e
                 if operation == 'shutdown':
                     logger.info(f"Connection closed during shutdown request (expected): {e}")
                 else:
                     logger.warning(f"Connection error (attempt {attempt + 1}/{retries}): {e}")
-                
-                # Try to reconnect
+
                 if attempt < retries - 1:
-                    if self._process is not None:
-                        # Pipe mode: restart the daemon process
-                        if self._restart_pipe_daemon():
-                            message = serialize_message(request)  # Re-serialize
-                            continue
-                    else:
-                        # Socket mode: simple reconnect
-                        time.sleep(self.RECONNECT_DELAY)
-                        if self.connect():
-                            message = serialize_message(request)  # Re-serialize
-                            continue
-                
-                # If all retries failed, raise
+                    if self._restart_pipe_daemon():
+                        message = serialize_message(request)
+                        continue
+
                 raise last_error
-                
+
             except DaemonTimeoutError:
-                raise  # Don't retry on timeout
+                raise
             except Exception as e:
                 logger.error(f"Unexpected error in request: {str(e)}", exc_info=True)
                 raise
-    
-    def request_stream(self, operation: str, params: Dict[str, Any],
-                       on_chunk: Callable[[str], None],
-                       timeout: float = None) -> Dict[str, Any]:
+
+    def request_stream(
+        self,
+        operation: str,
+        params: Dict[str, Any],
+        on_chunk: Callable[[str], None],
+        timeout: float = None,
+        on_started: Optional[Callable[[StreamRequestHandle], None]] = None,
+    ) -> Dict[str, Any]:
         """Send a streaming request to the daemon.
-        
+
         Like request(), but for operations that produce incremental output
         (e.g. run_command_stream). The on_chunk callback is invoked for each
         intermediate line of output as it arrives from the daemon.
-        
+
+        ``timeout`` is an *idle* timeout: each received chunk resets the clock.
+        ``on_started`` is called with a :class:`StreamRequestHandle` before the
+        request is sent so callers can cancel via :meth:`cancel_request`.
+
         The final response (containing aggregated output and return code) is
         returned when the operation completes.
-        
-        This method is only supported in pipe mode.
-        
-        Args:
-            operation: The operation to perform (e.g. 'run_command_stream').
-            params: Operation parameters.
-            on_chunk: Callback invoked with each line of streaming output.
-            timeout: Optional timeout in seconds for the entire operation.
-        
-        Returns:
-            The final response dict from the daemon.
-        
-        Raises:
-            DaemonConnectionError: If not connected or connection lost.
-            DaemonTimeoutError: If the operation times out.
-            RuntimeError: If called in socket mode.
         """
-        if self._process is None:
-            raise RuntimeError("request_stream() is only supported in pipe mode")
-        
         if not self.is_connected():
             if not self.connect():
                 raise DaemonConnectionError("Could not connect to daemon")
-        
+
+        idle_timeout = self.OPERATION_TIMEOUT if timeout is None else float(timeout)
         request = create_request(operation, params)
         request_id = request['id']
+        handle = StreamRequestHandle(request_id=request_id)
         message = serialize_message(request)
-        
-        # Register the streaming callback before sending the request
-        with self._stream_callbacks_lock:
-            self._stream_callbacks[request_id] = on_chunk
-        
-        try:
-            response = self._send_recv(message, expected_id=request_id, timeout=timeout)
-            
-            if response.get('id') != request_id:
-                logger.warning(f"Response ID mismatch: {request_id} != {response.get('id')}")
-            
-            return response
-        finally:
-            # Always clean up the streaming callback
+
+        if on_started is not None:
+            try:
+                on_started(handle)
+            except Exception as e:
+                logger.warning(f"on_started callback error for {request_id}: {e}")
+
+        last_error: Optional[Exception] = None
+        retries = 2
+        for attempt in range(retries):
             with self._stream_callbacks_lock:
-                self._stream_callbacks.pop(request_id, None)
-    
+                self._stream_callbacks[request_id] = on_chunk
+                self._stream_activity[request_id] = time.monotonic()
+
+            active_id = request_id
+            retry = False
+            try:
+                response = self._send_recv(
+                    message,
+                    expected_id=active_id,
+                    idle_timeout=idle_timeout,
+                )
+
+                if response.get('id') != active_id:
+                    logger.warning(f"Response ID mismatch: {active_id} != {response.get('id')}")
+
+                return response
+
+            except DaemonConnectionError as e:
+                last_error = e
+                logger.warning(f"Stream connection error (attempt {attempt + 1}/{retries}): {e}")
+                retry = attempt < retries - 1 and self._restart_pipe_daemon()
+            except DaemonTimeoutError:
+                raise
+            except Exception as e:
+                logger.error(f"Unexpected error in request_stream: {e}", exc_info=True)
+                raise
+            finally:
+                with self._stream_callbacks_lock:
+                    self._stream_callbacks.pop(active_id, None)
+                    self._stream_activity.pop(active_id, None)
+
+            if not retry:
+                assert last_error is not None
+                raise last_error
+
+            request = create_request(operation, params)
+            request_id = request['id']
+            handle.request_id = request_id
+            message = serialize_message(request)
+            if on_started is not None:
+                try:
+                    on_started(handle)
+                except Exception as cb_err:
+                    logger.warning(f"on_started callback error for {request_id}: {cb_err}")
+            last_error = None
+
+        assert last_error is not None
+        raise last_error
+
     def cancel_request(self, target_id: str, timeout: float = 5.0) -> Dict[str, Any]:
         """Cancel a running request by its ID.
-        
+
         Sends a cancel operation to the daemon, which will SIGTERM the
         subprocess associated with the given request ID (with a 2-second
         grace period before SIGKILL).
-        
-        Args:
-            target_id: The ID of the request to cancel.
-            timeout: Timeout for the cancel request itself.
-        
-        Returns:
-            Response dict with 'cancelled' (bool) and 'target_id' fields.
         """
         return self.request('cancel', {'target_id': target_id}, timeout=timeout)
-    
+
     def _restart_pipe_daemon(self) -> bool:
         """Restart the pipe daemon after a crash or disconnection.
-        
+
         Kills the old process (if still alive), spawns a new daemon via
-        elevation_linux.start_daemon(), and re-establishes the reader loop.
-        
-        Returns:
-            True if the restart succeeded, False otherwise.
+        elevation_linux.spawn_daemon_process(), and re-establishes the reader loop.
         """
         logger.info("Attempting to restart pipe daemon...")
-        
-        # Kill old process if still alive
+
         if self._process and self._process.poll() is None:
             try:
                 self._process.terminate()
@@ -451,47 +386,53 @@ class DaemonClient:
                     self._process.kill()
                 except Exception:
                     pass
-        
-        # Stop old reader thread
-        self._reader_running = False
-        if self._reader_thread is not None:
-            self._reader_thread.join(timeout=2.0)
-            self._reader_thread = None
-        
+
+        # Clear elevation global so spawn_daemon_process() will spawn a fresh process
         try:
-            from ..utils.elevation_linux import start_daemon
-            new_client = start_daemon()
-            if new_client is None:
-                logger.error("Failed to restart pipe daemon: start_daemon returned None")
+            from ..utils.elevation_linux import clear_daemon_process
+            clear_daemon_process()
+        except Exception as e:
+            logger.debug(f"clear_daemon_process failed: {e}")
+
+        if not self._stop_reader(timeout=2.0):
+            logger.warning("Previous pipe reader did not exit before restart")
+
+        try:
+            from ..utils.elevation_linux import spawn_daemon_process
+            new_process = spawn_daemon_process()
+            if new_process is None:
+                logger.error("Failed to restart pipe daemon: spawn_daemon_process returned None")
                 return False
-            
-            # Transplant the new process and state
-            # Stop the new client's reader thread before stealing its process
-            new_client._reader_running = False
-            if new_client._reader_thread:
-                new_client._reader_thread.join(timeout=2.0)
-            self._process = new_client._process
+
+            self._process = new_process
+            try:
+                from ..utils.elevation_linux import set_daemon_process
+                set_daemon_process(self._process)
+            except Exception as e:
+                logger.debug(f"set_daemon_process failed: {e}")
+
             self._connected = True
-            self._pending_requests = {}
-            self._stream_callbacks = {}
+            with self._pending_lock:
+                self._pending_requests = {}
+            with self._stream_callbacks_lock:
+                self._stream_callbacks = {}
+                self._stream_activity = {}
             self._start_reader_thread()
-            
-            # Update the global daemon client reference
+
             from ..daemon import set_daemon_client
             set_daemon_client(self)
-            
+
             logger.info("Pipe daemon restarted successfully")
             return True
         except Exception as e:
             logger.error(f"Failed to restart pipe daemon: {e}", exc_info=True)
             self._connected = False
             return False
-    
     def __enter__(self):
         """Context manager entry."""
         self.connect()
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit."""
         self.disconnect()
@@ -501,7 +442,8 @@ class LocalDaemonClient:
     """In-process daemon client when application runs directly as root."""
 
     def __init__(self, *args, **kwargs):
-        pass
+        self._jobs_lock = threading.Lock()
+        self._active_jobs: Dict[str, subprocess.Popen] = {}
 
     def is_connected(self) -> bool:
         return True
@@ -510,66 +452,28 @@ class LocalDaemonClient:
         return True
 
     def disconnect(self):
-        pass
+        with self._jobs_lock:
+            for proc in list(self._active_jobs.values()):
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+            self._active_jobs.clear()
 
     def request(self, operation: str, params: Dict[str, Any], timeout: float = None) -> Dict[str, Any]:
         import uuid
-        import subprocess
         request_id = str(uuid.uuid4())
-        
+
         if operation == 'run_command':
-            command = params.get('command')
-            if not command:
-                return {'id': request_id, 'success': False, 'error': "Command parameter is required"}
-            if not isinstance(command, list):
-                return {'id': request_id, 'success': False, 'error': "Command must be a list"}
-            
-            cmd_timeout = params.get('timeout')
-            if cmd_timeout is not None:
-                try:
-                    cmd_timeout = int(cmd_timeout)
-                except ValueError:
-                    cmd_timeout = None
-            
-            try:
-                result = subprocess.run(
-                    command,
-                    capture_output=True,
-                    text=True,
-                    timeout=cmd_timeout
-                )
-                return {
-                    'id': request_id,
-                    'success': True,
-                    'result': {
-                        'returncode': result.returncode,
-                        'stdout': result.stdout,
-                        'stderr': result.stderr,
-                        'success': result.returncode == 0
-                    }
-                }
-            except subprocess.TimeoutExpired as e:
-                return {
-                    'id': request_id,
-                    'success': True,
-                    'result': {
-                        'returncode': -1,
-                        'stdout': '',
-                        'stderr': f'Command timed out: {e}',
-                        'success': False
-                    }
-                }
-            except Exception as e:
-                return {
-                    'id': request_id,
-                    'success': True,
-                    'result': {
-                        'returncode': -1,
-                        'stdout': '',
-                        'stderr': str(e),
-                        'success': False
-                    }
-                }
+            return self._run_local(request_id, params, stream=False, on_chunk=None)
+        elif operation == 'run_command_stream':
+            return self._run_local(request_id, params, stream=False, on_chunk=None)
+        elif operation == 'cancel':
+            return {
+                'id': request_id,
+                'success': True,
+                'result': self._cancel_local(params.get('target_id')),
+            }
         elif operation == 'ping':
             return {
                 'id': request_id,
@@ -589,11 +493,223 @@ class LocalDaemonClient:
                 'error': f"Unknown operation: {operation}"
             }
 
+    def request_stream(
+        self,
+        operation: str,
+        params: Dict[str, Any],
+        on_chunk: Callable[[str], None],
+        timeout: float = None,
+        on_started: Optional[Callable[[StreamRequestHandle], None]] = None,
+    ) -> Dict[str, Any]:
+        import uuid
+        request_id = str(uuid.uuid4())
+        handle = StreamRequestHandle(request_id=request_id)
+        if on_started is not None:
+            try:
+                on_started(handle)
+            except Exception as e:
+                logger.warning(f"on_started callback error for {request_id}: {e}")
+
+        if operation not in ('run_command_stream', 'run_command'):
+            return {
+                'id': request_id,
+                'success': False,
+                'error': f"Unknown streaming operation: {operation}",
+            }
+
+        if timeout is not None and 'timeout' not in params:
+            params = {**params, 'timeout': timeout}
+        return self._run_local(request_id, params, stream=True, on_chunk=on_chunk)
+
+    def cancel_request(self, target_id: str, timeout: float = 5.0) -> Dict[str, Any]:
+        return self.request('cancel', {'target_id': target_id}, timeout=timeout)
+
+    def _cancel_local(self, target_id: Optional[str]) -> Dict[str, Any]:
+        if not target_id:
+            return {'cancelled': False, 'target_id': target_id, 'reason': 'missing target_id'}
+        with self._jobs_lock:
+            proc = self._active_jobs.get(target_id)
+        if proc is None:
+            return {'cancelled': False, 'target_id': target_id, 'reason': 'not found'}
+        try:
+            proc.terminate()
+            try:
+                proc.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5.0)
+            return {'cancelled': True, 'target_id': target_id}
+        except Exception as e:
+            return {'cancelled': False, 'target_id': target_id, 'reason': str(e)}
+
+    def _run_local(
+        self,
+        request_id: str,
+        params: Dict[str, Any],
+        *,
+        stream: bool,
+        on_chunk: Optional[Callable[[str], None]],
+    ) -> Dict[str, Any]:
+        command = params.get('command')
+        if not command:
+            return {'id': request_id, 'success': False, 'error': "Command parameter is required"}
+        if not isinstance(command, list):
+            return {'id': request_id, 'success': False, 'error': "Command must be a list"}
+
+        cmd_timeout = params.get('timeout')
+        if cmd_timeout is not None:
+            try:
+                cmd_timeout = float(cmd_timeout)
+            except ValueError:
+                cmd_timeout = None
+
+        try:
+            if not stream:
+                result = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=cmd_timeout,
+                )
+                return {
+                    'id': request_id,
+                    'success': True,
+                    'result': {
+                        'returncode': result.returncode,
+                        'stdout': result.stdout,
+                        'stderr': result.stderr,
+                        'success': result.returncode == 0,
+                    },
+                }
+
+            proc = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=0,
+            )
+            with self._jobs_lock:
+                self._active_jobs[request_id] = proc
+
+            stdout_parts: list[str] = []
+            stderr_parts: list[str] = []
+            try:
+                assert proc.stdout is not None
+                assert proc.stderr is not None
+                deadline = None if cmd_timeout is None else time.monotonic() + float(cmd_timeout)
+                output_queue: queue.Queue[tuple[str, Optional[str]]] = queue.Queue()
+
+                def _drain(stream, label: str) -> None:
+                    try:
+                        while True:
+                            chunk = stream.read(4096)
+                            if not chunk:
+                                break
+                            output_queue.put(
+                                (label, chunk.decode("utf-8", errors="replace"))
+                            )
+                    finally:
+                        output_queue.put((label, None))
+
+                stdout_reader = threading.Thread(
+                    target=_drain, args=(proc.stdout, 'stdout'), daemon=True
+                )
+                stderr_reader = threading.Thread(
+                    target=_drain, args=(proc.stderr, 'stderr'), daemon=True
+                )
+                stdout_reader.start()
+                stderr_reader.start()
+
+                stdout_done = False
+                stderr_done = False
+                stdout_carry = ''
+                while not (stdout_done and stderr_done and proc.poll() is not None):
+                    remaining = None
+                    if deadline is not None:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            proc.kill()
+                            proc.wait()
+                            stdout_reader.join(timeout=1)
+                            stderr_reader.join(timeout=1)
+                            raise subprocess.TimeoutExpired(command, cmd_timeout)
+                    try:
+                        wait = 0.1 if remaining is None else min(0.1, max(remaining, 0.001))
+                        label, chunk = output_queue.get(timeout=wait)
+                    except queue.Empty:
+                        continue
+                    if chunk is None:
+                        if label == 'stdout':
+                            stdout_done = True
+                            if stdout_carry and on_chunk is not None:
+                                on_chunk(stdout_carry.rstrip('\n'))
+                                stdout_carry = ''
+                        else:
+                            stderr_done = True
+                        continue
+                    if deadline is not None:
+                        deadline = time.monotonic() + cmd_timeout
+                    if label == 'stdout':
+                        stdout_parts.append(chunk)
+                        if on_chunk is not None:
+                            stdout_carry += chunk
+                            while '\n' in stdout_carry:
+                                line, stdout_carry = stdout_carry.split('\n', 1)
+                                on_chunk(line)
+                    else:
+                        stderr_parts.append(chunk)
+
+                stdout_reader.join(timeout=1)
+                stderr_reader.join(timeout=1)
+                returncode = proc.wait()
+                return {
+                    'id': request_id,
+                    'success': True,
+                    'result': {
+                        'returncode': returncode,
+                        'stdout': ''.join(stdout_parts),
+                        'stderr': ''.join(stderr_parts),
+                        'success': returncode == 0,
+                    },
+                }
+            finally:
+                with self._jobs_lock:
+                    self._active_jobs.pop(request_id, None)
+
+        except subprocess.TimeoutExpired as e:
+            return {
+                'id': request_id,
+                'success': True,
+                'result': {
+                    'returncode': -1,
+                    'stdout': '',
+                    'stderr': f'Command timed out: {e}',
+                    'success': False,
+                },
+            }
+        except Exception as e:
+            return {
+                'id': request_id,
+                'success': True,
+                'result': {
+                    'returncode': -1,
+                    'stdout': '',
+                    'stderr': str(e),
+                    'success': False,
+                },
+            }
+
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
+        self.disconnect()
 
 
-__all__ = ['DaemonClient', 'DaemonConnectionError', 'DaemonTimeoutError', 'LocalDaemonClient']
+__all__ = [
+    'DaemonClient',
+    'DaemonConnectionError',
+    'DaemonTimeoutError',
+    'LocalDaemonClient',
+    'StreamRequestHandle',
+]

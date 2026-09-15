@@ -1,11 +1,16 @@
 """
 Minimal plugin example - contains only what's necessary to register as a plugin.
+
+Uses the toolkit-neutral ``create_tab_content`` entry point and
+``GUI.app.ui.definitions`` for content (no direct toolkit imports).
 """
 from __future__ import annotations
 
-from typing import Optional, TYPE_CHECKING
-from ..app.qt_bindings import QWidget
+from typing import TYPE_CHECKING
+
+from ..app.ui.definitions import tab_root
 from ..plugin_system.base import BaseTabPlugin
+from ..plugin_system.types import TabContent, TabCreateContext
 
 if TYPE_CHECKING:
     from ..app.services.container import ServiceContainer
@@ -13,19 +18,20 @@ if TYPE_CHECKING:
 
 class MinimalTabPlugin(BaseTabPlugin):
     """Minimal plugin with only required components."""
-    
+
     # =========================================================================
     # Plugin Metadata
     # =========================================================================
     plugin_name = "Minimal Plugin"
+    plugin_id = "gui.minimal"
     tab_title = "Minimal Plugin"
     plugin_description = "A minimal plugin with only required components"
     supported_platforms = ["Windows", "Linux", "macOS"]
     requires_admin = False
-    plugin_version = "1.0.1"
+    plugin_version = "1.3.0"
     plugin_author = "Plugin Creator"
-    min_gui_version = "4.0.0"
-    required_gui_version = ">=4.0.0"
+    min_gui_version = "6.0.0"
+    required_gui_version = ">=6.0.0"
     disabled_by_default = True
 
     def __init__(self, container: "ServiceContainer") -> None:
@@ -36,16 +42,9 @@ class MinimalTabPlugin(BaseTabPlugin):
     # TabExtension Interface
     # =========================================================================
 
-    def create_widget(self, parent: Optional[QWidget] = None) -> QWidget:
-        """Create the widget for this tab."""
-        return MinimalWidget(parent)
-
-
-class MinimalWidget(QWidget):
-    """Minimal widget that is completely blank."""
-    
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
+    def create_tab_content(self, context: TabCreateContext) -> TabContent:
+        """Create blank tab content via shared UI definitions."""
+        return tab_root(context)
 
 
 __all__ = ["MinimalTabPlugin"]

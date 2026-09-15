@@ -12,7 +12,7 @@ import platform
 # =============================================================================
 # GUI Internal Variables (app_plugins will NOT override these)
 # =============================================================================
-GUI_API_VERSION = "5.2.0"
+GUI_API_VERSION = "6.0.0"
 
 # =============================================================================
 # Version Information (can be overridden by app_plugins/constants.py)
@@ -40,9 +40,13 @@ LOG_TO_FILE = True
 # Console configuration
 SHOW_CONSOLE = False
 
-# UI configuration
-DEFAULT_QT_BINDING = ""  # If set, overrides the default binding (e.g., "pyside6" or "pyqt6")
-NEW_UI_ENABLED_BY_DEFAULT = True
+# UI configuration — cross-backend (toolkit-neutral)
+DEFAULT_UI_BACKEND = "qt"
+
+# UI configuration — Qt backend only (ignored when DEFAULT_UI_BACKEND is not "qt")
+DEFAULT_QT_BINDING = "pyside6"  # Prefer a single binding; avoids probing PySide6 then PyQt6
+QT_NEW_UI_ENABLED_BY_DEFAULT = True  # theme manager "new UI" stylesheet toggle default
+
 # Hide the Admin menu/button by default (can be overridden by app_plugins/constants.py)
 HIDE_ADMIN_MENU_BY_DEFAULT = True
 
@@ -52,11 +56,6 @@ SINGLE_PLUGIN_NAME = ""
 
 # Default theme override (can be overridden by app_plugins/constants.py, blank defaults to system dark/light check)
 DEFAULT_THEME = ""
-
-# Use pipe daemon instead of socket daemon on Linux (default is False for compatibility).
-# Note: This sets the daemon type used at launch when REQUIRE_ADMIN_BY_DEFAULT is True.
-# Otherwise, users can choose to activate either the legacy daemon or the pipe daemon if they want elevation after launch.
-USE_PIPE_DAEMON = False
 
 # =============================================================================
 # GUI Internal (app_plugins will NOT override these)
@@ -75,13 +74,13 @@ __all__ = [
     'LOGGING_ENABLED',
     'LOG_TO_FILE',
     'SHOW_CONSOLE',
+    'DEFAULT_UI_BACKEND',
     'DEFAULT_QT_BINDING',
-    'NEW_UI_ENABLED_BY_DEFAULT',
+    'QT_NEW_UI_ENABLED_BY_DEFAULT',
     'HIDE_ADMIN_MENU_BY_DEFAULT',
     'SINGLE_PLUGIN_MODE',
     'SINGLE_PLUGIN_NAME',
     'DEFAULT_THEME',
-    'USE_PIPE_DAEMON',
     # GUI internal
     'GUI_API_VERSION',
     'CURRENT_PLATFORM',

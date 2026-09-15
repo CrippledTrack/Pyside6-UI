@@ -1,7 +1,10 @@
 """Path utilities for determining application directories.
 
 This module provides functions to locate various application directories
-whether running from source or as a PyInstaller bundle.
+Keep portable mode as the default (settings/logs next to the inferred
+install or source root). Hosts that need a user-data directory should
+inject :class:`~GUI.app.host_config.HostConfig` at bootstrap.
+
 """
 
 from __future__ import annotations
@@ -74,20 +77,14 @@ def get_plugins_dir() -> Path:
     return base / "plugins"
 
 
-def app_root() -> Path:
-    """Legacy function for backward compatibility."""
-    return get_base_path()
-
-
 def logs_dir() -> Path:
     """Get the logs directory path."""
-    return app_root() / "logs"
+    return get_base_path() / "logs"
 
 
 __all__ = [
     'get_base_path',
     'get_plugins_dir',
-    'app_root',
     'logs_dir',
     'parent_has_gui_plugin_dirs',
 ]

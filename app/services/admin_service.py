@@ -1,9 +1,4 @@
-"""Admin/elevation service for managing privileged operations.
-
-This module provides a centralized service for checking admin status,
-handling elevation prompts, and managing platform-specific admin logic
-across Windows and Linux systems.
-"""
+"""Admin/elevation service for managing privileged operations."""
 
 from __future__ import annotations
 
@@ -13,68 +8,89 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 from ..constants import CURRENT_PLATFORM
 
 if TYPE_CHECKING:
-    from ..qt_bindings import QWidget
+    from ..ui.abstractions.presenters import IDialogPresenter
 
 logger = logging.getLogger(__name__)
 
-if CURRENT_PLATFORM == "windows":
-    from ..utils.elevation_windows import is_admin as _is_admin_windows, run_as_admin
-elif CURRENT_PLATFORM == "linux":
-    from ..utils.elevation_linux import get_sudo_status, is_admin as _is_admin_linux, run_as_admin
-else:
-    # Dummy functions for unsupported platforms
-    def _is_admin_windows() -> bool:
-        return False
-    
-    def _is_admin_linux() -> bool:
-        return False
-    
-    def get_sudo_status() -> Dict[str, Any]:
-        return {"is_admin": False, "current_user": "unknown", "sudo_available": False}
-    
-    def run_as_admin() -> None:
-        raise RuntimeError("Admin elevation not supported on this platform")
-
 
 class AdminService:
-    """Service for managing admin/elevation status and operations."""
-    
+    """Base class and factory for managing admin/elevation status and operations."""
+
+    def __new__(cls, daemon_service: Optional[Any] = None) -> AdminService:
+        if cls is AdminService:
+            if CURRENT_PLATFORM == "windows":
+                return super().__new__(WindowsAdminService)
+            elif CURRENT_PLATFORM == "linux":
+                return super().__new__(LinuxAdminService)
+            else:
+                return super().__new__(FallbackAdminService)
+        return super().__new__(cls)
+
     def __init__(self, daemon_service: Optional[Any] = None):
-        """Initialize the admin service.
-        
-        Args:
-            daemon_service: Optional daemon service instance (for Linux)
-        """
+        if hasattr(self, "_initialized") and self._initialized:
+            return
+
         self._daemon_service = daemon_service
         self._is_admin: Optional[bool] = None
-        self._sudo_status: Optional[Dict[str, Any]] = None
+        self._dialog_presenter: Optional["IDialogPresenter"] = None
         self._check_admin_status()
-    
+        self._initialized = True
+
+    def set_dialog_presenter(self, presenter: "IDialogPresenter") -> None:
+        """Register dialog presenter (lazy-injected by UI backend)."""
+        self._dialog_presenter = presenter
+
     def _check_admin_status(self) -> None:
-        """Check and cache admin status for the current platform."""
-        if CURRENT_PLATFORM == "windows":
-            self._check_windows_admin_status()
-        elif CURRENT_PLATFORM == "linux":
-            self._check_linux_admin_status()
+        raise NotImplementedError("Subclasses must implement _check_admin_status")
+
+    def is_admin(self) -> bool:
+        if self._is_admin is None:
+            self._check_admin_status()
+        return self._is_admin or False
+
+    def get_sudo_status(self) -> Optional[Dict[str, Any]]:
+        return None
+
+    def prompt_for_admin_operation(self, operation_description: str) -> bool:
+        if self.is_admin():
+            return True
+        return False
+
+    def restart_as_admin(self) -> tuple[bool, Optional[str]]:
+        return False, f"Admin elevation not supported on {CURRENT_PLATFORM}"
+
+    def needs_admin_for_plugin(self, requires_admin: bool) -> bool:
+        raise NotImplementedError("Subclasses must implement needs_admin_for_plugin")
+
+    def _show_warning(self, title: str, message: str) -> None:
+        if self._dialog_presenter:
+            self._dialog_presenter.warning(title, message)
         else:
-            logger.warning(f"Unsupported platform: {CURRENT_PLATFORM}")
-            self._is_admin = False
-    
-    def _check_windows_admin_status(self) -> None:
-        """Check and handle Windows admin status."""
+            logger.warning("%s: %s", title, message)
+
+    def _show_confirm(self, title: str, message: str) -> bool:
+        if self._dialog_presenter:
+            return self._dialog_presenter.confirm(title, message)
+        logger.warning("%s: %s (no dialog presenter — defaulting to False)", title, message)
+        return False
+
+
+class WindowsAdminService(AdminService):
+    def _check_admin_status(self) -> None:
+        from ..utils.elevation_windows import is_admin as _is_admin_windows
         self._is_admin = _is_admin_windows()
         if self._is_admin:
             logger.info("Application running with admin privileges")
             return
-        
-        # Check if admin is required by default
+
         from ..utils.imports import get_platforms_constants
         constants = get_platforms_constants()
-        require_admin_by_default = constants.REQUIRE_ADMIN_BY_DEFAULT
-        
+        require_admin_by_default = getattr(constants, "REQUIRE_ADMIN_BY_DEFAULT", False)
+
         if require_admin_by_default:
             try:
                 logger.warning("Attempting to restart with elevated rights...")
+                from ..utils.elevation_windows import run_as_admin
                 run_as_admin()
             except Exception as e:
                 logger.warning(f"Elevation denied or failed ({e}); continuing without admin.")
@@ -83,9 +99,41 @@ class AdminService:
                 logger.info("Continuing without admin privileges. Some operations will be disabled until elevated.")
         else:
             logger.info("Running without admin privileges by default. Some operations will be disabled until elevated.")
-    
-    def _check_linux_admin_status(self) -> None:
-        """Check and handle Linux admin status."""
+
+    def prompt_for_admin_operation(self, operation_description: str) -> bool:
+        if self.is_admin():
+            return True
+        self._show_warning(
+            "Admin Privileges Required",
+            f"{operation_description} requires administrator privileges.\n"
+            "Please restart the application as administrator.",
+        )
+        return False
+
+    def restart_as_admin(self) -> tuple[bool, Optional[str]]:
+        try:
+            from ..utils.elevation_windows import run_as_admin
+            run_as_admin()
+            return True, None
+        except Exception as e:
+            return False, str(e)
+
+    def needs_admin_for_plugin(self, requires_admin: bool) -> bool:
+        from ..utils.admin import is_dev_mode
+        if is_dev_mode():
+            return False
+        if not requires_admin:
+            return False
+        return not self.is_admin()
+
+
+class LinuxAdminService(AdminService):
+    def __init__(self, daemon_service: Optional[Any] = None):
+        self._sudo_status: Optional[Dict[str, Any]] = None
+        super().__init__(daemon_service)
+
+    def _check_admin_status(self) -> None:
+        from ..utils.elevation_linux import get_sudo_status
         self._sudo_status = get_sudo_status()
         self._is_admin = self._sudo_status["is_admin"]
         if self._is_admin:
@@ -96,121 +144,74 @@ class AdminService:
                 logger.info("Sudo is available - operations requiring root will prompt for password")
             else:
                 logger.warning("Sudo not available - some operations may not work")
-    
-    def is_admin(self) -> bool:
-        """Check if the application is running with admin privileges.
-        
-        Returns:
-            True if running as admin/root, False otherwise
-        """
-        if self._is_admin is None:
-            self._check_admin_status()
-        return self._is_admin or False
-    
+
     def get_sudo_status(self) -> Optional[Dict[str, Any]]:
-        """Get Linux sudo status information.
-        
-        Returns:
-            Dictionary with sudo status info, or None if not on Linux
-        """
-        if CURRENT_PLATFORM == "linux":
-            if self._sudo_status is None:
-                self._check_linux_admin_status()
-            return self._sudo_status
-        return None
-    
-    def prompt_for_admin_operation(
-        self, 
-        operation_description: str, 
-        parent_widget: Optional["QWidget"] = None
-    ) -> bool:
-        """Prompt user for admin operation and check if admin is available.
-        
-        Args:
-            operation_description: Description of the operation requiring admin
-            parent_widget: Optional parent widget for dialogs
-            
-        Returns:
-            True if admin is available, False otherwise
-        """
+        if self._sudo_status is None:
+            self._check_admin_status()
+        return self._sudo_status
+
+    def prompt_for_admin_operation(self, operation_description: str) -> bool:
         if self.is_admin():
             return True
-            
-        from ..qt_bindings import QMessageBox
-        
-        if CURRENT_PLATFORM == "windows":
-            if self.is_admin():
-                return True
-            if parent_widget:
-                QMessageBox.warning(
-                    parent_widget,
-                    "Admin Privileges Required",
-                    f"{operation_description} requires administrator privileges.\n"
-                    "Please restart the application as administrator.",
-                )
-            return False
-        elif CURRENT_PLATFORM == "linux":
-            # On Linux, check if daemon is available
-            if self._daemon_service and self._daemon_service.is_available():
-                return True
-            if parent_widget:
-                QMessageBox.warning(
-                    parent_widget,
-                    "Privileged Daemon Required",
-                    f"{operation_description} requires administrator privileges.\n"
-                    "The privileged daemon is not running.\n"
-                    "Please start it from the Admin menu to use this feature.",
-                )
-            return False
-        else:
-            # Other platforms
-            if self.is_admin():
-                return True
-            sudo_status = self.get_sudo_status()
-            if sudo_status and not sudo_status.get("sudo_available", False):
-                if parent_widget:
-                    QMessageBox.warning(
-                        parent_widget,
-                        "Admin Privileges Required",
-                        f"{operation_description} requires root privileges, but sudo is not available.\n"
-                        "Please run the application as root or install sudo.",
-                    )
-                return False
-            if parent_widget:
-                reply = QMessageBox.question(
-                    parent_widget,
-                    "Admin Privileges Required",
-                    f"{operation_description} requires root privileges.\n"
-                    "The application will prompt for your password when needed.\n\n"
-                    "Do you want to continue?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.Yes,
-                )
-                return reply == QMessageBox.StandardButton.Yes
+        if self._daemon_service and self._daemon_service.is_available():
+            return True
+        self._show_warning(
+            "Privileged Daemon Required",
+            f"{operation_description} requires administrator privileges.\n"
+            "The privileged daemon is not running.\n"
+            "Please start it from the Admin menu to use this feature.",
+        )
         return False
-    
+
     def restart_as_admin(self) -> tuple[bool, Optional[str]]:
-        """Restart the application with administrator/root privileges.
-        
-        On Windows: Restarts the entire application as administrator.
-        On Linux: Starts the privileged daemon (GUI continues running as normal user).
-        
-        Returns:
-            Tuple of (success: bool, error_message: Optional[str])
-        """
-        if CURRENT_PLATFORM == "windows":
-            try:
-                run_as_admin()
-                return True, None
-            except Exception as e:
-                return False, str(e)
-        elif CURRENT_PLATFORM == "linux":
-            if self._daemon_service:
-                return self._daemon_service.start()
-            return False, "Daemon service not available"
-        else:
-            return False, f"Admin elevation not supported on {CURRENT_PLATFORM}"
+        if self._daemon_service:
+            return self._daemon_service.start()
+        return False, "Daemon service not available"
+
+    def needs_admin_for_plugin(self, requires_admin: bool) -> bool:
+        from ..utils.admin import is_dev_mode
+        if is_dev_mode():
+            return False
+        if not requires_admin:
+            return False
+        if self.is_admin():
+            return False
+        if self._daemon_service and self._daemon_service.is_available():
+            return False
+        try:
+            from ..daemon import is_daemon_available
+            return not is_daemon_available()
+        except Exception:
+            return True
 
 
-__all__ = ['AdminService']
+class FallbackAdminService(AdminService):
+    def _check_admin_status(self) -> None:
+        logger.warning(f"Unsupported platform: {CURRENT_PLATFORM}")
+        self._is_admin = False
 
+    def prompt_for_admin_operation(self, operation_description: str) -> bool:
+        if self.is_admin():
+            return True
+        return self._show_confirm(
+            "Admin Privileges Required",
+            f"{operation_description} requires root privileges.\n"
+            "The application will prompt for your password when needed.\n\n"
+            "Do you want to continue?",
+        )
+
+    def needs_admin_for_plugin(self, requires_admin: bool) -> bool:
+        from ..utils.admin import is_dev_mode
+        if is_dev_mode():
+            return False
+        if not requires_admin:
+            return False
+        return not self.is_admin()
+
+
+__all__ = [
+    'AdminService',
+    'WindowsAdminService',
+    'LinuxAdminService',
+    'FallbackAdminService',
+]

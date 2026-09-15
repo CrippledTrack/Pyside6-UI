@@ -8,13 +8,13 @@ can implement. Plugins can implement any combination of these interfaces.
 from __future__ import annotations
 
 from typing import (
-    Any, Callable, Dict, List, Optional, 
-    Protocol, runtime_checkable, TYPE_CHECKING
+    Any, Callable, Dict, List, Optional,
+    Protocol, runtime_checkable, TYPE_CHECKING,
+    Type, TypeVar
 )
 
 if TYPE_CHECKING:
-    from ..app.qt_bindings import QWidget
-    from .types import MenuItemDefinition, ToolbarAction
+    from .types import MenuItemDefinition, ToolbarAction, TabContent, TabCreateContext
     from ..app.services.container import ServiceContainer
 
 
@@ -24,6 +24,10 @@ class PluginProtocol(Protocol):
     
     This is checked at runtime using isinstance() to determine if a class
     is a valid plugin.
+
+    ``plugin_id`` is the immutable registry key (optional; defaults to
+    ``plugin_name``). ``dependencies`` lists provider ids and is enforced
+    after discovery.
     """
     
     # Required metadata (class-level)
@@ -32,6 +36,7 @@ class PluginProtocol(Protocol):
     supported_platforms: List[str]
     
     # Optional metadata with defaults
+    plugin_id: str
     plugin_description: str
     plugin_author: str
     plugin_authors: List[str]
@@ -43,13 +48,14 @@ class PluginProtocol(Protocol):
 
 @runtime_checkable
 class TabExtension(Protocol):
-    """Interface for plugins that provide a tab widget.
+    """Interface for plugins that provide tab content.
     
-    This is the primary extension point for adding new tabs to the application.
+    Prefer ``create_tab_content`` for new plugins. ``create_widget`` remains
+    supported as a legacy Qt-oriented entry point; hosts may accept either.
     
     Attributes:
-        plugin_name: Unique identifier for the plugin
-        tab_title: Display name shown in the tab bar
+        plugin_name: Display name for the plugin (identity is ``plugin_id``)
+        tab_title: Display name shown in the tab bar (not plugin_id)
         requires_admin: Whether admin privileges are needed
     """
     
@@ -57,14 +63,28 @@ class TabExtension(Protocol):
     tab_title: str
     requires_admin: bool
     
-    def create_widget(self, parent: Optional["QWidget"] = None) -> "QWidget":
-        """Create and return a UI widget to be used as the tab's content.
+    def create_tab_content(self, context: "TabCreateContext") -> "TabContent":
+        """Create and return tab content for the active UI backend.
         
         Args:
-            parent: The parent widget (e.g., QTabWidget for PySide6)
+            context: Backend id and parent handle for content creation
             
         Returns:
-            A QWidget instance for the tab content
+            Opaque content understood by the active UI backend
+        """
+        ...
+    
+    def create_widget(self, parent: Optional[Any] = None) -> "TabContent":
+        """Legacy entry point: create tab content with a parent handle.
+        
+        Qt hosts historically passed a QWidget parent. New plugins should
+        implement ``create_tab_content`` instead.
+        
+        Args:
+            parent: Backend-specific parent handle (may be ``None``)
+            
+        Returns:
+            Opaque tab content for the active UI backend
         """
         ...
     
@@ -94,18 +114,18 @@ class MenuExtension(Protocol):
 
 @runtime_checkable
 class StatusExtension(Protocol):
-    """Interface for plugins that contribute widgets to the status bar."""
+    """Interface for plugins that contribute content to the status bar."""
     
     plugin_name: str
     
-    def create_status_widget(self, parent: Optional["QWidget"] = None) -> "QWidget":
-        """Create and return a widget to display in the status bar.
+    def create_status_widget(self, parent: Optional[Any] = None) -> "TabContent":
+        """Create and return content to display in the status bar.
         
         Args:
-            parent: The parent widget (status bar)
+            parent: Backend-specific parent handle (status bar)
             
         Returns:
-            A UI widget to embed in the status bar
+            Opaque content to embed in the status bar
         """
         ...
 
@@ -172,14 +192,14 @@ class SettingsExtension(Protocol):
     
     plugin_name: str
     
-    def get_settings_widget(self, parent: Optional["QWidget"] = None) -> Optional["QWidget"]:
-        """Get a settings widget for this plugin.
+    def get_settings_widget(self, parent: Optional[Any] = None) -> Optional["TabContent"]:
+        """Get settings content for this plugin.
         
         Args:
-            parent: Parent widget for the settings widget
+            parent: Backend-specific parent handle
             
         Returns:
-            A widget containing settings controls, or None
+            Opaque settings content, or None
         """
         ...
     
@@ -187,6 +207,140 @@ class SettingsExtension(Protocol):
         """Called when plugin settings are changed."""
         ...
 
+
+T = TypeVar('T')
+
+
+@runtime_checkable
+class IServiceContainer(Protocol):
+    """Protocol for the service container to decouple plugin system from app services."""
+    
+    def get(self, service_type: Type[T]) -> T:
+        """Retrieve a service instance by its class or interface type."""
+        ...
+
+
+@runtime_checkable
+class ISettingsService(Protocol):
+    """Canonical settings service Protocol (app + plugin_system).
+
+    Defined here so ``plugin_system`` does not import ``app.services``.
+    The concrete implementation lives in ``app.services.settings_service``.
+    """
+
+    def get_settings(self) -> Any:
+        """Get current settings object."""
+        ...
+
+    def save_theme_preference(self, theme_name: str) -> None:
+        """Save theme preference."""
+        ...
+
+    def get_theme_preference(self) -> str:
+        """Get saved theme preference."""
+        ...
+
+    def save_disabled_plugins(self, plugin_names: List[str]) -> None:
+        """Save user-disabled plugin ids."""
+        ...
+
+    def get_disabled_plugins(self) -> List[str]:
+        """Get saved user-disabled plugin ids."""
+        ...
+
+    def save_enabled_plugins(self, plugin_names: List[str]) -> None:
+        """Save user-enabled plugin ids (overrides for disabled_by_default)."""
+        ...
+
+    def get_enabled_plugins(self) -> List[str]:
+        """Get saved user-enabled plugin ids (overrides for disabled_by_default)."""
+        ...
+
+    def save_window_geometry(self, x: int, y: int, width: int, height: int) -> None:
+        """Save window geometry."""
+        ...
+
+    def get_window_geometry(self) -> Any:
+        """Get saved window geometry."""
+        ...
+
+    def get_show_tooltips(self) -> bool:
+        """Get show tooltips setting."""
+        ...
+
+    def save_shortcuts_enabled(self, enabled: bool) -> None:
+        """Save shortcuts enabled setting."""
+        ...
+
+    def get_shortcuts_enabled(self) -> bool:
+        """Get shortcuts enabled setting."""
+        ...
+
+    def save_toast_settings(self, enabled: bool, duration: int) -> None:
+        """Save toast notification settings."""
+        ...
+
+    def get_toast_notifications_enabled(self) -> bool:
+        """Get toast notifications enabled setting."""
+        ...
+
+    def get_toast_duration(self) -> int:
+        """Get toast duration setting."""
+        ...
+
+    def save_new_ui_enabled(self, enabled: bool) -> None:
+        """Save whether the modern (non-classic) UI is enabled."""
+        ...
+
+    def get_new_ui_enabled(self) -> bool:
+        """Return whether the modern (non-classic) UI is enabled."""
+        ...
+
+    def save_gui_version(self, version: str) -> None:
+        """Save GUI version to settings."""
+        ...
+
+    def get_gui_version(self) -> str:
+        """Get saved GUI version."""
+        ...
+
+    def save_plugin_settings(self, plugin_name: str, settings: Dict[str, Any]) -> None:
+        """Save settings for a specific plugin."""
+        ...
+
+    def get_plugin_settings(self, plugin_name: str) -> Dict[str, Any]:
+        """Get settings for a specific plugin."""
+        ...
+
+    def is_extension_enabled(self, plugin_name: str, extension_type: str) -> bool:
+        """Check if a specific extension type is enabled for a plugin."""
+        ...
+
+
+@runtime_checkable
+class IPluginLifecycle(Protocol):
+    """Toolkit-neutral plugin lifecycle events."""
+
+    def on_plugins_unloaded(self, plugin_names: List[str]) -> None:
+        """Called when plugin instances are unloaded and resources cleaned up."""
+        ...
+
+    def on_plugins_discovered(self, plugin_names: List[str]) -> None:
+        """Called when new plugins are discovered and registered."""
+        ...
+
+    def on_plugin_state_changed(self, plugin_name: str, enabled: bool) -> None:
+        """Called when a plugin is enabled or disabled."""
+        ...
+
+
+@runtime_checkable
+class IPluginResourceCleanup(Protocol):
+    """Backend-registered cleanup for plugin-owned UI resources."""
+
+    def cleanup(self, plugin: Any) -> None:
+        """Release backend-specific resources held by a plugin instance."""
+        ...
 
 
 __all__ = [
@@ -199,4 +353,8 @@ __all__ = [
     'ServiceExtension',
     'EventSubscriberExtension',
     'SettingsExtension',
+    'IServiceContainer',
+    'ISettingsService',
+    'IPluginLifecycle',
+    'IPluginResourceCleanup',
 ]

@@ -11,18 +11,18 @@ from pathlib import Path
 from typing import Optional
 from logging.handlers import RotatingFileHandler
 
-from ..utils.imports import get_platforms_constants
 from ..utils.admin import is_dev_mode
 
-# Import platform constants using the utility function
-constants = get_platforms_constants()
-LOGGING_ENABLED = constants.LOGGING_ENABLED
-LOG_TO_FILE = constants.LOG_TO_FILE
+# PERF: LOGGING_ENABLED and LOG_TO_FILE are resolved lazily inside setup_logging()
+# instead of at module import time, to avoid pinning the constants module in memory.
 
-SAVE_LOGS_TO_FILE = LOG_TO_FILE
+SAVE_LOGS_TO_FILE = None  # Set in setup_logging()
 MAX_LOG_SIZE = 5 * 1024 * 1024  # 5MB
 MAX_LOG_FILES = 6
 LOG_FORMAT = "%(asctime)s - %(levelname)s - [%(threadName)s] - %(name)s - %(message)s%(exc_text)s"
+
+# Console StreamHandlers detached while a full-screen TUI owns the terminal.
+_suspended_console_handlers: list[logging.Handler] = []
 
 ANSI_RESET = "\033[0m"
 LEVEL_COLOR_MAP = {
@@ -31,6 +31,13 @@ LEVEL_COLOR_MAP = {
     logging.WARNING: "\033[33m",   # Yellow
     logging.ERROR: "\033[31m",     # Red
     logging.CRITICAL: "\033[35m",  # Magenta
+}
+LOG_LEVEL_DISPLAY_ROLES = {
+    logging.DEBUG: "log_debug",
+    logging.INFO: "log_info",
+    logging.WARNING: "log_warning",
+    logging.ERROR: "log_error",
+    logging.CRITICAL: "log_critical",
 }
 THREAD_COLOR = "\033[94m"  # Bright blue
 DAEMON_THREAD_COLOR = "\033[95m"  # Bright magenta
@@ -56,28 +63,10 @@ class CustomFormatter(logging.Formatter):
         if not hasattr(record, "threadName"):
             record.threadName = "MainThread"
         elif record.threadName and record.threadName.startswith("Dummy-"):
-            # Replace Qt internal thread names with more descriptive names
-            # This handles cases where Qt creates internal threads with "Dummy-X" names
             current_thread = threading.current_thread()
-            
-            # Retrieve the QThread name if available
-            qthread_name = None
-            try:
-                # Safely check if the qt_bindings module has been imported
-                if any(name.endswith('.qt_bindings') for name in sys.modules):
-                    from ..qt_bindings import QThread
-                    qthread = QThread.currentThread()
-                    if qthread and qthread.objectName():
-                        qthread_name = qthread.objectName()
-            except Exception:
-                pass
-
-            if qthread_name:
-                record.threadName = qthread_name
-            elif hasattr(current_thread, 'objectName') and current_thread.objectName():
+            if hasattr(current_thread, 'objectName') and current_thread.objectName():
                 record.threadName = current_thread.objectName()
             else:
-                # Create a meaningful name based on the logger context
                 logger_name = getattr(record, 'name', '')
                 if 'plugin' in logger_name.lower():
                     record.threadName = "PluginLoader"
@@ -102,6 +91,19 @@ class CustomFormatter(logging.Formatter):
             return super().format(record)
         finally:
             record.exc_info = orig_exc_info
+
+
+def log_display_role(level: int) -> str:
+    """Map a ``logging`` level to the shared toolkit-neutral display role."""
+    if level >= logging.CRITICAL:
+        return LOG_LEVEL_DISPLAY_ROLES[logging.CRITICAL]
+    if level >= logging.ERROR:
+        return LOG_LEVEL_DISPLAY_ROLES[logging.ERROR]
+    if level >= logging.WARNING:
+        return LOG_LEVEL_DISPLAY_ROLES[logging.WARNING]
+    if level >= logging.INFO:
+        return LOG_LEVEL_DISPLAY_ROLES[logging.INFO]
+    return LOG_LEVEL_DISPLAY_ROLES[logging.DEBUG]
 
 
 def _prune_old_logs(log_dir: Path, keep: int) -> None:
@@ -201,8 +203,8 @@ def _configure_handlers(root_logger: logging.Logger, level: int) -> None:
     base_formatter = CustomFormatter(LOG_FORMAT)
 
     if SAVE_LOGS_TO_FILE:
-        from ..utils.paths import logs_dir
-        log_dir = logs_dir()
+        from ..host_config import get_host_config
+        log_dir = get_host_config().logs_dir()
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / f"app_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
         file_handler = RotatingFileHandler(
@@ -224,15 +226,66 @@ def _configure_handlers(root_logger: logging.Logger, level: int) -> None:
     root_logger.addHandler(console_handler)
 
 
+def _is_console_stream_handler(handler: logging.Handler) -> bool:
+    """Return True for stderr/stdout stream handlers (not file handlers)."""
+    if isinstance(handler, logging.FileHandler):
+        return False
+    if not isinstance(handler, logging.StreamHandler):
+        return False
+    stream = getattr(handler, "stream", None)
+    return stream in (sys.stderr, sys.stdout, getattr(sys, "__stderr__", None), getattr(sys, "__stdout__", None))
+
+
+def suspend_console_logging() -> None:
+    """Detach console stream handlers so logs do not paint over a TUI.
+
+    File handlers (and the Log Viewer) keep receiving records. Call
+    :func:`resume_console_logging` when the TUI exits.
+    """
+    global _suspended_console_handlers
+    if _suspended_console_handlers:
+        return
+    root = logging.getLogger()
+    for handler in list(root.handlers):
+        if _is_console_stream_handler(handler):
+            root.removeHandler(handler)
+            _suspended_console_handlers.append(handler)
+    if _suspended_console_handlers:
+        logging.getLogger(__name__).debug(
+            "Suspended %s console log handler(s) for TUI",
+            len(_suspended_console_handlers),
+        )
+
+
+def resume_console_logging() -> None:
+    """Re-attach console stream handlers suspended for a TUI session."""
+    global _suspended_console_handlers
+    if not _suspended_console_handlers:
+        return
+    root = logging.getLogger()
+    for handler in _suspended_console_handlers:
+        root.addHandler(handler)
+    count = len(_suspended_console_handlers)
+    _suspended_console_handlers = []
+    logging.getLogger(__name__).debug("Resumed %s console log handler(s)", count)
+
+
 def setup_logging() -> logging.Logger:
     """Configure logging with rotation and proper error handling.
 
     Matches the behavior previously implemented in main.py.
     """
-    global _logging_configured, _previous_excepthook, _previous_showwarning
+    global _logging_configured, _previous_excepthook, _previous_showwarning, SAVE_LOGS_TO_FILE
     try:
         if _logging_configured:
             return logging.getLogger(__name__)
+
+        # Resolve platform constants lazily (first and only call)
+        from ..utils.imports import get_platforms_constants
+        _constants = get_platforms_constants()
+        LOGGING_ENABLED = _constants.LOGGING_ENABLED
+        SAVE_LOGS_TO_FILE = _constants.LOG_TO_FILE
+
         if not LOGGING_ENABLED:
             # Minimal no-op configuration to avoid noisy handlers
             logging.getLogger().handlers.clear()
@@ -290,4 +343,11 @@ def setup_logging() -> logging.Logger:
         return logger
 
 
-__all__ = ['setup_logging']
+__all__ = [
+    "setup_logging",
+    "suspend_console_logging",
+    "resume_console_logging",
+    "log_display_role",
+    "LOG_LEVEL_DISPLAY_ROLES",
+    "LEVEL_COLOR_MAP",
+]

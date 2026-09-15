@@ -2,7 +2,7 @@
 Notification service for managing application notifications.
 
 This module provides a centralized service for handling, storing, and retrieving
-notification history, and notifying the UI of new alerts.
+notification history, and notifying observers of new alerts.
 """
 
 from __future__ import annotations
@@ -11,11 +11,11 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional
-
-from ..qt_bindings import QObject, Signal
+from typing import Callable, List, Optional
 
 logger = logging.getLogger(__name__)
+
+Unsubscribe = Callable[[], None]
 
 
 class NotificationType(Enum):
@@ -36,57 +36,66 @@ class Notification:
     details: Optional[str] = None
 
 
-class NotificationService(QObject):
-    """Service for managing notifications."""
-    
-    # Constants
+class NotificationService:
+    """Service for managing notifications (toolkit-free)."""
+
     MAX_HISTORY_SIZE = 50
-    
-    # Signals
-    notification_added = Signal(Notification)
-    unread_count_changed = Signal(int)
-    
+
     def __init__(self) -> None:
-        """Initialize the notification service."""
-        super().__init__()
         self._notifications: List[Notification] = []
-    
-    def add_notification(self, message: str, type: NotificationType, details: Optional[str] = None) -> None:
-        """Add a new notification.
-        
-        Args:
-            message: The main message text
-            type: The type of notification (info, success, warning, error)
-            details: Optional detailed description
-        """
+        self._added_subscribers: List[Callable[[Notification], None]] = []
+        self._unread_subscribers: List[Callable[[int], None]] = []
+
+    def subscribe_added(self, callback: Callable[[Notification], None]) -> Unsubscribe:
+        """Subscribe to new notification events."""
+        self._added_subscribers.append(callback)
+
+        def unsubscribe() -> None:
+            if callback in self._added_subscribers:
+                self._added_subscribers.remove(callback)
+
+        return unsubscribe
+
+    def subscribe_unread_changed(self, callback: Callable[[int], None]) -> Unsubscribe:
+        """Subscribe to unread count changes."""
+        self._unread_subscribers.append(callback)
+
+        def unsubscribe() -> None:
+            if callback in self._unread_subscribers:
+                self._unread_subscribers.remove(callback)
+
+        return unsubscribe
+
+    def add_notification(
+        self,
+        message: str,
+        type: NotificationType,
+        details: Optional[str] = None,
+    ) -> None:
+        """Add a new notification."""
         notification = Notification(message=message, type=type, details=details)
-        self._notifications.insert(0, notification)  # Newest first
-        
-        # Enforce history limit
+        self._notifications.insert(0, notification)
+
         while len(self._notifications) > self.MAX_HISTORY_SIZE:
-            self._notifications.pop()  # Remove oldest
-        
+            self._notifications.pop()
+
         logger.debug(f"Notification added: [{type.value}] {message}")
-        
-        self.notification_added.emit(notification)
-        self._emit_unread_count()
-    
+
+        for cb in list(self._added_subscribers):
+            try:
+                cb(notification)
+            except Exception as e:
+                logger.error(f"Notification subscriber error: {e}", exc_info=True)
+        self._notify_unread_count()
+
     def get_notifications(self) -> List[Notification]:
-        """Get all notifications.
-        
-        Returns:
-            List of notifications (newest first)
-        """
-        return self._notifications
-    
+        """Get all notifications (newest first)."""
+        return list(self._notifications)
+
     def get_unread_count(self) -> int:
-        """Get the number of unread notifications.
-        
-        Returns:
-            Count of unread notifications
-        """
+        """Get count of unread notifications."""
         return sum(1 for n in self._notifications if not n.read)
-    
+
     def mark_all_as_read(self) -> None:
         """Mark all notifications as read."""
         changed = False
@@ -94,18 +103,21 @@ class NotificationService(QObject):
             if not n.read:
                 n.read = True
                 changed = True
-        
         if changed:
-            self._emit_unread_count()
-    
+            self._notify_unread_count()
+
     def clear_all(self) -> None:
         """Clear all notifications."""
         self._notifications.clear()
-        self._emit_unread_count()
-    
-    def _emit_unread_count(self) -> None:
-        """Emit the unread count signal."""
-        self.unread_count_changed.emit(self.get_unread_count())
+        self._notify_unread_count()
+
+    def _notify_unread_count(self) -> None:
+        count = self.get_unread_count()
+        for cb in list(self._unread_subscribers):
+            try:
+                cb(count)
+            except Exception as e:
+                logger.error(f"Unread subscriber error: {e}", exc_info=True)
 
 
-__all__ = ['NotificationService', 'Notification', 'NotificationType']
+__all__ = ['NotificationService', 'Notification', 'NotificationType', 'Unsubscribe']

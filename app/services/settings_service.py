@@ -14,30 +14,49 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-from ..utils.paths import get_base_path
 from ..utils.imports import get_platforms_constants
+from ..host_config import get_host_config
 
-# Try to get NEW_UI_ENABLED_BY_DEFAULT from platform constants first, fallback to GUI constants
+# PERF: Single call to get_platforms_constants() for both values (was 2 separate calls).
 try:
     platform_constants = get_platforms_constants()
-    NEW_UI_ENABLED_BY_DEFAULT = getattr(platform_constants, 'NEW_UI_ENABLED_BY_DEFAULT', None)
-    if NEW_UI_ENABLED_BY_DEFAULT is None:
-        from ..constants import NEW_UI_ENABLED_BY_DEFAULT
-except (ImportError, AttributeError):
-    from ..constants import NEW_UI_ENABLED_BY_DEFAULT
-
-# Try to get HIDE_ADMIN_MENU_BY_DEFAULT from platform constants first, fallback to GUI constants
-try:
-    platform_constants = get_platforms_constants()
+    QT_NEW_UI_ENABLED_BY_DEFAULT = getattr(
+        platform_constants, 'QT_NEW_UI_ENABLED_BY_DEFAULT', None
+    )
     HIDE_ADMIN_MENU_BY_DEFAULT = getattr(platform_constants, 'HIDE_ADMIN_MENU_BY_DEFAULT', None)
+    if QT_NEW_UI_ENABLED_BY_DEFAULT is None:
+        from ..constants import QT_NEW_UI_ENABLED_BY_DEFAULT
     if HIDE_ADMIN_MENU_BY_DEFAULT is None:
         from ..constants import HIDE_ADMIN_MENU_BY_DEFAULT
 except (ImportError, AttributeError):
-    from ..constants import HIDE_ADMIN_MENU_BY_DEFAULT
+    from ..constants import QT_NEW_UI_ENABLED_BY_DEFAULT, HIDE_ADMIN_MENU_BY_DEFAULT
 
 logger = logging.getLogger(__name__)
 
 SETTINGS_SCHEMA_VERSION = 1
+
+KNOWN_SETTINGS_KEYS = {
+    "theme",
+    "disabled_plugins",
+    "enabled_plugins",
+    "logging_enabled",
+    "log_to_file",
+    "window_geometry",
+    "show_tooltips",
+    "hide_admin_menu",
+    "shortcuts_enabled",
+    "toast_notifications_enabled",
+    "toast_duration",
+    "new_ui_enabled",
+    "gui_version",
+    "settings_schema_version",
+    "plugin_settings",
+    "dev_mode",
+    "show_all_platforms",
+    "tab_order",
+    "last_active_tab",
+    "favorite_themes",
+}
 
 
 @dataclass
@@ -56,6 +75,7 @@ class AppSettings:
     """Application settings with persistence"""
     theme: str = ""  # Default theme (blank defaults to DEFAULT_THEME or auto-detection)
     disabled_plugins: List[str] = None  # User-disabled plugins (separate from disabled_by_default)
+    enabled_plugins: List[str] = None  # User-enabled plugins that are disabled_by_default
     logging_enabled: bool = True
     log_to_file: bool = True
     window_geometry: WindowGeometry = None
@@ -69,8 +89,8 @@ class AppSettings:
     toast_notifications_enabled: bool = True
     toast_duration: int = 3000
     # UI overhaul flag (enable new UI features)
-    # Default value comes from constants.py (NEW_UI_ENABLED_BY_DEFAULT)
-    new_ui_enabled: bool = NEW_UI_ENABLED_BY_DEFAULT
+    # Default value comes from constants.py (QT_NEW_UI_ENABLED_BY_DEFAULT)
+    new_ui_enabled: bool = QT_NEW_UI_ENABLED_BY_DEFAULT
     # GUI version (for future migration detection)
     gui_version: str = ""
     # Settings schema version (for migration detection)
@@ -89,6 +109,8 @@ class AppSettings:
         """Initialize default values for complex fields"""
         if self.disabled_plugins is None:
             self.disabled_plugins = []
+        if self.enabled_plugins is None:
+            self.enabled_plugins = []
         if self.window_geometry is None:
             self.window_geometry = WindowGeometry()
         if self.plugin_settings is None:
@@ -102,9 +124,20 @@ class AppSettings:
 class SettingsService:
     """Service for managing application settings with JSON persistence"""
     
-    def __init__(self) -> None:
-        self._settings_file = get_base_path() / "settings.json"
+    def __init__(
+        self,
+        settings_file: Optional[Path] = None,
+        host_config: Any = None,
+    ) -> None:
+        config = host_config if host_config is not None else get_host_config()
+        if settings_file is not None:
+            self._settings_file = Path(settings_file)
+        else:
+            self._settings_file = Path(config.settings_file())
         self._settings = AppSettings()
+        self._unknown_fields: Dict[str, Any] = {}
+        self._future_schema = False
+        self._plugin_override_keys_present = False
         self._load_settings()
     
     def _load_settings(self) -> None:
@@ -117,6 +150,26 @@ class SettingsService:
             with open(self._settings_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             data = self._apply_migrations(data)
+            self._unknown_fields = {
+                key: value
+                for key, value in data.items()
+                if key not in KNOWN_SETTINGS_KEYS
+            }
+            try:
+                file_schema = int(data.get("settings_schema_version", 0))
+            except (TypeError, ValueError):
+                file_schema = 0
+            if file_schema > SETTINGS_SCHEMA_VERSION:
+                self._future_schema = True
+                logger.error(
+                    "Settings file uses unsupported schema version %s "
+                    "(supported %s); saves are disabled so unknown fields "
+                    "are not rewritten.",
+                    file_schema,
+                    SETTINGS_SCHEMA_VERSION,
+                )
+            else:
+                self._future_schema = False
             
             # Load theme with backward compatibility for renamed defaults
             if 'theme' in data:
@@ -129,6 +182,11 @@ class SettingsService:
             # Load disabled plugins (user-disabled, not including disabled_by_default)
             if 'disabled_plugins' in data and isinstance(data['disabled_plugins'], list):
                 self._settings.disabled_plugins = data['disabled_plugins']
+                self._plugin_override_keys_present = True
+
+            if 'enabled_plugins' in data and isinstance(data['enabled_plugins'], list):
+                self._settings.enabled_plugins = data['enabled_plugins']
+                self._plugin_override_keys_present = True
             
             # Load logging settings
             if 'logging_enabled' in data:
@@ -204,50 +262,95 @@ class SettingsService:
             logger.error(f"Failed to load settings: {e}")
             # Keep default settings on error
     
+    def _settings_dict(self) -> Dict[str, Any]:
+        return {
+            'theme': self._settings.theme,
+            'disabled_plugins': self._settings.disabled_plugins,
+            'enabled_plugins': self._settings.enabled_plugins,
+            'logging_enabled': self._settings.logging_enabled,
+            'log_to_file': self._settings.log_to_file,
+            'window_geometry': {
+                'x': self._settings.window_geometry.x,
+                'y': self._settings.window_geometry.y,
+                'width': self._settings.window_geometry.width,
+                'height': self._settings.window_geometry.height,
+                'maximized': self._settings.window_geometry.maximized,
+                'fullscreen': self._settings.window_geometry.fullscreen
+            },
+            'show_tooltips': self._settings.show_tooltips,
+            'hide_admin_menu': self._settings.hide_admin_menu,
+            'shortcuts_enabled': self._settings.shortcuts_enabled,
+            'toast_notifications_enabled': self._settings.toast_notifications_enabled,
+            'toast_duration': self._settings.toast_duration,
+            'new_ui_enabled': self._settings.new_ui_enabled,
+            'gui_version': self._settings.gui_version,
+            'settings_schema_version': self._settings.settings_schema_version,
+            'plugin_settings': self._settings.plugin_settings.copy(),
+            'dev_mode': self._settings.dev_mode,
+            'show_all_platforms': self._settings.show_all_platforms,
+            'tab_order': self._settings.tab_order,
+            'last_active_tab': self._settings.last_active_tab,
+            'favorite_themes': self._settings.favorite_themes
+        }
+
+    def _merge_disk_snapshot(self, data: Dict[str, Any], disk: Dict[str, Any]) -> Dict[str, Any]:
+        """Preserve independent plugin_settings keys and unknown fields from disk."""
+        disk_ps = disk.get("plugin_settings")
+        if isinstance(disk_ps, dict):
+            merged = dict(disk_ps)
+            merged.update(data.get("plugin_settings") or {})
+            data["plugin_settings"] = merged
+        for key, value in disk.items():
+            if key not in KNOWN_SETTINGS_KEYS and key not in data:
+                data[key] = value
+        return data
+
     def _save_settings(self) -> None:
         """Save settings to JSON file"""
+        if self._future_schema:
+            logger.error(
+                "Refusing to save settings: file uses unsupported schema version %s",
+                self._settings.settings_schema_version,
+            )
+            return
         try:
-            # Convert settings to dict
-            data = {
-                'theme': self._settings.theme,
-                'disabled_plugins': self._settings.disabled_plugins,
-                'logging_enabled': self._settings.logging_enabled,
-                'log_to_file': self._settings.log_to_file,
-                'window_geometry': {
-                    'x': self._settings.window_geometry.x,
-                    'y': self._settings.window_geometry.y,
-                    'width': self._settings.window_geometry.width,
-                    'height': self._settings.window_geometry.height,
-                    'maximized': self._settings.window_geometry.maximized,
-                    'fullscreen': self._settings.window_geometry.fullscreen
-                },
-                'show_tooltips': self._settings.show_tooltips,
-                'hide_admin_menu': self._settings.hide_admin_menu,
-                'shortcuts_enabled': self._settings.shortcuts_enabled,
-                'toast_notifications_enabled': self._settings.toast_notifications_enabled,
-                'toast_duration': self._settings.toast_duration,
-                'new_ui_enabled': self._settings.new_ui_enabled,
-                'gui_version': self._settings.gui_version,
-                'settings_schema_version': self._settings.settings_schema_version,
-                'plugin_settings': self._settings.plugin_settings.copy(),
-                'dev_mode': self._settings.dev_mode,
-                'show_all_platforms': self._settings.show_all_platforms,
-                'tab_order': self._settings.tab_order,
-                'last_active_tab': self._settings.last_active_tab,
-                'favorite_themes': self._settings.favorite_themes
-            }
-            
-            # Write to file atomically
+            data = self._settings_dict()
+            data.update(self._unknown_fields)
+
             import os
             import tempfile
-            
+
             settings_dir = os.path.dirname(self._settings_file)
             if settings_dir:
                 os.makedirs(settings_dir, exist_ok=True)
-            
-            temp_fd, temp_path = tempfile.mkstemp(dir=settings_dir or ".", prefix=".settings_json_")
+
+            if self._settings_file.exists():
+                try:
+                    with open(self._settings_file, "r", encoding="utf-8") as fh:
+                        disk = json.load(fh)
+                    if isinstance(disk, dict):
+                        try:
+                            disk_schema = int(disk.get("settings_schema_version", 0))
+                        except (TypeError, ValueError):
+                            disk_schema = 0
+                        if disk_schema > SETTINGS_SCHEMA_VERSION:
+                            logger.error(
+                                "Refusing to overwrite settings: on-disk schema "
+                                "version %s is newer than supported %s",
+                                disk_schema,
+                                SETTINGS_SCHEMA_VERSION,
+                            )
+                            self._future_schema = True
+                            return
+                        data = self._merge_disk_snapshot(data, disk)
+                except Exception as exc:
+                    logger.debug("Could not merge on-disk settings: %s", exc)
+
+            temp_fd, temp_path = tempfile.mkstemp(
+                dir=settings_dir or ".", prefix=".settings_json_"
+            )
             try:
-                with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
+                with os.fdopen(temp_fd, "w", encoding="utf-8") as f:
                     json.dump(data, f, indent=2, ensure_ascii=False)
                 os.replace(temp_path, self._settings_file)
             except Exception as e:
@@ -257,7 +360,7 @@ class SettingsService:
                     except Exception:
                         pass
                 raise e
-            
+
             logger.debug(f"Settings saved to {self._settings_file}")
         except Exception as e:
             logger.error(f"Failed to save settings: {e}")
@@ -268,6 +371,8 @@ class SettingsService:
     
     def save_theme_preference(self, theme_name: str) -> None:
         """Save theme preference"""
+        if self._settings.theme == theme_name:
+            return
         self._settings.theme = theme_name
         self._save_settings()
         logger.info(f"Theme preference saved: {theme_name}")
@@ -277,14 +382,56 @@ class SettingsService:
         return self._settings.theme
     
     def save_disabled_plugins(self, plugin_names: List[str]) -> None:
-        """Save user-disabled plugin names (excludes disabled_by_default)"""
-        self._settings.disabled_plugins = plugin_names
+        """Save user-disabled plugin ids (excludes disabled_by_default)"""
+        names = list(plugin_names)
+        if self._settings.disabled_plugins == names and self._plugin_override_keys_present:
+            return
+        self._settings.disabled_plugins = names
+        self._plugin_override_keys_present = True
         self._save_settings()
         logger.debug(f"Disabled plugins saved: {plugin_names}")
     
     def get_disabled_plugins(self) -> List[str]:
-        """Get saved user-disabled plugin names"""
+        """Get saved user-disabled plugin ids"""
         return self._settings.disabled_plugins.copy()
+
+    def save_enabled_plugins(self, plugin_names: List[str]) -> None:
+        """Save user-enabled plugin ids (overrides for disabled_by_default)."""
+        names = list(plugin_names)
+        if self._settings.enabled_plugins == names and self._plugin_override_keys_present:
+            return
+        self._settings.enabled_plugins = names
+        self._plugin_override_keys_present = True
+        self._save_settings()
+        logger.debug(f"Enabled plugins saved: {plugin_names}")
+
+    def save_plugin_overrides(
+        self, disabled_plugins: List[str], enabled_plugins: List[str]
+    ) -> None:
+        """Persist both plugin override lists in one write."""
+        disabled = list(disabled_plugins)
+        enabled = list(enabled_plugins)
+        if (
+            self._settings.disabled_plugins == disabled
+            and self._settings.enabled_plugins == enabled
+            and self._plugin_override_keys_present
+        ):
+            return
+        self._settings.disabled_plugins = disabled
+        self._settings.enabled_plugins = enabled
+        self._plugin_override_keys_present = True
+        self._save_settings()
+        logger.debug(
+            "Plugin overrides saved: disabled=%s enabled=%s", disabled, enabled
+        )
+
+    def has_plugin_override_keys(self) -> bool:
+        """Return True if override lists were loaded from disk or saved this session."""
+        return self._plugin_override_keys_present
+
+    def get_enabled_plugins(self) -> List[str]:
+        """Get saved user-enabled plugin ids (overrides for disabled_by_default)."""
+        return self._settings.enabled_plugins.copy()
     
     def save_window_geometry(self, x: int, y: int, width: int, height: int) -> None:
         """Save window geometry (only saves size, not position to avoid off-screen issues)"""
@@ -321,21 +468,7 @@ class SettingsService:
             fullscreen
         )
     
-    def get_logging_enabled(self) -> bool:
-        """Get logging enabled setting"""
-        return self._settings.logging_enabled
-    
-    def get_log_to_file(self) -> bool:
-        """Get log to file setting"""
-        return self._settings.log_to_file
-    
     # UI/UX settings methods
-    def save_ui_preferences(self, show_tooltips: bool) -> None:
-        """Save UI preferences"""
-        self._settings.show_tooltips = show_tooltips
-        self._save_settings()
-        logger.debug(f"UI preferences saved: tooltips={show_tooltips}")
-    
     def get_show_tooltips(self) -> bool:
         """Get show tooltips setting"""
         return self._settings.show_tooltips
@@ -380,6 +513,8 @@ class SettingsService:
     # UI overhaul flag methods
     def save_new_ui_enabled(self, enabled: bool) -> None:
         """Save new UI enabled setting"""
+        if self._settings.new_ui_enabled == enabled:
+            return
         self._settings.new_ui_enabled = enabled
         self._save_settings()
         logger.debug(f"New UI enabled saved: {enabled}")
@@ -389,7 +524,10 @@ class SettingsService:
         return self._settings.new_ui_enabled
     
     def save_gui_version(self, version: str) -> None:
-        """Save GUI version to settings"""
+        """Save GUI version to settings when it actually changed."""
+        if self._settings.gui_version == version:
+            logger.debug(f"GUI version unchanged: {version}")
+            return
         self._settings.gui_version = version
         self._save_settings()
         logger.debug(f"GUI version saved: {version}")
@@ -413,17 +551,27 @@ class SettingsService:
     def save_plugin_settings(self, plugin_name: str, settings: Dict[str, Any]) -> None:
         """
         Save settings for a specific plugin.
+
+        Existing framework extension toggles are retained when the supplied
+        dictionary omits ``extension_states``.
         
         Args:
             plugin_name: Name of the plugin
             settings: Dictionary containing plugin settings
         """
-        self._settings.plugin_settings[plugin_name] = settings.copy()
+        saved = settings.copy()
+        # Configure widgets own their fields, not the framework extension toggles.
+        existing = self._settings.plugin_settings.get(plugin_name, {})
+        if 'extension_states' not in saved and 'extension_states' in existing:
+            saved['extension_states'] = existing['extension_states'].copy()
+        self._settings.plugin_settings[plugin_name] = saved
         self._save_settings()
         logger.debug(f"Plugin settings saved for '{plugin_name}'")
 
     def save_dev_mode(self, enabled: bool) -> None:
         """Persist dev mode flag."""
+        if self._settings.dev_mode == enabled:
+            return
         self._settings.dev_mode = enabled
         self._save_settings()
         logger.debug(f"Dev mode saved: {enabled}")
@@ -434,6 +582,8 @@ class SettingsService:
 
     def save_show_all_platforms(self, enabled: bool) -> None:
         """Persist show-all-platforms flag."""
+        if self._settings.show_all_platforms == enabled:
+            return
         self._settings.show_all_platforms = enabled
         self._save_settings()
         logger.debug(f"Show all platforms saved: {enabled}")
@@ -493,9 +643,10 @@ class SettingsService:
         Returns:
             True if enabled (default), False if explicitly disabled
         """
-        states = self.get_plugin_extension_states(plugin_name)
-        # Default to enabled if not explicitly set
-        return states.get(extension_type, True)
+        # PERF: Inline lookup to avoid the defensive .copy() in get_plugin_extension_states().
+        # This method is called on every tab activation and during plugin loading.
+        ps = self._settings.plugin_settings.get(plugin_name, {})
+        return ps.get('extension_states', {}).get(extension_type, True)
     
     def set_extension_enabled(self, plugin_name: str, extension_type: str, enabled: bool) -> None:
         """
@@ -517,8 +668,8 @@ class SettingsService:
         Save session state (tab order and active tab).
         
         Args:
-            tab_order: List of tab names in order
-            last_active_tab: Name of the currently active tab
+            tab_order: Visual tab order as ``plugin_id`` values
+            last_active_tab: ``plugin_id`` of the currently active tab
         """
         self._settings.tab_order = tab_order
         self._settings.last_active_tab = last_active_tab
@@ -526,11 +677,11 @@ class SettingsService:
         logger.debug(f"Session state saved: {len(tab_order)} tabs, active={last_active_tab}")
 
     def get_tab_order(self) -> List[str]:
-        """Get saved tab order."""
+        """Get saved tab order (``plugin_id`` values)."""
         return self._settings.tab_order.copy()
 
     def get_last_active_tab(self) -> Optional[str]:
-        """Get saved last active tab."""
+        """Get saved last active tab (``plugin_id``)."""
         return self._settings.last_active_tab
 
     def save_favorite_themes(self, favorite_themes: List[str]) -> None:
@@ -544,14 +695,8 @@ class SettingsService:
         return self._settings.favorite_themes.copy()
 
 
-def load_settings() -> SettingsService:
-    """Load and return a settings service instance"""
-    return SettingsService()
-
-
 __all__ = [
     'WindowGeometry',
     'AppSettings',
     'SettingsService',
-    'load_settings',
 ]

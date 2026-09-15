@@ -1,7 +1,7 @@
 """
 Plugin discovery system for Basic GUI Application.
 
-Supports both entry points (for installed plugins) and local plugins folder.
+Discovers plugins from local directories and importable packages.
 """
 from __future__ import annotations
 
@@ -10,34 +10,17 @@ import importlib
 import importlib.util
 import hashlib
 import logging
-import os
 import pkgutil
 import sys
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, List, Optional, Tuple, Type
 
 from .base import BaseTabPlugin
-from .registry import PluginRegistry
+from .identity import UNNAMED_PLUGIN, plugin_identity, plugin_ui_label
 from .sources import PluginSource
 
-# Try to import entry_points (Python 3.8+)
-try:
-    from importlib.metadata import entry_points
-    HAS_ENTRY_POINTS = True
-except ImportError:
-    try:
-        # importlib_metadata is a backport for older Python versions
-        from importlib_metadata import entry_points  # type: ignore
-        HAS_ENTRY_POINTS = True
-    except ImportError:
-        HAS_ENTRY_POINTS = False
-        entry_points = None
-
 logger = logging.getLogger(__name__)
-
-# Entry point group name for tab plugins
-ENTRY_POINT_GROUP = "gui_app_tabs"
 
 # Default plugins directory relative to the main script
 DEFAULT_PLUGINS_DIR = "plugins"
@@ -53,76 +36,14 @@ class PluginDiscovery:
             plugins_dir: Path to the plugins directory (defaults to "plugins")
         """
         self.plugins_dir = plugins_dir or DEFAULT_PLUGINS_DIR
-        self.discovered_plugins: List[Tuple[str, Type[Any], str]] = []  # (name, class, source)
-        
-    def discover_all_plugins(self, *, enable_entry_points: bool = False) -> List[Tuple[str, Type[Any], str]]:
-        """
-        Discover all plugins from both entry points and local directory.
-        
-        Returns:
-            List of tuples containing (plugin_name, plugin_class, source)
-        """
-        self.discovered_plugins.clear()
-        
-        # Discover entry point plugins
-        if enable_entry_points and HAS_ENTRY_POINTS:
-            entry_point_plugins = self.discover_entry_point_plugins()
-            self.discovered_plugins.extend(entry_point_plugins)
-            logger.info(f"Discovered {len(entry_point_plugins)} entry point plugins")
-        elif enable_entry_points and not HAS_ENTRY_POINTS:
-            logger.warning("Entry points not available, skipping entry point plugin discovery")
-        
-        # Discover local plugins
-        local_plugins = self.discover_local_plugins()
-        self.discovered_plugins.extend(local_plugins)
-        logger.info(f"Discovered {len(local_plugins)} local plugins")
-        
-        logger.info(f"Total plugins discovered: {len(self.discovered_plugins)}")
-        return self.discovered_plugins.copy()
-    
-    def discover_entry_point_plugins(self) -> List[Tuple[str, Type[Any], str]]:
-        """
-        Discover plugins via entry points.
-        
-        Returns:
-            List of tuples containing (plugin_name, plugin_class, "entry_point")
-        """
-        if not HAS_ENTRY_POINTS:
-            return []
-        
-        plugins: List[Tuple[str, Type[Any], str]] = []
-        
-        try:
-            # Get all entry points for our group
-            eps = entry_points(group=ENTRY_POINT_GROUP)
-            
-            for ep in eps:
-                try:
-                    logger.debug(f"Loading entry point plugin: {ep.name}")
-                    plugin_class = ep.load()
-                    
-                    # Validate that it's a valid plugin class
-                    if not self._is_valid_plugin_class(plugin_class):
-                        logger.warning(f"Entry point {ep.name} does not provide a valid plugin class")
-                        continue
-                    
-                    plugins.append((ep.name, plugin_class, "entry_point"))
-                    logger.info(f"Successfully loaded entry point plugin: {ep.name}")
-                    
-                except Exception as e:
-                    logger.error(f"Failed to load entry point plugin {ep.name}: {e}")
-                    
-        except Exception as e:
-            logger.error(f"Error discovering entry point plugins: {e}")
-        
-        return plugins
+        self.discovered_plugins: List[Tuple[str, Type[Any], str]] = []  # (plugin_id, class, source)
     
     def discover_local_plugins(self) -> List[Tuple[str, Type[Any], str]]:
         """
         Discover plugins in the local plugins directory.
         
         Returns:
-            List of tuples containing (plugin_name, plugin_class, "local")
+            List of tuples containing (plugin_id, plugin_class, source tag)
         """
         plugins = []
         plugins_path = Path(self.plugins_dir)
@@ -226,12 +147,12 @@ class PluginDiscovery:
         
         plugin_classes = self._find_plugin_classes_in_module(module)
         for plugin_class in plugin_classes:
-            plugin_name = getattr(plugin_class, 'plugin_name', None)
-            if not plugin_name or plugin_name == "Unnamed Plugin":
-                plugin_name = plugin_class.__name__
-                
-            plugins.append((plugin_name, plugin_class, f"local:{py_file.name}"))
-            logger.info(f"Successfully loaded local plugin: {plugin_name} from {py_file.name}")
+            plugin_id = plugin_identity(plugin_class)
+            plugins.append((plugin_id, plugin_class, f"local:{py_file.name}"))
+            logger.info(
+                f"Successfully loaded local plugin: {plugin_ui_label(plugin_class)} "
+                f"from {py_file.name}"
+            )
         
         return plugins
 
@@ -278,25 +199,13 @@ class PluginDiscovery:
                 return False
 
             # Must have a valid identifier (plugin_name)
-            has_plugin_name = bool(getattr(cls, 'plugin_name', None)) and getattr(cls, 'plugin_name') != "Unnamed Plugin"
+            has_plugin_name = bool(getattr(cls, 'plugin_name', None)) and getattr(cls, 'plugin_name') != UNNAMED_PLUGIN
             if not has_plugin_name:
                 return False
 
             # Must implement at least one extension surface.
-            # Keep this purely attribute-based so Protocol-based plugins can be discovered.
-            extension_markers = [
-                ('create_widget',),                 # TabExtension
-                ('get_menu_items',),                # MenuExtension
-                ('create_status_widget',),          # StatusExtension
-                ('get_toolbar_actions',),           # ToolbarExtension
-                ('on_application_start',),          # ServiceExtension
-                ('get_event_subscriptions',),       # EventSubscriberExtension
-                ('get_settings_widget',),           # SettingsExtension (registry further checks override)
-            ]
-            has_any_extension = any(
-                all(hasattr(cls, attr) and callable(getattr(cls, attr)) for attr in attrs)
-                for attrs in extension_markers
-            )
+            from .extensions import EXTENSION_POINTS
+            has_any_extension = any(ep.check_implements(cls) for ep in EXTENSION_POINTS if ep.name != "PluginProtocol")
             if not has_any_extension:
                 return False
             
@@ -326,45 +235,19 @@ class PluginDiscovery:
 
             for modinfo in pkgutil.iter_modules(pkg.__path__, prefix=f"{source.package}."):
                 try:
+                    # Reuse already-imported modules (core registration); reload only
+                    # after an explicit clear()/invalidate that dropped sys.modules entries.
                     module = importlib.import_module(modinfo.name)
                 except Exception as e:
                     logger.warning(f"Failed to import plugin module {modinfo.name}: {e}")
                     continue
 
                 for plugin_class in self._find_plugin_classes_in_module(module):
-                    plugin_name = getattr(plugin_class, 'plugin_name', None)
-                    if not plugin_name or plugin_name == "Unnamed Plugin":
-                        plugin_name = plugin_class.__name__
-                    discovered.append((plugin_name, plugin_class, f"package:{source.package}"))
+                    plugin_id = plugin_identity(plugin_class)
+                    discovered.append((plugin_id, plugin_class, f"package:{source.package}"))
 
         self.discovered_plugins.extend(discovered)
         return discovered.copy()
-
-    def get_plugin_info_summary(self) -> Dict[str, any]:
-        """
-        Get a summary of all discovered plugins.
-        
-        Returns:
-            Dictionary with plugin discovery summary
-        """
-        total_plugins = len(self.discovered_plugins)
-        entry_point_count = len([p for p in self.discovered_plugins if p[2] == "entry_point"])
-        local_count = len([p for p in self.discovered_plugins if p[2].startswith("local:")])
-        
-        return {
-            'total_discovered': total_plugins,
-            'entry_point_plugins': entry_point_count,
-            'local_plugins': local_count,
-            'plugins': [
-                {
-                    'name': name,
-                    'source': source,
-                    'class': cls.__name__,
-                    'module': cls.__module__
-                }
-                for name, cls, source in self.discovered_plugins
-            ]
-        }
 
 
 __all__ = ['PluginDiscovery']

@@ -1,8 +1,18 @@
-"""UI dialogs for the application."""
+"""Toolkit-neutral host dialog controllers.
 
-from .theme_dialog import ThemeDialog, ThemePreviewWidget
+These dialogs build content through :mod:`GUI.app.ui.definitions` and do not
+import a specific UI toolkit. Qt-only dialogs (for example Theme) remain under
+``GUI.app.ui.qt.dialogs``.
+"""
+
+from .about_dialog import AboutDialog, create_about_dialog
+from .log_viewer_dialog import LogViewerDialog, UIThreadLogHandler
 from .plugin_dialog import PluginManagementDialog
-from .log_viewer_dialog import LogViewerDialog
 
-__all__ = ['ThemeDialog', 'ThemePreviewWidget', 'PluginManagementDialog', 'LogViewerDialog']
-
+__all__ = [
+    "AboutDialog",
+    "create_about_dialog",
+    "LogViewerDialog",
+    "UIThreadLogHandler",
+    "PluginManagementDialog",
+]

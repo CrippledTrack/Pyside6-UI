@@ -8,7 +8,23 @@ such as menu item definitions and toolbar actions.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
+
+# Opaque tab/status/settings content understood by the active UI backend.
+TabContent = Any
+
+
+@dataclass(frozen=True)
+class TabCreateContext:
+    """Context passed when creating toolkit-neutral tab content.
+
+    Attributes:
+        backend_id: Active UI backend identifier (e.g. ``"qt"``).
+        parent: Backend-specific parent handle (may be ``None``).
+    """
+
+    backend_id: str
+    parent: Any = None
 
 
 @dataclass
@@ -70,6 +86,8 @@ class PluginEvent:
 
 
 __all__ = [
+    'TabContent',
+    'TabCreateContext',
     'MenuItemDefinition',
     'ToolbarAction',
     'PluginEvent',
