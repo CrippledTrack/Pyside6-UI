@@ -348,12 +348,17 @@ def _collect_hidden_imports() -> List[str]:
     follow them.  We therefore only list imports that are truly dynamic
     (e.g. loaded via importlib, env-var gated, or optional).
     """
+    # Both entry points import the app as a subpackage of the GUI directory
+    # (standalone run.py puts GUI's parent on sys.path before importing
+    # ``GUI.app.app``), so runtime importlib names keep this prefix even in
+    # standalone builds. Dropping it collects modules under names nothing
+    # imports, leaving the frozen app without style/dialog maps or themes.
+    prefix = f"{GUI_ROOT.name}."
     imports = [
         # The generated build-info module is imported via a try/except and
         # may not exist at analysis time.
-        "app._build_info_generated" if IS_STANDALONE else f"{GUI_ROOT.name}.app._build_info_generated",
+        f"{prefix}app._build_info_generated",
     ]
-    prefix = "" if IS_STANDALONE else f"{GUI_ROOT.name}."
     # definitions loads these by importlib; builtin themes are lazy factories.
     imports.append(f"{prefix}app.ui.qt.style_map")
     imports.append(f"{prefix}app.ui.qt.dialog_map")
