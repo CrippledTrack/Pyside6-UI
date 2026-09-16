@@ -1,6 +1,6 @@
 # Architecture
 
-High-level layout after the 6.0 Qt / abstractions separation. Breaking import and API notes live in the host repo changelog (`CHANGELOG_6.0.0.md`) when developing from a test bed.
+High-level layout after the 6.0 Qt / abstractions separation. Import, API, and release notes live in the host repo's per-version changelogs (`CHANGELOG_6.0.0.md`, `CHANGELOG_6.1.0.md`) when developing from a test bed.
 
 ## Layers
 
@@ -13,7 +13,7 @@ High-level layout after the 6.0 Qt / abstractions separation. Breaking import an
 | UI abstractions | Shell, presenters, plugin host, event loop | `app/ui/abstractions/` |
 | UI glue | Backend registry, wiring, definitions kit | `app/ui/registry.py`, `backend_wiring.py`, `definitions.py` |
 | Qt backend | All Qt code | `app/ui/qt/` |
-| Daemon | Linux privileged pipe daemon | `app/daemon/`, `app/utils/privileged.py` |
+| Daemon | Unix privileged pipe daemon (Linux/macOS) | `app/daemon/`, `app/utils/privileged.py`, `app/utils/elevation.py` |
 
 ## Rules of thumb
 

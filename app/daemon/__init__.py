@@ -1,4 +1,4 @@
-"""Linux privileged daemon for handling root operations."""
+"""Unix privileged daemon for handling root operations over stdin/stdout."""
 
 from __future__ import annotations
 

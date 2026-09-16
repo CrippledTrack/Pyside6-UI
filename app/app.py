@@ -19,7 +19,9 @@ from .utils.admin import set_dev_mode
 
 def run(argv: List[str]) -> int:
     """Application bootstrap."""
-    if ('--daemon' in argv or '--pipe' in argv) and platform.system().lower() == 'linux':
+    from .utils.elevation import supports_privileged_daemon
+
+    if ('--daemon' in argv or '--pipe' in argv) and supports_privileged_daemon():
         from .daemon.server import run_daemon
         return run_daemon(argv)
 

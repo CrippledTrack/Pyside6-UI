@@ -27,7 +27,7 @@ Constants merge the same way: host overrides → GUI defaults. `GUI_API_VERSION`
 
 ## Example
 
-See `plugins/example_plugin.py` in this package for a plugin that exercises the main extension interfaces and the backend-neutral `definitions` kit.
+See `plugins/example_plugin.py` in this package for a plugin that exercises the main extension interfaces and the backend-neutral `definitions` kit. `plugins/privileged_probe_plugin.py` runs `id` through the privileged pipe daemon (Linux/macOS).
 
 ## Backend-neutral tab content
 

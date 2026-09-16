@@ -7,10 +7,10 @@ administrator privileges when a tab requires elevated permissions.
 
 from __future__ import annotations
 
-import platform
 from typing import Optional
 
 from ..bindings import Qt, Signal, QLabel, QPushButton, QVBoxLayout, QWidget, QFont, QSizePolicy
+from ....utils.elevation import privileged_action_copy, supports_privileged_daemon
 
 
 class AdminRequiredPlaceholder(QWidget):
@@ -37,9 +37,7 @@ class AdminRequiredPlaceholder(QWidget):
         center_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         # Platform-specific messages
-        is_linux = platform.system().lower() == "linux"
-        
-        # Title/Heading
+        desc_text, btn_text = privileged_action_copy(supports_privileged_daemon())
         self._title_label = QLabel(f"{tab_name} Requires Administrator Privileges")
         self._title_label.setObjectName("adminTitle")
         self._title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -49,21 +47,6 @@ class AdminRequiredPlaceholder(QWidget):
         title_font.setWeight(QFont.Weight.Medium)
         self._title_label.setFont(title_font)
         center_layout.addWidget(self._title_label)
-        
-        if is_linux:
-            desc_text = (
-                "The privileged daemon is not currently running.\n"
-                "Some features requiring root access will be disabled.\n\n"
-                "Click the button below to start the daemon and "
-                "grant administrator privileges when prompted."
-            )
-            btn_text = "Start Privileged Daemon"
-        else:
-            desc_text = (
-                "This tab requires administrator privileges to run.\n"
-                "Please restart the application with elevated privileges."
-            )
-            btn_text = "Restart as Administrator"
             
         # Description
         self._desc_label = QLabel(desc_text)

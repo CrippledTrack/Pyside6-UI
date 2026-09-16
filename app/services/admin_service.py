@@ -20,8 +20,8 @@ class AdminService:
         if cls is AdminService:
             if CURRENT_PLATFORM == "windows":
                 return super().__new__(WindowsAdminService)
-            elif CURRENT_PLATFORM == "linux":
-                return super().__new__(LinuxAdminService)
+            elif CURRENT_PLATFORM in ("linux", "darwin"):
+                return super().__new__(UnixAdminService)
             else:
                 return super().__new__(FallbackAdminService)
         return super().__new__(cls)
@@ -127,20 +127,25 @@ class WindowsAdminService(AdminService):
         return not self.is_admin()
 
 
-class LinuxAdminService(AdminService):
+class UnixAdminService(AdminService):
+    """Admin service for Linux/macOS: GUI stays unprivileged, pipe daemon is root."""
+
     def __init__(self, daemon_service: Optional[Any] = None):
         self._sudo_status: Optional[Dict[str, Any]] = None
         super().__init__(daemon_service)
 
     def _check_admin_status(self) -> None:
-        from ..utils.elevation_linux import get_sudo_status
-        self._sudo_status = get_sudo_status()
-        self._is_admin = self._sudo_status["is_admin"]
+        from ..utils.elevation import get_sudo_status
+        self._sudo_status = get_sudo_status() or {}
+        self._is_admin = bool(self._sudo_status.get("is_admin"))
         if self._is_admin:
             logger.info("Application running with admin/root privileges")
         else:
-            logger.info(f"Application running as user '{self._sudo_status['current_user']}'")
-            if self._sudo_status["sudo_available"]:
+            logger.info(
+                "Application running as user '%s'",
+                self._sudo_status.get("current_user", "unknown"),
+            )
+            if self._sudo_status.get("sudo_available"):
                 logger.info("Sudo is available - operations requiring root will prompt for password")
             else:
                 logger.warning("Sudo not available - some operations may not work")
@@ -209,9 +214,13 @@ class FallbackAdminService(AdminService):
         return not self.is_admin()
 
 
+LinuxAdminService = UnixAdminService
+
+
 __all__ = [
     'AdminService',
     'WindowsAdminService',
+    'UnixAdminService',
     'LinuxAdminService',
     'FallbackAdminService',
 ]

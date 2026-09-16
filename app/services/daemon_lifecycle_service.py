@@ -4,8 +4,9 @@ Daemon lifecycle management for privileged operations.
 from __future__ import annotations
 
 import logging
-import platform
 from typing import Any, Optional
+
+from ..utils.elevation import start_daemon, stop_daemon, supports_privileged_daemon
 
 
 logger = logging.getLogger(__name__)
@@ -15,7 +16,7 @@ class DaemonLifecycleService:
     """Start and stop the privileged daemon when required."""
 
     def start_if_required(self, container: Any) -> Optional[Any]:
-        if platform.system().lower() != "linux":
+        if not supports_privileged_daemon():
             return None
 
         # Check if running directly as root
@@ -36,7 +37,6 @@ class DaemonLifecycleService:
         from ..utils.imports import get_platforms_constants
         require_admin_by_default = getattr(get_platforms_constants(), 'REQUIRE_ADMIN_BY_DEFAULT', False)
         from ..daemon import set_daemon_client
-        from ..utils.elevation_linux import start_daemon
         if not require_admin_by_default:
             logger.info("REQUIRE_ADMIN_BY_DEFAULT is False - skipping privileged daemon startup")
             return None
@@ -55,7 +55,7 @@ class DaemonLifecycleService:
         return daemon_client
 
     def shutdown(self, daemon_client: Optional[Any] = None) -> None:
-        if platform.system().lower() != "linux":
+        if not supports_privileged_daemon():
             return
 
         if daemon_client is None:
@@ -69,7 +69,6 @@ class DaemonLifecycleService:
         if not daemon_client:
             # Try to stop daemon process if it was spawned but client is not available/connected
             try:
-                from ..utils.elevation_linux import stop_daemon
                 stop_daemon()
             except Exception:
                 pass
@@ -79,8 +78,6 @@ class DaemonLifecycleService:
         if isinstance(daemon_client, LocalDaemonClient):
             logger.info("Local root mode active, no external daemon to stop")
             return
-
-        from ..utils.elevation_linux import stop_daemon
 
         logger.info("Stopping privileged daemon...")
         try:

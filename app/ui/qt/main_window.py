@@ -66,6 +66,7 @@ VERSION_NAME = constants.VERSION_NAME
 
 # Import centralized platform constant
 from ...constants import CURRENT_PLATFORM
+from ...utils.elevation import supports_privileged_daemon
 
 
 logger = logging.getLogger(__name__)
@@ -121,8 +122,8 @@ class MainWindow(QMainWindow):
         self.daemon_service = container.get(IDaemonService)
         self.plugin_service = container.get(PluginService)
         
-        # Register daemon refresh callback on Linux
-        if CURRENT_PLATFORM == "linux":
+        # Register daemon refresh callback on Linux/macOS
+        if supports_privileged_daemon():
             self.daemon_service.register_refresh_callback(self._refresh_admin_tabs)
         
         # Pre-declare attributes that are created during deferred init,
@@ -545,12 +546,12 @@ class MainWindow(QMainWindow):
         """Restart the application with administrator/root privileges.
         
         On Windows: Restarts the entire application as administrator.
-        On Linux: Starts the privileged daemon (GUI continues running as normal user).
+        On Linux/macOS: Starts the privileged daemon (GUI continues running as a normal user).
         """
         try:
             success, error_msg = self.admin_service.restart_as_admin()
             
-            if CURRENT_PLATFORM == "linux":
+            if supports_privileged_daemon():
                 if success:
                     self.toast_manager.show_success("Privileged daemon started successfully")
                     if self.menu_controller:
@@ -558,7 +559,7 @@ class MainWindow(QMainWindow):
                 else:
                     detail = error_msg or (
                         "Could not start the privileged daemon. "
-                        "Approve the pkexec/sudo prompt and check logs."
+                        "Approve the elevation prompt and check logs."
                     )
                     self.toast_manager.show_error(f"Failed to start daemon: {detail}")
             elif CURRENT_PLATFORM != "windows":
@@ -568,7 +569,7 @@ class MainWindow(QMainWindow):
                     )
         except Exception as e:
             logger.error(f"Failed to restart as administrator: {e}")
-            if CURRENT_PLATFORM == "linux":
+            if supports_privileged_daemon():
                 self.toast_manager.show_error(f"Failed to start privileged daemon: {e}")
             else:
                 self.toast_manager.show_error(f"Failed to restart as administrator: {e}")
@@ -587,7 +588,7 @@ class MainWindow(QMainWindow):
         # Refresh admin tabs through tab controller
         # The tab controller will handle reloading tabs when they are activated
         # We just need to trigger a refresh of the current tab if it's an admin placeholder
-        if CURRENT_PLATFORM == "linux" and self.daemon_service.is_available():
+        if supports_privileged_daemon() and self.daemon_service.is_available():
             current_index = self.tab_widget.currentIndex()
             if current_index >= 0:
                 # Trigger tab change to reload if needed

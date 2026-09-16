@@ -13,6 +13,7 @@ from typing import Optional, Callable, TYPE_CHECKING, Any
 from ..bindings import QObject, Signal, QAction, QMenuBar, QMenu, QWidget
 
 from ....constants import CURRENT_PLATFORM
+from ....utils.elevation import supports_privileged_daemon
 
 from ....services.interfaces import IAdminService, IDaemonService, ISettingsService
 
@@ -119,7 +120,7 @@ class MenuBarController(QObject):
             
         Note:
             On Windows: Shows when not running as administrator.
-            On Linux: Always shows to allow starting the daemon.
+            On Linux/macOS: Always shows to allow starting the daemon.
         """
         # Allow hiding the Admin menu/button (e.g., kiosk/demo mode)
         force_show_for_dev = False
@@ -144,8 +145,8 @@ class MenuBarController(QObject):
                 should_show = not self.admin_service.is_admin()
             else:
                 should_show = True
-        elif CURRENT_PLATFORM == "linux":
-            # On Linux, always show the menu to allow starting the daemon
+        elif supports_privileged_daemon():
+            # Linux/macOS: always show the menu to allow starting the daemon
             should_show = True
 
         if force_show_for_dev:
@@ -156,7 +157,7 @@ class MenuBarController(QObject):
             self.menu_bar.addMenu(admin_menu)
             
             # Platform-specific menu text
-            if CURRENT_PLATFORM == "linux":
+            if supports_privileged_daemon():
                 # Check if daemon is already running
                 is_running = self.daemon_service and self.daemon_service.is_available()
                 
@@ -297,7 +298,7 @@ class MenuBarController(QObject):
         
         if self.restart_admin_action:
             # Update tooltip based on platform
-            if CURRENT_PLATFORM == "linux":
+            if supports_privileged_daemon():
                 self.restart_admin_action.setToolTip(
                     "Start the privileged daemon for root operations"
                 )
@@ -329,7 +330,7 @@ class MenuBarController(QObject):
         if not self.restart_admin_action:
             return
         
-        if CURRENT_PLATFORM == "linux":
+        if supports_privileged_daemon():
             if self.daemon_service and self.daemon_service.is_available():
                 self.restart_admin_action.setText("Daemon Running")
                 self.restart_admin_action.setEnabled(False)

@@ -373,7 +373,7 @@ class DaemonClient:
         """Restart the pipe daemon after a crash or disconnection.
 
         Kills the old process (if still alive), spawns a new daemon via
-        elevation_linux.spawn_daemon_process(), and re-establishes the reader loop.
+        elevation.spawn_daemon_process(), and re-establishes the reader loop.
         """
         logger.info("Attempting to restart pipe daemon...")
 
@@ -389,7 +389,7 @@ class DaemonClient:
 
         # Clear elevation global so spawn_daemon_process() will spawn a fresh process
         try:
-            from ..utils.elevation_linux import clear_daemon_process
+            from ..utils.elevation import clear_daemon_process
             clear_daemon_process()
         except Exception as e:
             logger.debug(f"clear_daemon_process failed: {e}")
@@ -398,7 +398,7 @@ class DaemonClient:
             logger.warning("Previous pipe reader did not exit before restart")
 
         try:
-            from ..utils.elevation_linux import spawn_daemon_process
+            from ..utils.elevation import spawn_daemon_process
             new_process = spawn_daemon_process()
             if new_process is None:
                 logger.error("Failed to restart pipe daemon: spawn_daemon_process returned None")
@@ -406,7 +406,7 @@ class DaemonClient:
 
             self._process = new_process
             try:
-                from ..utils.elevation_linux import set_daemon_process
+                from ..utils.elevation import set_daemon_process
                 set_daemon_process(self._process)
             except Exception as e:
                 logger.debug(f"set_daemon_process failed: {e}")

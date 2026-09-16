@@ -9,8 +9,9 @@ import subprocess
 import threading
 import signal
 import select
+import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from .protocol import (
     OPERATION_RUN_COMMAND,
     OPERATION_RUN_COMMAND_STREAM,
@@ -31,10 +32,72 @@ MAX_WORKERS = 8
 SHUTDOWN_REQUESTED = threading.Event()
 
 
+def parse_daemon_argv(argv: List[str]) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+    """Parse ``--uid``, ``--gid``, and ``--parent-pid`` from daemon argv."""
+
+    def _flag(name: str) -> Optional[int]:
+        if name not in argv:
+            return None
+        idx = argv.index(name)
+        if idx + 1 >= len(argv):
+            logger.warning("%s argument missing value", name)
+            return None
+        try:
+            return int(argv[idx + 1])
+        except ValueError as e:
+            logger.warning("Failed to parse %s from command line: %s", name, e)
+            return None
+
+    uid = _flag("--uid")
+    gid = _flag("--gid")
+    parent_pid = _flag("--parent-pid")
+    if uid is None:
+        logger.warning("--uid argument not found in daemon command line")
+    return uid, gid, parent_pid
+
+
+def parent_process_gone(pid: int) -> bool:
+    """Return True when *pid* is missing or cannot be signaled."""
+    if pid is None or pid <= 1:
+        return True
+    try:
+        os.kill(pid, 0)
+        return False
+    except OSError:
+        return True
+
+
+def kqueue_wait_for_exit(pid: int) -> None:
+    """Block until *pid* exits using kqueue NOTE_EXIT (Darwin).
+
+    Raises if kqueue is unavailable or the kevent cannot be registered.
+    Callers should fall back to polling. Times out in 1s slices so shutdown
+    can interrupt the wait.
+    """
+    if not hasattr(select, "kqueue"):
+        raise RuntimeError("kqueue is not available")
+    kq = select.kqueue()
+    try:
+        ke = select.kevent(
+            pid,
+            filter=select.KQ_FILTER_PROC,
+            flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT,
+            fflags=select.KQ_NOTE_EXIT,
+        )
+        kq.control([ke], 0, 0)
+        while not SHUTDOWN_REQUESTED.is_set():
+            events = kq.control(None, 1, 1.0)
+            if events:
+                return
+    finally:
+        kq.close()
+
+
+
 class PrivilegedDaemon:
     """Daemon server for executing privileged operations over stdin/stdout."""
 
-    def __init__(self, max_workers: int = MAX_WORKERS):
+    def __init__(self, max_workers: int = MAX_WORKERS, parent_pid: Optional[int] = None):
         self.allowed_uid = self._get_original_uid()
         self.allowed_gid = self._get_original_gid()
         self.executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix='daemon-worker')
@@ -44,6 +107,7 @@ class PrivilegedDaemon:
         self._pipe_stdout = None
         self._stdout_lock = threading.Lock()
         self._stopping = False
+        self._parent_pid = parent_pid
 
     def _get_original_uid(self) -> Optional[int]:
         """Get the original user's UID from environment variables."""
@@ -278,12 +342,19 @@ class PrivilegedDaemon:
                 logger.error("Failed to send error response", exc_info=True)
 
     def _install_parent_death_signal(self) -> None:
-        """Register PR_SET_PDEATHSIG and exit if the parent is already gone.
+        """Exit when the GUI parent dies.
 
-        Elevation may already set PDEATHSIG via preexec_fn; calling again here
-        covers in-process / atypical spawn paths and closes the fork/exec race
-        where the parent dies before prctl runs.
+        Linux uses prctl(PR_SET_PDEATHSIG). macOS (and a Linux fallback when
+        ``--parent-pid`` is passed) watches that pid with kqueue or polling,
+        because ``sudo`` is the daemon's immediate parent rather than the GUI.
         """
+        if sys.platform == "linux":
+            self._install_linux_pdeathsig()
+        if self._parent_pid:
+            self._watch_parent_pid(self._parent_pid)
+
+    def _install_linux_pdeathsig(self) -> None:
+        """Register PR_SET_PDEATHSIG and exit if the parent is already gone."""
         try:
             import ctypes
 
@@ -297,12 +368,39 @@ class PrivilegedDaemon:
             else:
                 logger.info("Registered PR_SET_PDEATHSIG=SIGTERM")
 
-            # If the parent already died between fork and now, exit immediately.
             if os.getppid() == 1:
                 logger.error("Parent process already gone (ppid=1); exiting")
                 sys.exit(1)
         except Exception as e:
             logger.warning(f"Could not install parent death signal: {e}")
+
+    def _watch_parent_pid(self, parent_pid: int) -> None:
+        """Shut down when *parent_pid* exits (kqueue on Darwin, else poll)."""
+        if parent_process_gone(parent_pid):
+            logger.error("GUI parent %s already gone; exiting", parent_pid)
+            sys.exit(1)
+
+        def _watch() -> None:
+            if sys.platform == "darwin":
+                try:
+                    kqueue_wait_for_exit(parent_pid)
+                    if not SHUTDOWN_REQUESTED.is_set():
+                        logger.info("GUI parent %s exited; shutting down", parent_pid)
+                        os.kill(os.getpid(), signal.SIGTERM)
+                    return
+                except Exception as e:
+                    logger.warning("kqueue parent watch failed (%s); polling", e)
+            while not SHUTDOWN_REQUESTED.is_set():
+                if parent_process_gone(parent_pid):
+                    logger.info("GUI parent %s gone; shutting down", parent_pid)
+                    try:
+                        os.kill(os.getpid(), signal.SIGTERM)
+                    except OSError:
+                        SHUTDOWN_REQUESTED.set()
+                    return
+                time.sleep(1.0)
+
+        threading.Thread(target=_watch, name="ParentDeathWatch", daemon=True).start()
 
     def start(self):
         """Start the daemon in stdin/stdout pipe mode."""
@@ -397,27 +495,13 @@ def run_daemon(argv: Optional[List[str]] = None) -> int:
     if argv is None:
         argv = sys.argv
 
-    uid = None
-    gid = None
-    if '--uid' in argv:
-        idx = argv.index('--uid')
-        if idx + 1 < len(argv):
-            try:
-                uid = int(argv[idx + 1])
-                logger.info(f"Parsed UID from command line: {uid}")
-            except (ValueError, IndexError) as e:
-                logger.warning(f"Failed to parse UID from command line: {e}")
-    else:
-        logger.warning("--uid argument not found in daemon command line")
-
-    if '--gid' in argv:
-        idx = argv.index('--gid')
-        if idx + 1 < len(argv):
-            try:
-                gid = int(argv[idx + 1])
-                logger.info(f"Parsed GID from command line: {gid}")
-            except (ValueError, IndexError) as e:
-                logger.warning(f"Failed to parse GID from command line: {e}")
+    uid, gid, parent_pid = parse_daemon_argv(argv)
+    if uid is not None:
+        logger.info("Parsed UID from command line: %s", uid)
+    if gid is not None:
+        logger.info("Parsed GID from command line: %s", gid)
+    if parent_pid is not None:
+        logger.info("Parsed parent PID from command line: %s", parent_pid)
 
     if uid is not None and 'PKEXEC_UID' not in os.environ and 'SUDO_UID' not in os.environ:
         os.environ['PKEXEC_UID'] = str(uid)
@@ -427,8 +511,12 @@ def run_daemon(argv: Optional[List[str]] = None) -> int:
         os.environ['SUDO_GID'] = str(gid)
 
     try:
-        print(f"[Daemon] Initializing daemon with UID: {uid}, GID: {gid}", file=sys.stderr, flush=True)
-        daemon = PrivilegedDaemon()
+        print(
+            f"[Daemon] Initializing daemon with UID: {uid}, GID: {gid}, parent: {parent_pid}",
+            file=sys.stderr,
+            flush=True,
+        )
+        daemon = PrivilegedDaemon(parent_pid=parent_pid)
         if uid is not None:
             daemon.allowed_uid = uid
             print(f"[Daemon] Set allowed_uid to {uid}", file=sys.stderr, flush=True)
@@ -450,4 +538,10 @@ def run_daemon(argv: Optional[List[str]] = None) -> int:
         return 1
 
 
-__all__ = ['PrivilegedDaemon', 'run_daemon']
+__all__ = [
+    'PrivilegedDaemon',
+    'run_daemon',
+    'parse_daemon_argv',
+    'parent_process_gone',
+    'kqueue_wait_for_exit',
+]

@@ -26,7 +26,7 @@ class IAdminService(Protocol):
         ...
 
     def get_sudo_status(self) -> Optional[Dict[str, Any]]:
-        """Get Linux sudo status information."""
+        """Get Unix sudo/pkexec status information (Linux and macOS)."""
         ...
 
     def prompt_for_admin_operation(self, operation_description: str) -> bool:

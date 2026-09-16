@@ -10,7 +10,7 @@ Host applications supply branding and plugins via an optional `app_plugins/` (or
 - **Plugin system** — protocol-based extension points (tabs, menus, toolbar, status, settings, …)
 - **UI abstractions** — toolkit-neutral shell / presenter contracts
 - **Qt backend** — full implementation under `GUI.app.ui.qt/` (classic and modern themes)
-- **Privileged daemon** (Linux) — pipe-based elevated command runner
+- **Privileged daemon** (Linux/macOS) — pipe-based elevated command runner
 
 API version: see `GUI_API_VERSION` in `app/constants.py`.
 

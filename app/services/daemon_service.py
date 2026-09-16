@@ -1,39 +1,33 @@
-"""Daemon management service for Linux privileged operations.
+"""Daemon management service for privileged pipe operations.
 
-This module provides a centralized service for managing the privileged pipe
-daemon on Linux systems, including starting, checking status, and refreshing
-admin-required UI components when the daemon becomes available.
+Starts, checks, and refreshes UI when the Unix privileged daemon (Linux or
+macOS) becomes available.
 """
 
 from __future__ import annotations
 
 import logging
-import platform
 from typing import Callable, Optional
+
+from ..utils.elevation import start_daemon, supports_privileged_daemon
 
 logger = logging.getLogger(__name__)
 
-# Only import Linux-specific modules on Linux
-if platform.system().lower() == "linux":
-    from ..daemon import is_daemon_available, set_daemon_client
-    from ..utils.elevation_linux import start_daemon
-else:
-    def start_daemon(*args, **kwargs) -> Optional[object]:
-        return None
-
 
 class DaemonService:
-    """Service for managing the privileged pipe daemon on Linux systems."""
+    """Service for managing the privileged pipe daemon on Linux and macOS."""
 
     def __init__(self) -> None:
         self._refresh_callbacks: list[Callable[[], None]] = []
-        self._is_linux = platform.system().lower() == "linux"
+        self._supports_daemon = supports_privileged_daemon()
 
     def is_available(self) -> bool:
         """Check if the daemon is available and connected."""
-        if not self._is_linux:
+        if not self._supports_daemon:
             return False
         try:
+            from ..daemon import is_daemon_available
+
             return is_daemon_available()
         except Exception as e:
             logger.debug(f"Error checking daemon availability: {e}")
@@ -45,14 +39,16 @@ class DaemonService:
         Returns:
             Tuple of (success, error_message)
         """
-        if not self._is_linux:
-            return False, "Daemon is only available on Linux"
+        if not self._supports_daemon:
+            return False, "Daemon is only available on Linux and macOS"
 
         if self.is_available():
             return True, None
 
         logger.info("Starting privileged daemon...")
         try:
+            from ..daemon import set_daemon_client
+
             client = start_daemon()
             if client:
                 set_daemon_client(client)
@@ -61,7 +57,7 @@ class DaemonService:
                 return True, None
             return False, (
                 "Failed to start the privileged daemon. "
-                "Ensure pkexec or sudo is installed, approve the elevation prompt, "
+                "Approve the pkexec, sudo, or macOS password prompt, "
                 "and check the application log for details."
             )
         except Exception as e:
@@ -90,4 +86,4 @@ class DaemonService:
                 logger.error(f"Error in refresh callback: {e}", exc_info=True)
 
 
-__all__ = ['DaemonService']
+__all__ = ["DaemonService"]

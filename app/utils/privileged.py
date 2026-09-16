@@ -1,13 +1,14 @@
 """Helper module for running privileged commands via daemon.
 
 This module provides functions to execute commands, read files, and write files
-with root privileges using the privileged daemon on Linux systems.
+with root privileges using the privileged daemon on Linux and macOS.
 """
 
 from __future__ import annotations
 
 import logging
 import subprocess
+import sys
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Union
 
@@ -266,6 +267,18 @@ def read_privileged_file(file_path: str) -> str:
         raise
 
 
+def _stat_ownership_command(file_path: str) -> list[str]:
+    """Return a ``stat`` argv that prints ``mode uid gid`` on GNU and BSD."""
+    if sys.platform == "darwin":
+        return ["stat", "-f", "%OLp %u %g", file_path]
+    return ["stat", "-c", "%a %u %g", file_path]
+
+
+def _default_chown_spec() -> str:
+    """Numeric root:root so Linux and macOS (root:wheel) both accept it."""
+    return "0:0"
+
+
 def write_privileged_file(file_path: str, content: str) -> bool:
     """Write content to a file with root privileges via daemon.
     
@@ -279,7 +292,6 @@ def write_privileged_file(file_path: str, content: str) -> bool:
     try:
         import tempfile
         import os
-        target_dir = os.path.dirname(file_path) or "."
 
         # Determine existing permissions/ownership if the file exists
         mode = "644"
@@ -287,7 +299,7 @@ def write_privileged_file(file_path: str, content: str) -> bool:
         group = None
         try:
             stat_result = run_privileged_command(
-                ["stat", "-c", "%a %u %g", file_path],
+                _stat_ownership_command(file_path),
                 timeout=10
             )
             if stat_result.returncode == 0 and stat_result.stdout:
@@ -312,13 +324,16 @@ def write_privileged_file(file_path: str, content: str) -> bool:
             if result.returncode != 0:
                 raise IOError(f"Failed to write {file_path}: {result.stderr}")
 
-            # Restore permissions and ownership if we had them, otherwise default to root:root for new files
+            # Restore permissions and ownership if we had them, otherwise default to 0:0
             run_privileged_command(["chmod", mode, file_path], timeout=10)
             if owner is not None and group is not None:
                 run_privileged_command(["chown", f"{owner}:{group}", file_path], timeout=10)
             else:
                 try:
-                    run_privileged_command(["chown", "root:root", file_path], timeout=10)
+                    run_privileged_command(
+                        ["chown", _default_chown_spec(), file_path],
+                        timeout=10,
+                    )
                 except Exception:
                     pass
 
