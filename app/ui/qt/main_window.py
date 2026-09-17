@@ -179,6 +179,12 @@ class MainWindow(QMainWindow):
         self.tab_widget = QTabWidget()
         self.tab_widget.hide()
         self.tab_widget.setMovable(True)
+        # Don't take the macOS style's tab-bar defaults: without scroll arrows the
+        # bar's minimum width covers every tab and widens the window as tabs load,
+        # and ElideRight squeezes every label to an ellipsis once the bar overflows.
+        # Scroll full-width tabs instead, as Fusion does.
+        self.tab_widget.tabBar().setUsesScrollButtons(True)
+        self.tab_widget.tabBar().setElideMode(Qt.TextElideMode.ElideNone)
         self.tab_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         if getattr(constants, "SINGLE_PLUGIN_MODE", False):
             self.tab_widget.tabBar().hide()

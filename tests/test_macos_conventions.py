@@ -12,6 +12,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from GUI.app.host_config import HostConfig, set_host_config
 from GUI.app.ui.qt.controllers.shortcut_manager import default_shortcut_sequences
+from GUI.app.ui.qt.lifecycle import resolve_style_name
 from GUI.app.ui.qt.widgets.notification_center import uses_manual_popup_shadow
 from GUI.app.utils.dev_mode_utils import linux_mocks
 from GUI.plugin_system.registry import PluginRegistry
@@ -195,6 +196,110 @@ def test_popup_shadow_is_left_to_macos() -> None:
     assert uses_manual_popup_shadow("darwin") is False
     assert uses_manual_popup_shadow("windows") is False
     assert uses_manual_popup_shadow("linux") is True
+
+
+def test_macos_keeps_its_native_style() -> None:
+    """Forcing Fusion on Darwin drew non-native controls everywhere."""
+    assert resolve_style_name("darwin", requested="") is None
+    assert resolve_style_name("windows", requested="") == "Fusion"
+    assert resolve_style_name("linux", requested="") is None
+
+
+def test_style_override_wins_on_any_platform() -> None:
+    assert resolve_style_name("darwin", requested="Fusion") == "Fusion"
+    assert resolve_style_name("windows", requested=" macOS ") == "macOS"
+
+
+def test_style_override_reads_the_environment(monkeypatch) -> None:
+    monkeypatch.setenv("GUI_QT_STYLE", "Fusion")
+    assert resolve_style_name("darwin") == "Fusion"
+
+    monkeypatch.delenv("GUI_QT_STYLE")
+    assert resolve_style_name("darwin") is None
+
+
+def test_tab_bar_scrolls_instead_of_widening_the_window() -> None:
+    """The macOS style prefers no arrows, so minimumSizeHint covers every tab."""
+    from GUI.app.ui.qt.bindings import Qt, QApplication, QWidget
+    from GUI.app.ui.qt.style_map import create_tabs
+
+    if QApplication.instance() is None:
+        QApplication([])
+
+    tabs = create_tabs()
+    assert tabs.tabBar().usesScrollButtons() is True
+    assert tabs.tabBar().elideMode() == Qt.TextElideMode.ElideNone
+
+    def grow_to(tab_count: int) -> int:
+        """Add tabs up to *tab_count*, then report the minimum width."""
+        while tabs.count() < tab_count:
+            tabs.addTab(QWidget(), f"Some Plugin Tab {tabs.count()}")
+        return tabs.minimumSizeHint().width()
+
+    with_two = grow_to(2)
+    with_eight = grow_to(8)
+    assert with_eight == with_two
+
+    # Same widget with arrows off: this is the growth that was reported.
+    tabs.tabBar().setUsesScrollButtons(False)
+    without_arrows = tabs.minimumSizeHint().width()
+    assert grow_to(16) > without_arrows
+
+
+def test_overflowing_tabs_keep_their_full_labels() -> None:
+    """ElideRight, the macOS default, squeezes every tab below its size hint."""
+    from GUI.app.ui.qt.bindings import Qt, QApplication, QWidget
+    from GUI.app.ui.qt.style_map import create_tabs
+
+    if QApplication.instance() is None:
+        QApplication([])
+
+    tabs = create_tabs()
+    tabs.resize(400, 300)
+    for index in range(9):
+        tabs.addTab(QWidget(), f"Some Plugin Tab {index}")
+    tabs.show()
+    try:
+        bar = tabs.tabBar()
+        assert sum(bar.tabSizeHint(i).width() for i in range(bar.count())) > 400, (
+            "tab bar must overflow for this to test anything"
+        )
+        assert all(bar.tabRect(i).width() == bar.tabSizeHint(i).width() for i in range(bar.count()))
+
+        bar.setElideMode(Qt.TextElideMode.ElideRight)
+        assert any(bar.tabRect(i).width() < bar.tabSizeHint(i).width() for i in range(bar.count()))
+    finally:
+        tabs.hide()
+
+
+def test_main_window_tab_bar_matches_the_shared_factory() -> None:
+    import inspect
+
+    from GUI.app.ui.qt.main_window import MainWindow
+
+    source = inspect.getsource(MainWindow._setup_ui_components)
+    assert "tabBar().setUsesScrollButtons(True)" in source
+    assert "tabBar().setElideMode(Qt.TextElideMode.ElideNone)" in source
+
+
+def test_themes_style_the_toolbar() -> None:
+    """Unstyled, QToolBar is platform-painted and clashes with the themed tabs."""
+    from GUI.app.ui.qt.themes.classic_theme_manager import get_classic_stylesheet
+    from GUI.app.ui.qt.themes.theme_manager import ThemeManager
+
+    manager = ThemeManager()
+    manager.load_builtin_themes()
+    for theme in ("dark", "light", "legacy"):
+        theme_data = manager.get_theme_data(theme)
+
+        modern = theme_data.get("stylesheet", "")
+        assert "QToolBar {" in modern
+        assert "QToolButton {" in modern
+
+        # Classic UI mode generates its own sheet and ignores the one above.
+        classic = get_classic_stylesheet(theme_data)
+        assert "QToolBar {" in classic
+        assert "QToolButton {" in classic
 
 
 def test_no_hardcoded_font_families_in_qt_widgets() -> None:

@@ -817,6 +817,43 @@ def generate_stylesheet(
         QStatusBar::item {{
             border: none;
         }}
+
+        /* ===== Tool Bar ===== */
+        /* Unstyled, the toolbar is painted by the platform style, which on macOS
+           puts a light native strip and bordered buttons above the themed tabs. */
+        QToolBar {{
+            background-color: {window_bg};
+            border: none;
+            border-bottom: 1px solid {border_color};
+            padding: 2px 4px;
+            spacing: 4px;
+        }}
+        QToolBar::handle {{
+            background-color: {border_color};
+            width: 1px;
+            margin: 4px 2px;
+        }}
+        QToolBar::separator {{
+            background-color: {border_color};
+            width: 1px;
+            margin: 4px 4px;
+        }}
+        QToolButton {{
+            background-color: transparent;
+            color: {text_color};
+            border: none;
+            border-radius: 4px;
+            padding: 4px 8px;
+        }}
+        QToolButton:hover {{
+            background-color: {hover_overlay};
+        }}
+        QToolButton:pressed, QToolButton:checked {{
+            background-color: {pressed_overlay};
+        }}
+        QToolButton:disabled {{
+            color: {text_secondary};
+        }}
         
         /* ===== Message Box ===== */
         QMessageBox {{

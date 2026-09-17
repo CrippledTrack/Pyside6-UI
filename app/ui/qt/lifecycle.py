@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import platform
 import sys
 from pathlib import Path
@@ -36,6 +37,25 @@ def resolve_window_icon_path() -> Optional[Path]:
     return path
 
 
+def resolve_style_name(sysname: str, requested: Optional[str] = None) -> Optional[str]:
+    """Return the Qt style to force, or ``None`` to keep the platform default.
+
+    Windows gets Fusion, since the native Windows style ignores much of what the
+    builtin themes ask for. macOS keeps its own style: the platform default there
+    already draws native controls. Note that the light/dark themes ship ~20 KB of
+    QSS, which overrides most of that painting, so the fully native look also
+    needs the ``Default`` theme.
+
+    ``GUI_QT_STYLE`` overrides the choice on any platform, which is how you
+    compare styles without a rebuild.
+    """
+    override = os.environ.get("GUI_QT_STYLE", "") if requested is None else requested
+    override = (override or "").strip()
+    if override:
+        return override
+    return "Fusion" if sysname == "windows" else None
+
+
 def configure_qt_application(app, version_name: str, gui_api_version: str) -> None:
     """Configure Qt application identity, style and Windows AppUserModelID."""
     sysname = platform.system().lower()
@@ -54,9 +74,9 @@ def configure_qt_application(app, version_name: str, gui_api_version: str) -> No
         except Exception as e:
             logger.warning(f"Failed to set window icon from {icon_path}: {e}")
 
-    # Use the built-in Fusion style on Windows and macOS for consistent theming.
-    if sysname in ("windows", "darwin"):
-        app.setStyle("Fusion")
+    style_name = resolve_style_name(sysname)
+    if style_name and not app.setStyle(style_name):
+        logger.warning(f"Qt style is unavailable, keeping the platform default: {style_name}")
 
     if sysname == "windows":
         try:
@@ -68,4 +88,4 @@ def configure_qt_application(app, version_name: str, gui_api_version: str) -> No
             print(f"Failed to set AppUserModelID: {e}", file=sys.stderr)
 
 
-__all__ = ["configure_qt_application"]
+__all__ = ["configure_qt_application", "resolve_style_name"]

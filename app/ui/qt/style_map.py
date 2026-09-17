@@ -360,9 +360,16 @@ def create_card(parent: Any = None) -> QFrame:
 
 
 def create_tabs(parent: Any = None) -> QTabWidget:
-    """Create a QTabWidget."""
+    """Create a QTabWidget whose tab bar scrolls at full label width.
+
+    The macOS style would otherwise drop the scroll arrows, which makes the bar's
+    minimum width cover every tab and widen the window, and elide every label to
+    an ellipsis once the bar overflows.
+    """
     tabs = QTabWidget(parent)
     set_expand(tabs, True)
+    tabs.tabBar().setUsesScrollButtons(True)
+    tabs.tabBar().setElideMode(Qt.TextElideMode.ElideNone)
     return tabs
 
 

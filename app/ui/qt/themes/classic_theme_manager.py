@@ -56,6 +56,34 @@ QTabBar::tab:hover {{
     background-color: {tab_hover_bg};
     color: {tab_hover_text};
 }}
+QToolBar {{
+    background-color: {window};
+    border: none;
+    border-bottom: {border_width} solid {border};
+    padding: 2px;
+    spacing: 2px;
+}}
+QToolBar::handle, QToolBar::separator {{
+    background-color: {border};
+    width: 1px;
+    margin: 4px 2px;
+}}
+QToolButton {{
+    background-color: transparent;
+    color: {text};
+    border: {border_width} solid transparent;
+    border-radius: {border_radius};
+    padding: 4px 8px;
+}}
+QToolButton:hover {{
+    background-color: {tab_hover_bg};
+    border-color: {highlight};
+}}
+QToolButton:pressed, QToolButton:checked {{
+    background-color: {tab_selected_bg};
+    color: {tab_selected_text};
+    border-color: {highlight};
+}}
 QPushButton {{
     background-color: {button_bg};
     color: {button_text};

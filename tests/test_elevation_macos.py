@@ -276,6 +276,20 @@ def test_admin_menu_reports_running_daemon() -> None:
     assert controller.restart_admin_action.isEnabled() is False
 
 
+def test_settings_items_keep_their_labels_on_macos() -> None:
+    """PreferencesRole renamed "Manage Plugins…" to "Settings…" in the app menu."""
+    from GUI.app.ui.qt.bindings import QAction
+
+    controller = _menu_controller(daemon_available=False)
+    controller.setup(_noop, _noop, _noop)
+
+    for action in (controller.manage_plugins_action, controller.select_theme_action):
+        assert action.menuRole() != QAction.MenuRole.PreferencesRole
+
+    # About is still merged deliberately; macOS supplies that title itself.
+    assert controller.about_action.menuRole() == QAction.MenuRole.AboutRole
+
+
 def test_admin_placeholder_uses_daemon_copy() -> None:
     from GUI.app.ui.qt.bindings import QApplication
     from GUI.app.ui.qt.widgets.admin_required_placeholder import (
