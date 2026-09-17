@@ -72,6 +72,9 @@ def _resolve_roots() -> tuple[Path, Path, Path]:
 SCRIPT_DIR, GUI_ROOT, PROJECT_ROOT = _resolve_roots()
 IS_STANDALONE = (GUI_ROOT == PROJECT_ROOT)
 
+# Fallback OS floor for macOS bundles when the PySide6 wheel tag cannot be read.
+MACOS_MIN_SYSTEM_VERSION = "13.0"
+
 
 # ---------------------------------------------------------------------------
 # Constants helpers
@@ -80,13 +83,19 @@ IS_STANDALONE = (GUI_ROOT == PROJECT_ROOT)
 def _load_constants() -> dict[str, object]:
     """Load merged constants the same way the app does at runtime.
 
-    Falls back to GUI/app/constants.py when running standalone.
+    A host tree beside ``GUI/`` wins, so the bundle carries the host's name and
+    version rather than the framework defaults, matching what the app shows when
+    run from source. Falls back to reading the constants files directly.
     """
     import sys
 
-    parent = str(PROJECT_ROOT)
-    if parent not in sys.path:
-        sys.path.insert(0, parent)
+    # ``import GUI`` resolves from the *parent* of GUI/. PROJECT_ROOT is the GUI
+    # directory itself in a standalone layout, so inserting only that made the
+    # merge below fail with "No module named 'GUI'" and silently fall through to
+    # framework-only constants -- host name and version were ignored.
+    for candidate in (str(GUI_ROOT.parent), str(PROJECT_ROOT)):
+        if candidate not in sys.path:
+            sys.path.insert(0, candidate)
     try:
         from GUI.app.utils.imports import merge_constants
         return merge_constants(apply_launch_overrides=False)
@@ -96,13 +105,13 @@ def _load_constants() -> dict[str, object]:
     consts: dict[str, object] = {}
     gui_const_path = GUI_ROOT / "app" / "constants.py"
     consts.update(_exec_constants_file(gui_const_path))
-    if not IS_STANDALONE:
-        platforms_const = PROJECT_ROOT / "platforms" / "constants.py"
-        if platforms_const.exists():
-            consts.update(_exec_constants_file(platforms_const))
-        app_const_path = PROJECT_ROOT / "app_plugins" / "constants.py"
-        if app_const_path.exists():
-            consts.update(_exec_constants_file(app_const_path))
+    # Same precedence as merge_constants: platforms first, then app_plugins.
+    # Keyed off GUI's parent, not PROJECT_ROOT, so it also applies to a
+    # standalone layout that happens to have a host tree next to it.
+    for tree in ("platforms", "app_plugins"):
+        host_const = GUI_ROOT.parent / tree / "constants.py"
+        if host_const.exists():
+            consts.update(_exec_constants_file(host_const))
     try:
         from GUI.app import constants as gui_constants
         consts["GUI_API_VERSION"] = gui_constants.GUI_API_VERSION
@@ -265,6 +274,129 @@ def _parse_version_tuple(version_str: str) -> tuple[int, int, int, int]:
     while len(parts) < 4:
         parts.append(0)
     return tuple(parts[:4])  # type: ignore[return-value]
+
+
+def derive_bundle_identifier(app_name: str, *, prefix: str = "com.example") -> str:
+    """Build a reverse-DNS macOS bundle identifier from an application name.
+
+    PyInstaller otherwise uses the bare output name, which is not reverse-DNS;
+    macOS keys preferences, TCC grants and Launch Services state off this value,
+    so two differently-named apps that both ship a non-DNS id can collide. The
+    default prefix is the RFC 2606 placeholder domain: a host shipping a real
+    product is expected to pass its own via ``--bundle-identifier``.
+    """
+    slug = "".join(ch if ch.isalnum() else "-" for ch in app_name.strip().lower())
+    while "--" in slug:
+        slug = slug.replace("--", "-")
+    slug = slug.strip("-") or "application"
+    return f"{prefix}.{slug}"
+
+
+def detect_macos_min_system_version(default: str = MACOS_MIN_SYSTEM_VERSION) -> str:
+    """Read the minimum macOS version from the installed PySide6 wheel tag.
+
+    The bundle can only run where its Qt build runs, and that floor moves with
+    the PySide6 release (6.11 ships ``macosx_13_0_universal2``), so it is read
+    from the wheel rather than pinned in this script.
+    """
+    import re
+    from importlib.metadata import PackageNotFoundError, distribution
+
+    for dist_name in ("PySide6-Essentials", "PySide6"):
+        try:
+            dist = distribution(dist_name)
+        except PackageNotFoundError:
+            continue
+        for file in dist.files or []:
+            if file.name != "WHEEL":
+                continue
+            try:
+                text = dist.locate_file(file).read_text(encoding="utf-8")
+            except OSError:
+                continue
+            match = re.search(r"macosx_(\d+)_(\d+)", text)
+            if match:
+                return f"{match.group(1)}.{match.group(2)}"
+    return default
+
+
+def macos_plist_updates(
+    *,
+    version: str,
+    app_name: str,
+    min_system_version: str,
+) -> dict:
+    """Return the ``Info.plist`` keys a macOS bundle needs beyond PyInstaller's.
+
+    PyInstaller writes ``CFBundleShortVersionString = 0.0.0``, no
+    ``CFBundleVersion`` at all, no OS floor, and an underscored display name.
+    Version strings are reduced to their numeric parts because macOS rejects
+    suffixes like ``-dev-1`` in these two keys.
+    """
+    numeric = ".".join(str(part) for part in _parse_version_tuple(version)[:3])
+    return {
+        "CFBundleShortVersionString": numeric,
+        "CFBundleVersion": numeric,
+        "CFBundleDisplayName": app_name,
+        "LSMinimumSystemVersion": min_system_version,
+    }
+
+
+def patch_macos_plist(app_bundle: Path, updates: dict) -> bool:
+    """Apply *updates* to ``app_bundle/Contents/Info.plist``.
+
+    Done as a post-build step because the ``.spec`` file is regenerated on every
+    build (PyInstaller runs with the script path plus ``--noconfirm``), so plist
+    edits made there are silently discarded.
+    """
+    import plistlib
+
+    plist_path = app_bundle / "Contents" / "Info.plist"
+    if not plist_path.is_file():
+        print(f"  Warning: no Info.plist at {plist_path}, skipping", file=sys.stderr)
+        return False
+
+    try:
+        data = plistlib.loads(plist_path.read_bytes())
+        data.update(updates)
+        plist_path.write_bytes(plistlib.dumps(data))
+    except Exception as e:
+        print(f"  Warning: could not patch {plist_path}: {e}", file=sys.stderr)
+        return False
+
+    for key, value in sorted(updates.items()):
+        print(f"  {key} = {value!r}")
+    return True
+
+
+def resign_macos_bundle(app_bundle: Path) -> bool:
+    """Re-apply the ad-hoc signature after the bundle has been modified.
+
+    The seal PyInstaller writes covers ``Info.plist``, so editing the plist
+    leaves ``codesign --verify`` failing with "plist or signature have been
+    modified" and macOS refusing to launch the app in some configurations. This
+    only restores the ad-hoc signature; it is not notarization.
+    """
+    try:
+        result = subprocess.run(
+            ["codesign", "--force", "--sign", "-", str(app_bundle)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        print("  Warning: codesign not found, bundle left unsigned", file=sys.stderr)
+        return False
+
+    if result.returncode != 0:
+        print(
+            f"  Warning: could not re-sign {app_bundle.name}: {result.stderr.strip()}",
+            file=sys.stderr,
+        )
+        return False
+
+    print(f"  Re-signed (ad-hoc): {app_bundle.name}")
+    return True
 
 
 def generate_windows_version_info(
@@ -467,10 +599,27 @@ def build_pyinstaller_args(opts: argparse.Namespace, consts: dict[str, object]) 
     # -- Icon ------------------------------------------------------------------
     if opts.icon:
         icon_path = Path(opts.icon).resolve()
-        if icon_path.exists():
-            args.extend(["--icon", str(icon_path)])
-        else:
+        if not icon_path.exists():
             print(f"  Warning: icon not found at {icon_path}, skipping", file=sys.stderr)
+        elif sysname == "darwin" and icon_path.suffix.lower() != ".icns":
+            # A .app bundle needs an icon set; other formats only convert when
+            # Pillow happens to be installed, so fail loudly instead of shipping
+            # a bundle with a generic icon.
+            print(
+                f"  Warning: macOS bundles need an .icns icon, got {icon_path.suffix or 'no suffix'!r}; skipping",
+                file=sys.stderr,
+            )
+        else:
+            args.extend(["--icon", str(icon_path)])
+
+    # -- macOS bundle identifier -----------------------------------------------
+    if sysname == "darwin":
+        bundle_id = (
+            opts.bundle_identifier
+            or str(consts.get("BUNDLE_IDENTIFIER", ""))
+            or derive_bundle_identifier(str(consts.get("VERSION_NAME", "Application")))
+        )
+        args.extend(["--osx-bundle-identifier", bundle_id])
 
     # -- Hidden imports --------------------------------------------------------
     hidden = _collect_hidden_imports()
@@ -557,6 +706,12 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
     parser.add_argument("--name", type=str, default="", help="Override executable name")
     parser.add_argument("--icon", type=str, default="", help="Path to application icon")
+    parser.add_argument(
+        "--bundle-identifier",
+        type=str,
+        default="",
+        help="macOS CFBundleIdentifier in reverse-DNS form (default: derived from the app name)",
+    )
 
     console_group = parser.add_mutually_exclusive_group()
     console_group.add_argument("--console", action="store_true", help="Show console window")
@@ -654,6 +809,22 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("\nBuild succeeded!")
         dist_dir = opts.dist_dir or str(PROJECT_ROOT / "dist")
         print(f"  Output: {dist_dir}")
+
+        if sysname == "darwin":
+            bundle_name = opts.name or str(app_name).replace(" ", "_")
+            app_bundle = Path(dist_dir) / f"{bundle_name}.app"
+            if app_bundle.is_dir():
+                print("\nPatching bundle metadata ...")
+                patched = patch_macos_plist(
+                    app_bundle,
+                    macos_plist_updates(
+                        version=str(version),
+                        app_name=str(app_name),
+                        min_system_version=detect_macos_min_system_version(),
+                    ),
+                )
+                if patched:
+                    resign_macos_bundle(app_bundle)
     else:
         print(f"\nBuild failed (exit code {result.returncode}).", file=sys.stderr)
 

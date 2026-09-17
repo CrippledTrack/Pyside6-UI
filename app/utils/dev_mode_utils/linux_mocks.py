@@ -13,7 +13,7 @@ from __future__ import annotations
 import sys
 import logging
 from types import ModuleType
-from typing import Any, Iterator, NamedTuple
+from typing import Any, Iterator, List, NamedTuple, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -301,6 +301,22 @@ LINUX_MODULES = [
     'gi.repository.Gio',
 ]
 
+# Subset of LINUX_MODULES that genuinely does not exist on macOS. Everything
+# else in LINUX_MODULES (pwd, grp, fcntl, posix, termios, tty, pty, resource,
+# syslog) is real and working there, and mocking it would make the app report
+# fabricated users and groups from its own host.
+DARWIN_MISSING_MODULES = [
+    'spwd',
+    'crypt',
+    'dbus',
+    'dbus.mainloop',
+    'dbus.mainloop.glib',
+    'gi',
+    'gi.repository',
+    'gi.repository.GLib',
+    'gi.repository.Gio',
+]
+
 # Specialized mock modules with realistic APIs
 SPECIALIZED_MOCKS = {
     'pwd': MockPwdModule,
@@ -312,12 +328,18 @@ SPECIALIZED_MOCKS = {
 
 
 _mocks_installed = False
+_installed_modules: List[str] = []
 
 
-def install_linux_mocks() -> None:
+def install_linux_mocks(modules: Optional[Sequence[str]] = None) -> None:
     """Install mock modules for Linux-specific dependencies.
     
     This should only be called in dev mode when cross-platform tabs are enabled.
+
+    Args:
+        modules: Module names to mock. Defaults to all of ``LINUX_MODULES``.
+            Callers on a platform that provides some of these for real (macOS)
+            pass a narrower set such as ``DARWIN_MISSING_MODULES``.
     """
     global _mocks_installed
     
@@ -325,19 +347,22 @@ def install_linux_mocks() -> None:
         logger.debug("Linux mocks already installed")
         return
     
+    target_modules = list(LINUX_MODULES if modules is None else modules)
+    
     logger.warning("Installing mock modules for Linux dependencies (dev mode)")
     
-    for module_name in LINUX_MODULES:
+    for module_name in target_modules:
         if module_name not in sys.modules:
             # Use specialized mock if available, otherwise generic
             if module_name in SPECIALIZED_MOCKS:
                 sys.modules[module_name] = SPECIALIZED_MOCKS[module_name]()
             else:
                 sys.modules[module_name] = MockModule(module_name)
+            _installed_modules.append(module_name)
             logger.debug(f"Installed mock for: {module_name}")
     
     _mocks_installed = True
-    logger.info(f"Installed {len(LINUX_MODULES)} Linux module mocks for cross-platform testing")
+    logger.info(f"Installed {len(_installed_modules)} Linux module mocks for cross-platform testing")
 
 
 def uninstall_linux_mocks() -> None:
@@ -347,7 +372,7 @@ def uninstall_linux_mocks() -> None:
     """
     global _mocks_installed
     
-    for module_name in LINUX_MODULES:
+    for module_name in list(_installed_modules) or LINUX_MODULES:
         if module_name in sys.modules:
             mock = sys.modules[module_name]
             if isinstance(mock, (MockModule, MockPwdModule, MockGrpModule, 
@@ -355,6 +380,7 @@ def uninstall_linux_mocks() -> None:
                 del sys.modules[module_name]
                 logger.debug(f"Removed mock for: {module_name}")
     
+    _installed_modules.clear()
     _mocks_installed = False
     logger.info("Removed Linux module mocks")
 
@@ -364,5 +390,6 @@ def are_linux_mocks_installed() -> bool:
     return _mocks_installed
 
 
-__all__ = ['install_linux_mocks', 'uninstall_linux_mocks', 'are_linux_mocks_installed', 'LINUX_MODULES']
+__all__ = ['install_linux_mocks', 'uninstall_linux_mocks', 'are_linux_mocks_installed',
+           'LINUX_MODULES', 'DARWIN_MISSING_MODULES']
 

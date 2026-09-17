@@ -417,9 +417,14 @@ class PluginService:
                 install_linux_mocks()
             elif CURRENT_PLATFORM == "darwin":
                 from ..utils.dev_mode_utils.win32_mocks import install_win32_mocks
-                from ..utils.dev_mode_utils.linux_mocks import install_linux_mocks
+                from ..utils.dev_mode_utils.linux_mocks import (
+                    DARWIN_MISSING_MODULES,
+                    install_linux_mocks,
+                )
                 install_win32_mocks()
-                install_linux_mocks()
+                # macOS has real pwd/grp/fcntl and the rest of the POSIX set, so
+                # only the modules it actually lacks get stubbed.
+                install_linux_mocks(DARWIN_MISSING_MODULES)
         except Exception as e:
             logger.warning(f"Could not install cross-platform mocks: {e}")
 

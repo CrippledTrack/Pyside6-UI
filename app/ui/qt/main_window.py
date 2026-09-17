@@ -218,7 +218,11 @@ class MainWindow(QMainWindow):
         """Create and configure the status bar."""
         status_bar = QStatusBar(self)
         self.setStatusBar(status_bar)
-        status_bar.setMaximumHeight(20)
+        # Keep the bar thin, but derive the cap from the font: a fixed 20px clips
+        # descenders at the 13pt macOS system size.
+        status_bar.setMaximumHeight(
+            max(20, status_bar.fontMetrics().height() + 8)
+        )
         
         # Create status bar manager - now passes dependencies directly
         from .controllers.status_bar_manager import StatusBarManager
@@ -691,6 +695,27 @@ class MainWindow(QMainWindow):
         else:
             self.showFullScreen()
     
+    def finalize_shutdown(self) -> None:
+        """Run window teardown for quit paths that never close the window.
+
+        Window geometry, session state, extension shutdown and tab disposal all
+        live in ``closeEvent``. Qt 6's ``quit()`` does close top-level windows
+        first, so the macOS Quit item reaches that path, but ``exit()`` and any
+        other direct event-loop stop do not, and then nothing is saved.
+
+        ``closeEvent`` waits for tab discovery by re-posting itself on a timer,
+        which is not dependable once the loop is stopping, so the loader is
+        drained here before running the normal close path.
+        """
+        if self._close_complete:
+            return
+        loader = getattr(self, 'tab_loader', None)
+        if loader is not None:
+            loader.cancel()
+            if loader.isRunning():
+                loader.wait(5000)
+        self.close()
+
     def closeEvent(self, event: QCloseEvent) -> None:
         """Handle window close event to save settings."""
         if self._close_complete:

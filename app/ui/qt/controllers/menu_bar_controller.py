@@ -100,10 +100,18 @@ class MenuBarController(QObject):
         constants = get_platforms_constants()
         if not getattr(constants, "SINGLE_PLUGIN_MODE", False):
             self.manage_plugins_action = QAction("Manage Plugins...", self.parent_widget)
+            # Like AboutRole, the role must be set before addAction. macOS moves
+            # this item into the application menu and gives it Cmd+, ; elsewhere
+            # PreferencesRole is ignored and the item stays under Settings.
+            self.manage_plugins_action.setMenuRole(QAction.MenuRole.PreferencesRole)
             settings_menu.addAction(self.manage_plugins_action)
             self.manage_plugins_action.triggered.connect(on_manage_plugins)
         
         self.select_theme_action = QAction("Select Theme...", self.parent_widget)
+        if getattr(constants, "SINGLE_PLUGIN_MODE", False):
+            # No plugin manager in single-plugin mode, so the theme picker is the
+            # only settings entry left to carry Preferences.
+            self.select_theme_action.setMenuRole(QAction.MenuRole.PreferencesRole)
         settings_menu.addAction(self.select_theme_action)
         self.select_theme_action.triggered.connect(on_select_theme)
         

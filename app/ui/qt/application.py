@@ -42,6 +42,7 @@ class QtApplicationBackend:
         self._daemon_lifecycle: Optional[DaemonLifecycleService] = None
         self._daemon_client: Any = None
         self._notification_bridge: Optional[NotificationShellBridge] = None
+        self._theme_init: Optional[ThemeInitService] = None
 
     def run(self) -> int:
         from .deps_service import QtDepsService, should_skip_qt_deps
@@ -69,9 +70,10 @@ class QtApplicationBackend:
 
         configure_qt_application(self._app, self._version_name, GUI_API_VERSION)
 
-        theme_init = ThemeInitService()
+        # Held for the process lifetime: it owns the colorSchemeChanged slot.
+        self._theme_init = ThemeInitService()
         settings_service = self._container.get(ISettingsService)
-        theme_manager = theme_init.initialize(self._container, settings_service)
+        theme_manager = self._theme_init.initialize(self._container, settings_service)
 
         # Show the shell before optional auto-daemon elevation so hosts with
         # REQUIRE_ADMIN_BY_DEFAULT=True are not stuck on a blank process during pkexec.
@@ -83,6 +85,12 @@ class QtApplicationBackend:
 
         install_dialog_presenter(self._container, QtDialogPresenter(parent=window))
         self._notification_bridge = wire_notifications(self._container, window)
+
+        # Teardown must be reachable from the quit path, not just from a window
+        # close: an event-loop stop that skips closeEvent otherwise loses window
+        # geometry, session state and extension shutdown. finalize_shutdown() is
+        # a no-op once closeEvent has already completed.
+        self._app.aboutToQuit.connect(window.finalize_shutdown)
 
         window.show()
         # Process one event loop tick so the window paints before a blocking daemon start

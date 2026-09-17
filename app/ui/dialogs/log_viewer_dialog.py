@@ -8,8 +8,8 @@ from typing import Any, Callable, Optional
 
 from .. import definitions as ui
 from ..abstractions import IUIEventLoop
+from ...host_config import get_host_config
 from ...services.logging_service import CustomFormatter, LOG_FORMAT
-from ...utils.paths import logs_dir
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +159,10 @@ class LogViewerDialog:
     def _refresh_log_files(self) -> None:
         """Refresh available log files, newest first."""
         try:
-            log_path = logs_dir()
+            # Same source the logging service writes to: utils.paths.logs_dir
+            # ignores a host-configured user_data_dir, so the two only agreed in
+            # default portable mode.
+            log_path = get_host_config().logs_dir()
             if not log_path.exists():
                 ui.set_text(self._status_label, "No logs directory found")
                 ui.set_items(self._file_combo, [])

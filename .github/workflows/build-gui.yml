@@ -66,11 +66,11 @@ jobs:
             release-suffix: "-Linux"
 
           - os: macos-latest
-            label: macOS
+            label: macOS (Apple silicon)
             requirements: GUI/requirements-linux.txt   # same deps (no pywin32)
-            artifact-name: GUI-macOS
-            artifact-glob: "GUI/dist/*"
-            release-suffix: "-macOS"
+            artifact-name: GUI-macOS-arm64
+            artifact-glob: "GUI/dist/*.zip"
+            release-suffix: "-macOS-arm64.zip"
 
     name: Build – ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
@@ -126,6 +126,19 @@ jobs:
       - name: Run build script
         run: python GUI/scripts/build.py --clean
 
+      # ----- Archive the .app before it touches upload-artifact ---------------
+      # upload-artifact drops symlinks and executable bits, which breaks
+      # Contents/Frameworks and Python.framework inside a macOS bundle. ditto
+      # writes a zip that keeps both, so the downloaded app still launches.
+      - name: Package macOS app bundle
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          cd GUI/dist
+          app=$(ls -d *.app | head -n 1)
+          echo "Archiving $app"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "${app%.app}.zip"
+
       # ----- Upload CI artifact (always) --------------------------------------
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -153,9 +166,11 @@ jobs:
                 cp "$item" "release-assets/${name}${{ matrix.release-suffix }}"
               fi
             elif [ -d "$item" ]; then
-              # Directory bundle (macOS onedir) — zip it for the release
+              # Directory bundle — zip it for the release. -y stores symlinks
+              # instead of following them, which both keeps the archive valid and
+              # avoids duplicating every framework it points at.
               base=$(basename "$item")
-              (cd "$(dirname "$item")" && zip -r "$GITHUB_WORKSPACE/release-assets/${base}${{ matrix.release-suffix }}.zip" "$base")
+              (cd "$(dirname "$item")" && zip -r -y "$GITHUB_WORKSPACE/release-assets/${base}${{ matrix.release-suffix }}.zip" "$base")
             fi
           done
 

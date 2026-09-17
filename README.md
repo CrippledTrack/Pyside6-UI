@@ -79,6 +79,17 @@ python3 GUI/scripts/build.py
 
 Uses `run.py` as the entry. Options: `python3 scripts/build.py --help`.
 
+### macOS bundles
+
+The build produces `dist/<Name>.app` (always one-directory; PyInstaller is deprecating one-file windowed bundles). After PyInstaller runs, the script patches `Info.plist` with the version, display name and OS floor, then re-applies the **ad-hoc** signature the patch invalidates.
+
+- Pass `--bundle-identifier com.yourcompany.yourapp` (or set `BUNDLE_IDENTIFIER` in host constants) instead of shipping the derived `com.example.*` placeholder. macOS keys preferences and permission grants off this value.
+- `--icon` needs a `.icns` file on macOS; other formats are skipped with a warning.
+- The bundle is ad-hoc signed and **not notarized**, so a copy downloaded from a release is quarantined. Clear it with `xattr -dr com.apple.quarantine <Name>.app`, or right-click → Open once.
+- Archive the bundle with `ditto -c -k --sequesterRsrc --keepParent <Name>.app <Name>.zip`. Plain `zip -r` and GitHub's `upload-artifact` both drop symlinks and executable bits, which corrupts `Contents/Frameworks` and `Python.framework`.
+- Only the runner's own architecture is built, because PySide6 does not reliably publish `universal2` wheels. CI releases an Apple-silicon bundle.
+- Known limitation: a frozen app writes `settings.json` and `logs/` next to its executable inside the bundle, so settings do not persist if the `.app` sits somewhere unwritable or is launched under quarantine translocation.
+
 ## Host plugin directories
 
 When the **parent** of `GUI/` contains an `app_plugins` or `platforms` tree that looks like this framework’s plugin layout (`constants.py`, `core_plugins.py`, and/or `linux/` / `windows/`), the app loads constants and plugins from there. That supports test-bed or product hosts without forking the submodule.

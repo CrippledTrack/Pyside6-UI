@@ -7,18 +7,43 @@ from __future__ import annotations
 
 import logging
 from typing import Dict, Callable, Optional
+from ....constants import CURRENT_PLATFORM
 from ..bindings import QObject, Signal, QShortcut, QKeySequence, QWidget
 
 logger = logging.getLogger(__name__)
 
 
+def default_shortcut_sequences(platform_name: Optional[str] = None) -> Dict[str, str]:
+    """Return the shell shortcut key sequences for *platform_name*.
+
+    In Qt's portable notation ``Ctrl`` means Command on macOS and ``Meta``
+    means Control. macOS therefore needs different literals: ``Ctrl+Tab``
+    would be Cmd+Tab (the system application switcher) and ``F11`` is taken
+    by Mission Control, so tab cycling uses Control+Tab and fullscreen uses
+    Control+Cmd+F. ``QKeySequence.StandardKey.NextChild`` is not a fix here:
+    it also resolves to Cmd+Tab on macOS.
+    """
+    name = (platform_name or CURRENT_PLATFORM).lower()
+    if name == "darwin":
+        return {
+            "next_tab": "Meta+Tab",
+            "prev_tab": "Meta+Shift+Tab",
+            "fullscreen": "Ctrl+Meta+F",
+        }
+    return {
+        "next_tab": "Ctrl+Tab",
+        "prev_tab": "Ctrl+Shift+Tab",
+        "fullscreen": "F11",
+    }
+
+
 class ShortcutManager(QObject):
     """Manages keyboard shortcuts for the application."""
     
-    # Signals for shortcut actions
-    nextTab = Signal()    # Ctrl+Tab
-    prevTab = Signal()    # Ctrl+Shift+Tab
-    toggleFullscreen = Signal()  # F11
+    # Signals for shortcut actions (see default_shortcut_sequences for keys)
+    nextTab = Signal()
+    prevTab = Signal()
+    toggleFullscreen = Signal()
     
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -27,10 +52,14 @@ class ShortcutManager(QObject):
     
     def setup_shortcuts(self) -> None:
         """Setup all keyboard shortcuts."""
+        callbacks = {
+            "next_tab": self.nextTab.emit,
+            "prev_tab": self.prevTab.emit,
+            "fullscreen": self.toggleFullscreen.emit,
+        }
         shortcuts_config = {
-            "next_tab": ("Ctrl+Tab", self.nextTab.emit),
-            "prev_tab": ("Ctrl+Shift+Tab", self.prevTab.emit),
-            "fullscreen": ("F11", self.toggleFullscreen.emit),
+            name: (sequence, callbacks[name])
+            for name, sequence in default_shortcut_sequences().items()
         }
         
         for name, (key_sequence, callback) in shortcuts_config.items():
@@ -96,5 +125,5 @@ class ShortcutManager(QObject):
         logger.debug("Cleared all shortcuts")
 
 
-__all__ = ['ShortcutManager']
+__all__ = ['ShortcutManager', 'default_shortcut_sequences']
 

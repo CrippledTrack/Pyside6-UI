@@ -17,7 +17,6 @@ from ..bindings import (
     QWidget,
     QMenu,
     QAction,
-    QKeySequence,
     QMessageBox,
     QPoint,
     is_valid,
@@ -590,9 +589,10 @@ class TabController(QObject):
         # Create context menu
         context_menu = QMenu(self.tab_widget)
         
-        # Close tab action
+        # Close tab action. No shortcut is advertised: this action lives and dies
+        # with the context menu, so it never registers a working binding, and on
+        # macOS the Cmd+W it displayed reads as "close window".
         close_action = QAction("Close Tab", context_menu)
-        close_action.setShortcut(QKeySequence("Ctrl+W"))
         close_action.triggered.connect(lambda: self.close_tab_by_index(tab_index))
         context_menu.addAction(close_action)
         

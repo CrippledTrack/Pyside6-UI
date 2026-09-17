@@ -552,14 +552,22 @@ class PluginRegistry:
     def _check_extension_plugin_compatibility(self, plugin_class: Type[Any]) -> bool:
         """Check platform compatibility for plugins."""
         import platform
+
+        # Local import keeps registry -> base off the module import graph.
+        from .base import _normalize_platform_name_for_matching
+
         current_platform = platform.system()
         supported_platforms = getattr(plugin_class, 'supported_platforms', [])
         
         if not supported_platforms:
             return True
         
-        normalized_current = current_platform.capitalize()
-        normalized_supported = [p.capitalize() for p in supported_platforms]
+        # platform.system() returns "Darwin" while plugins declare "macOS", so
+        # both sides go through the same normalizer BaseTabPlugin uses.
+        normalized_current = _normalize_platform_name_for_matching(current_platform)
+        normalized_supported = {
+            _normalize_platform_name_for_matching(p) for p in supported_platforms
+        }
         
         return normalized_current in normalized_supported
     

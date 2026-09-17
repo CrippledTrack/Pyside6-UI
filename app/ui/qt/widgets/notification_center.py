@@ -27,6 +27,17 @@ from ....services.notification_service import NotificationType
 from ..themes.theme_manager import ThemeManager
 
 
+def uses_manual_popup_shadow(platform_name: Optional[str] = None) -> bool:
+    """Whether this popup has to draw its own drop shadow.
+
+    Windows is excluded because ``QGraphicsDropShadowEffect`` renders
+    incorrectly there, and macOS because the compositor already shadows popup
+    windows: a manual effect doubles the shadow and the translucent padding it
+    needs leaves a dead border around the panel.
+    """
+    return (platform_name or CURRENT_PLATFORM) not in ("windows", "darwin")
+
+
 class NotificationItemWidget(QFrame):
     """Widget representing a single notification item."""
     
@@ -148,14 +159,7 @@ class NotificationCenterWidget(QWidget):
         if self._use_new_ui:
             # New UI: Modern styling with rounded corners
             # Platform-specific shadow handling
-            if CURRENT_PLATFORM == "windows":
-                # Windows: QGraphicsDropShadowEffect has rendering issues
-                # Use standard size without shadow effect
-                self.setFixedWidth(350)
-                self.setFixedHeight(400)
-                self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
-                # No shadow effect on Windows
-            else:
+            if uses_manual_popup_shadow():
                 # Linux: Shadow effect works properly
                 self.setFixedWidth(370)  # 350 + shadow margin
                 self.setFixedHeight(420)  # 400 + shadow margin
@@ -167,6 +171,11 @@ class NotificationCenterWidget(QWidget):
                 shadow.setOffset(0, 3)
                 shadow.setColor(QColor(0, 0, 0, 60))
                 self.setGraphicsEffect(shadow)
+            else:
+                # Windows and macOS: standard size, shadow left to the platform
+                self.setFixedWidth(350)
+                self.setFixedHeight(400)
+                self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
         else:
             # Classic mode: Simple styling without shadow
             self.setFixedWidth(350)
@@ -197,11 +206,11 @@ class NotificationCenterWidget(QWidget):
     def setup_ui(self):
         layout = QVBoxLayout(self)
         
-        if self._use_new_ui and CURRENT_PLATFORM != "windows":
+        if self._use_new_ui and uses_manual_popup_shadow():
             # Add margins to prevent shadow clipping in new UI mode (Linux only)
             layout.setContentsMargins(10, 6, 10, 14)
         else:
-            # Windows or classic mode: no extra margins needed
+            # Platform-drawn shadow or classic mode: no extra margins needed
             layout.setContentsMargins(0, 0, 0, 0)
         
         layout.setSpacing(0)
@@ -396,14 +405,8 @@ class NotificationCenterWidget(QWidget):
         if ui_mode_changed:
             if self._use_new_ui:
                 # Switch to new UI
-                if CURRENT_PLATFORM == "windows":
-                    # Windows: No shadow effect
-                    self.setFixedWidth(350)
-                    self.setFixedHeight(400)
-                    self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
-                    self.setGraphicsEffect(None)  # Remove any existing shadow
-                else:
-                    # Linux: Add shadow effect
+                if uses_manual_popup_shadow():
+                    # Linux: Add shadow effect and margins to fit it
                     self.setFixedWidth(370)
                     self.setFixedHeight(420)
                     self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
@@ -414,14 +417,14 @@ class NotificationCenterWidget(QWidget):
                     shadow.setOffset(0, 3)
                     shadow.setColor(QColor(0, 0, 0, 60))
                     self.setGraphicsEffect(shadow)
-                
-                # Update layout margins (platform-specific)
-                if CURRENT_PLATFORM == "windows":
-                    # Windows: No shadow margins needed
-                    self.layout().setContentsMargins(0, 0, 0, 0)
-                else:
-                    # Linux: Add shadow margins
                     self.layout().setContentsMargins(10, 6, 10, 14)
+                else:
+                    # Windows and macOS: platform-drawn shadow, no padding
+                    self.setFixedWidth(350)
+                    self.setFixedHeight(400)
+                    self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+                    self.setGraphicsEffect(None)  # Remove any existing shadow
+                    self.layout().setContentsMargins(0, 0, 0, 0)
             else:
                 # Switch to classic mode: remove shadow and adjust size
                 self.setFixedWidth(350)

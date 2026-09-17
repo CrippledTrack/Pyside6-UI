@@ -57,19 +57,6 @@ class ToastNotification(QFrame):
         self.setup_animation()
         self.apply_theme()
     
-    def _font_exists(self, font_name: str) -> bool:
-        """Check if a font exists on the system."""
-        from ..bindings import QFontDatabase
-        try:
-            return font_name in QFontDatabase().families()
-        except TypeError:
-            try:
-                return font_name in QFontDatabase.families()
-            except Exception:
-                return False
-        except Exception:
-            return False
-
     def setup_ui(self) -> None:
         """Setup the toast notification UI."""
         # Set parent to establish window hierarchy (Tool windows stay above their parent)
@@ -93,9 +80,13 @@ class ToastNotification(QFrame):
         content_layout.setContentsMargins(15, 10, 12, 10)
         content_layout.setSpacing(8)
         
-        # Cross-platform font setup
-        msg_font = QFont("Segoe UI" if self._font_exists("Segoe UI") else "Arial", 9)
-        close_font = QFont("Segoe UI" if self._font_exists("Segoe UI") else "Arial", 10, QFont.Weight.Bold)
+        # A default-constructed QFont is the platform system font at its native
+        # size, which is what every platform wants here; naming families meant
+        # 9pt Arial on any machine without Segoe UI.
+        msg_font = QFont()
+        close_font = QFont()
+        close_font.setPointSize(msg_font.pointSize() + 1)
+        close_font.setWeight(QFont.Weight.Bold)
         
         # Message label (no icon)
         self.message_label = QLabel(self.message)
@@ -139,7 +130,6 @@ class ToastNotification(QFrame):
             }}
             QLabel {{
                 color: {colors['text']};
-                font-family: "Segoe UI", Arial, sans-serif;
                 background-color: transparent;
                 font-weight: 500;
             }}

@@ -70,7 +70,10 @@ class ThemePreviewWidget(QFrame):
         # Title
         title = QLabel("Theme Preview")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        title_font = QFont()
+        title_font.setPointSize(12)
+        title_font.setWeight(QFont.Weight.Bold)
+        title.setFont(title_font)
         layout.addWidget(title)
         
         # Sample content
@@ -177,7 +180,10 @@ class ThemeDialog(QDialog):
         
         # Theme list
         theme_label = QLabel("Available Themes:")
-        theme_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        section_font = QFont()
+        section_font.setPointSize(10)
+        section_font.setWeight(QFont.Weight.Bold)
+        theme_label.setFont(section_font)
         left_layout.addWidget(theme_label)
         
         self.theme_list = QListWidget()
@@ -200,7 +206,7 @@ class ThemeDialog(QDialog):
         right_layout = QVBoxLayout(right_widget)
         
         preview_label = QLabel("Theme Preview:")
-        preview_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        preview_label.setFont(section_font)
         right_layout.addWidget(preview_label)
         
         self.preview_widget = ThemePreviewWidget(theme_manager=self.theme_manager)
@@ -277,6 +283,11 @@ class ThemeDialog(QDialog):
         self.theme_list.clear()
         theme_names = self.theme_manager.get_theme_names()
         
+        # Bold variant of the list's own font: highlighting an entry should not
+        # also change its family or size.
+        bold_item_font = self.theme_list.font()
+        bold_item_font.setWeight(QFont.Weight.Bold)
+        
         for theme_name in theme_names:
             if self.show_favorites_only and theme_name not in self.favorite_themes:
                 continue
@@ -284,10 +295,10 @@ class ThemeDialog(QDialog):
             item.setData(Qt.ItemDataRole.UserRole, theme_name)
             if theme_name == self.current_theme:
                 item.setText(f"{theme_name} (Current)")
-                item.setFont(QFont("Arial", 9, QFont.Weight.Bold))
+                item.setFont(bold_item_font)
             elif theme_name in self.favorite_themes:
                 item.setText(f"⭐ {theme_name}")
-                item.setFont(QFont("Arial", 9, QFont.Weight.Bold))
+                item.setFont(bold_item_font)
             self.theme_list.addItem(item)
 
     def _theme_key(self, item: Optional[QListWidgetItem]) -> Optional[str]:

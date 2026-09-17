@@ -5,6 +5,8 @@ Mocks ``shutil.which`` / package queries. No sudo, display, or package managers.
 
 from __future__ import annotations
 
+import pytest
+
 from GUI.app.ui.qt import deps_service as deps
 from GUI.app.ui.qt.deps_service import (
     APT_PACKAGES,
@@ -334,8 +336,9 @@ def test_pacman_install_command_shape(monkeypatch) -> None:
     ]
 
 
-def test_ensure_non_linux_skips(monkeypatch) -> None:
-    monkeypatch.setattr(deps.platform, "system", lambda: "Windows")
+@pytest.mark.parametrize("system_name", ["Windows", "Darwin"])
+def test_ensure_non_linux_skips(monkeypatch, system_name: str) -> None:
+    monkeypatch.setattr(deps.platform, "system", lambda: system_name)
 
     def _boom() -> None:
         raise AssertionError("package manager must not be probed off Linux")

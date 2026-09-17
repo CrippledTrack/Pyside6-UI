@@ -24,6 +24,9 @@ High-level layout after the 6.0 Qt / abstractions separation. Import, API, and r
 - Import Qt widgets from **leaf** modules under `app/ui/qt/widgets/` (package `__init__` does not re-export).
 - Themes live under `app/ui/qt/themes/`.
 - Prefer `app/ui/qt/themes/ui_mode` helpers for classic vs modern stylesheet branches.
+- Platform differences belong in a named helper (`default_shortcut_sequences`, `uses_manual_popup_shadow`) rather than inline `CURRENT_PLATFORM` branches, so the behaviour is testable off-platform.
+- Do not name font families. A default `QFont` is the platform system font; naming Windows families silently degrades on Linux and macOS.
+- Window teardown must stay reachable from `QApplication.aboutToQuit` (`MainWindow.finalize_shutdown`), not only from `closeEvent`.
 
 ## UI backends
 

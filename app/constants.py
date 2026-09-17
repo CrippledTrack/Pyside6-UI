@@ -12,7 +12,7 @@ import platform
 # =============================================================================
 # GUI Internal Variables (app_plugins will NOT override these)
 # =============================================================================
-GUI_API_VERSION = "6.1.0-dev-1"
+GUI_API_VERSION = "6.1.0-dev-2"
 
 # =============================================================================
 # Version Information (can be overridden by app_plugins/constants.py)
@@ -57,6 +57,11 @@ SINGLE_PLUGIN_NAME = ""
 # Default theme override (can be overridden by app_plugins/constants.py, blank defaults to system dark/light check)
 DEFAULT_THEME = ""
 
+# Application icon for the window and task switcher (can be overridden by
+# app_plugins/constants.py). Blank means no icon: branding belongs to the host.
+# Relative paths resolve against the application base directory.
+WINDOW_ICON_PATH = ""
+
 # =============================================================================
 # GUI Internal (app_plugins will NOT override these)
 # =============================================================================
@@ -81,6 +86,7 @@ __all__ = [
     'SINGLE_PLUGIN_MODE',
     'SINGLE_PLUGIN_NAME',
     'DEFAULT_THEME',
+    'WINDOW_ICON_PATH',
     # GUI internal
     'GUI_API_VERSION',
     'CURRENT_PLATFORM',
