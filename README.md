@@ -3,9 +3,9 @@
 Reusable Qt application framework with toolkit-neutral plugin contracts. This package is the `GUI/` git submodule ([Pyside6-UI](https://github.com/CrippledTrack/Pyside6-UI)).
 
 
-Host apps may supply branding and plugins via an optional `app_plugins/` or `platforms/` tree next to `GUI/`. Those directories are **host integration**, not part of this framework.
+Host apps may supply branding and plugins via an optional `app_plugins/` or `platforms/` tree next to `GUI/`.
 
-For architecture, plugins, and generated API reference, use the [MkDocs site](#documentation) under `docs/`. This README is run/build only.
+For architecture, plugins, and generated API reference, use the [MkDocs site](#documentation) under `docs/`.
 
 ---
 
