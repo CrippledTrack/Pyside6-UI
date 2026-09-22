@@ -18,6 +18,38 @@ logger = logging.getLogger(__name__)
 Unsubscribe = Callable[[], None]
 
 
+def format_notification_age(
+    timestamp: datetime,
+    now: Optional[datetime] = None,
+) -> str:
+    """Return a short relative label for *timestamp*.
+
+    Under a minute: ``just now``. Under an hour: ``Nm ago``.
+    Under a day: ``Nh ago``. Older: a calendar date (``Sep 19``, or
+    ``Sep 19, 2025`` when the year differs from *now*).
+    """
+    current = now or datetime.now()
+    if timestamp.tzinfo is not None and current.tzinfo is None:
+        current = current.replace(tzinfo=timestamp.tzinfo)
+    elif timestamp.tzinfo is None and current.tzinfo is not None:
+        timestamp = timestamp.replace(tzinfo=current.tzinfo)
+
+    delta = current - timestamp
+    seconds = int(delta.total_seconds())
+    if seconds < 60:
+        return "just now"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}m ago"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours}h ago"
+    month_day = timestamp.strftime("%b %d").replace("  ", " ")
+    if timestamp.year != current.year:
+        return f"{month_day}, {timestamp.year}"
+    return month_day
+
+
 class NotificationType(Enum):
     """Types of notifications."""
     INFO = "info"
@@ -106,6 +138,17 @@ class NotificationService:
         if changed:
             self._notify_unread_count()
 
+    def remove_notification(self, notification: Notification) -> None:
+        """Remove a single notification from history.
+
+        Unknown objects are ignored so a stale UI row cannot raise.
+        """
+        try:
+            self._notifications.remove(notification)
+        except ValueError:
+            return
+        self._notify_unread_count()
+
     def clear_all(self) -> None:
         """Clear all notifications."""
         self._notifications.clear()
@@ -120,4 +163,10 @@ class NotificationService:
                 logger.error(f"Unread subscriber error: {e}", exc_info=True)
 
 
-__all__ = ['NotificationService', 'Notification', 'NotificationType', 'Unsubscribe']
+__all__ = [
+    'NotificationService',
+    'Notification',
+    'NotificationType',
+    'Unsubscribe',
+    'format_notification_age',
+]

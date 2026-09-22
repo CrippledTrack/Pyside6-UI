@@ -20,8 +20,9 @@ def default_shortcut_sequences(platform_name: Optional[str] = None) -> Dict[str,
     means Control. macOS therefore needs different literals: ``Ctrl+Tab``
     would be Cmd+Tab (the system application switcher) and ``F11`` is taken
     by Mission Control, so tab cycling uses Control+Tab and fullscreen uses
-    Control+Cmd+F. ``QKeySequence.StandardKey.NextChild`` is not a fix here:
-    it also resolves to Cmd+Tab on macOS.
+    Control+Cmd+F. The notification center uses Control+Cmd+N rather than
+    Cmd+Shift+N (commonly New Window). ``QKeySequence.StandardKey.NextChild``
+    is not a fix here: it also resolves to Cmd+Tab on macOS.
     """
     name = (platform_name or CURRENT_PLATFORM).lower()
     if name == "darwin":
@@ -29,11 +30,13 @@ def default_shortcut_sequences(platform_name: Optional[str] = None) -> Dict[str,
             "next_tab": "Meta+Tab",
             "prev_tab": "Meta+Shift+Tab",
             "fullscreen": "Ctrl+Meta+F",
+            "notifications": "Ctrl+Meta+N",
         }
     return {
         "next_tab": "Ctrl+Tab",
         "prev_tab": "Ctrl+Shift+Tab",
         "fullscreen": "F11",
+        "notifications": "Ctrl+Shift+N",
     }
 
 
@@ -44,6 +47,7 @@ class ShortcutManager(QObject):
     nextTab = Signal()
     prevTab = Signal()
     toggleFullscreen = Signal()
+    toggleNotifications = Signal()
     
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -56,6 +60,7 @@ class ShortcutManager(QObject):
             "next_tab": self.nextTab.emit,
             "prev_tab": self.prevTab.emit,
             "fullscreen": self.toggleFullscreen.emit,
+            "notifications": self.toggleNotifications.emit,
         }
         shortcuts_config = {
             name: (sequence, callbacks[name])

@@ -675,6 +675,7 @@ class MainWindow(QMainWindow):
         self.shortcut_manager.nextTab.connect(self.next_tab)
         self.shortcut_manager.prevTab.connect(self.previous_tab)
         self.shortcut_manager.toggleFullscreen.connect(self.toggle_fullscreen)
+        self.shortcut_manager.toggleNotifications.connect(self.toggle_notification_center)
     
     def next_tab(self) -> None:
         """Switch to next tab."""
@@ -700,6 +701,11 @@ class MainWindow(QMainWindow):
             self.showNormal()
         else:
             self.showFullScreen()
+
+    def toggle_notification_center(self) -> None:
+        """Toggle the status-bar notification history popup."""
+        if self.status_bar_manager:
+            self.status_bar_manager.toggle_notification_center()
     
     def finalize_shutdown(self) -> None:
         """Run window teardown for quit paths that never close the window.

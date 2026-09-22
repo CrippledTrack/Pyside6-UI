@@ -75,6 +75,7 @@ def test_tab_shortcuts_avoid_the_macos_app_switcher() -> None:
     assert darwin["next_tab"] == "Meta+Tab"
     assert darwin["prev_tab"] == "Meta+Shift+Tab"
     assert darwin["fullscreen"] == "Ctrl+Meta+F"
+    assert darwin["notifications"] == "Ctrl+Meta+N"
 
 
 @pytest.mark.parametrize("platform_name", ["linux", "windows"])
@@ -83,6 +84,7 @@ def test_tab_shortcuts_unchanged_elsewhere(platform_name: str) -> None:
     assert sequences["next_tab"] == "Ctrl+Tab"
     assert sequences["prev_tab"] == "Ctrl+Shift+Tab"
     assert sequences["fullscreen"] == "F11"
+    assert sequences["notifications"] == "Ctrl+Shift+N"
 
 
 # --- Quit-path teardown ----------------------------------------------------

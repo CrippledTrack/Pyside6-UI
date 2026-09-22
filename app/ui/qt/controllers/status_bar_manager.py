@@ -68,10 +68,12 @@ class StatusBarManager(QObject):
         self.notif_btn = QPushButton("🔔")
         self.notif_btn.setFlat(True)
         self.notif_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        #self.notif_btn.setAccessibleName("Notifications")
+        #self.notif_btn.setToolTip("Notifications")
         self._apply_notification_button_style(
             self.notification_service.get_unread_count()
         )
-        self.notif_btn.clicked.connect(self._toggle_notification_center)
+        self.notif_btn.clicked.connect(self.toggle_notification_center)
         layout.addWidget(self.notif_btn)
         
         # Add container to status bar (permanent widget stays on right)
@@ -137,7 +139,7 @@ class StatusBarManager(QObject):
         # Apply theme-aware styling
         self._apply_notification_button_style(count)
             
-    def _toggle_notification_center(self) -> None:
+    def toggle_notification_center(self) -> None:
         """Toggle the notification center popup."""
         if self._notification_widget and self._notification_widget.isVisible():
             self._notification_widget.hide()

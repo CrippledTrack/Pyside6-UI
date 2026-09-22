@@ -59,7 +59,7 @@ class IDaemonService(Protocol):
 
 
 class INotificationService(Protocol):
-    """Protocol for notification service."""
+    """Protocol for the toolkit-free notification history service."""
 
     def subscribe_added(self, callback: Callable[["Notification"], None]) -> "Unsubscribe":
         """Subscribe to new notifications."""
@@ -88,6 +88,10 @@ class INotificationService(Protocol):
 
     def mark_all_as_read(self) -> None:
         """Mark all notifications as read."""
+        ...
+
+    def remove_notification(self, notification: "Notification") -> None:
+        """Remove a single notification from history."""
         ...
 
     def clear_all(self) -> None:
